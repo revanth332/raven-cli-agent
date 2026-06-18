@@ -44,9 +44,9 @@ def ask(query:str):
 @app.command()
 def chat():
     try:
-        display_welcome()
         with console.status("preparing session..."):
             chat_session = get_chat_session()
+        display_welcome()
         while (query := console.input("[green]You:[/] ")) != "exit":
             with console.status("thinking..."):
                 response = chat_session.send_message(query)
@@ -91,20 +91,29 @@ def commit():
 
 @app.command()
 def run(instruction:str):
-    command_generation_prompt = f"Translate this natural language instruction into a Windows command line command (CMD/PowerShell). Return the response only in given JSON format. FORMAT: {{command:<command> description:<short, precise desciption about the command>}}. MUST resurn pure json. No backticks, no explanation, only pure json. If no command found then return plain text of explanation with details of similar commands. Instruction: {instruction}"
-    with console.status("generating command..."):
-        command_info = get_response(command_generation_prompt)
-        command_info_json = json.dumps(command_info)
-    if isinstance(command_info_json,dict):
-        command = command_info_json['command']
+    command_generation_prompt = f"""Translate this natural language instruction into a Windows command line command (CMD/PowerShell). Return the response only in given JSON format. FORMAT: {{"command":<command> "description":<short, precise desciption about the command>}}.If no command is found or if the instruction is too generalized where you cannot provide the exact command, return {{"command": "NONE", "description": "<explanation>"}}. NEVER provide the filer commands that failes upon executing without modification. MUST resurn pure json. No backticks, no explanation, only pure json. Instruction: {instruction}"""
+    try:
+        with console.status("generating command..."):
+            command_info = get_response(command_generation_prompt)
+            command_info_json = json.loads(command_info.strip().replace("```json", "").replace("```", ""))
+        command = command_info_json.get('command', 'NONE').strip()
+        description = command_info_json.get('description', '')
+        if command == "NONE":
+            console.print(f"[yellow]{description}[/yellow]")
+            return
+
         console.print(f"[bold cyan]{command}[/bold cyan]")
+        console.print(f"Info: {description}")
         should_execute_command = typer.confirm("Execute this command?")
         if should_execute_command:
             subprocess.run(command,shell=True)
         else:
             console.print("[yellow]Command execution termiated[/yellow]")
-    else:
-        console.print(f"[yellow]{command_info}[/yellow]")
+    except json.JSONDecodeError:
+        console.print("[red]Error: The AI did not return a valid command format.[/red]")
+        console.print(f"[dim]Raw output: {command_info}[/dim]")
+    except Exception as e:
+        console.print(f"[red]{e}[/red]")
 
 if __name__ == "__main__":
     app()

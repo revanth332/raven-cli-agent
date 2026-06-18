@@ -8,23 +8,33 @@ import os
 
 load_dotenv()
 
-if not os.getenv("GOOGLE_CLOUD_PROJECT") or not os.getenv("GOOGLE_CLOUD_LOCATION") or not os.getenv("GOOGLE_GENAI_USE_VERTEXAI"):
-    raise ValueError("Geni AI creds are missing!!!")
-
-client = genai.Client()
-model = "gemini-3-flash-preview"
+_genai_client = None
+model = "gemini-flash-latest"
+# model = "gemini-3-flash-preview"
 tools = [
         types.Tool(googleSearch=types.GoogleSearch(
         )),
     ]
 config = types.GenerateContentConfig(tools=tools)
 
+def get_genai_client():
+    global _genai_client
+    
+    if not os.getenv("GOOGLE_CLOUD_PROJECT") or not os.getenv("GOOGLE_CLOUD_LOCATION") or not os.getenv("GOOGLE_GENAI_USE_VERTEXAI"):
+        raise ValueError("Geni AI creds are missing!!!")
+
+    if not _genai_client:
+        _genai_client = genai.Client()
+    return _genai_client
+
 def get_chat_session():
     """Initializes and returns an interactive chat object."""
+    client = get_genai_client()
     return client.chats.create(model=model,config=config)
 
 def get_response(query):
     """Handles one-off questions."""
+    client = get_genai_client()
     contents = [
         types.Content(
             role="user",
