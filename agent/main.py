@@ -88,7 +88,7 @@ def chat():
 
 @app.command()
 def debug():
-    DEBUG_PROMPT = read_prompt_from_file("agent/prompts/debug_prompt.txt")
+    DEBUG_PROMPT = read_prompt_from_file("prompts/debug_prompt.txt")
     if sys.stdin.isatty():
         console.print("[red]No input detected. Usage: type error.log | reva debug[/red]")
         raise typer.Exit(1)
@@ -102,7 +102,7 @@ def debug():
 
 @app.command()
 def commit():
-    COMMIT_PROMPT = read_prompt_from_file("agent/prompts/commit_prompt.txt")
+    COMMIT_PROMPT = read_prompt_from_file("prompts/commit_prompt.txt")
     result = subprocess.run(["git","diff","--staged"],capture_output=True,text=True)
     staged_changes = result.stdout.strip()
     if not staged_changes:
@@ -123,7 +123,7 @@ def commit():
 
 @app.command()
 def run(instruction:str):
-    CMD_PROMPT = read_prompt_from_file("agent/prompts/cmd_prompt.txt")
+    CMD_PROMPT = read_prompt_from_file("prompts/cmd_prompt.txt")
     command_generation_prompt = f"""{CMD_PROMPT}\n\n {instruction}"""
     try:
         with console.status("generating command..."):
