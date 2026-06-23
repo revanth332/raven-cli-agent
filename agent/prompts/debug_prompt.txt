@@ -1,0 +1,1 @@
+Analyze the following logs/code and explain the error and how to fix it:
