@@ -143,26 +143,9 @@ def find_and_read_file(filename:str):
         console.print(f"[red]Failed to read the file: {e}[/red]")
         raise typer.Exit(1)
 
-
 @app.command()
 def test():
     print("testng..")
-
-@app.command()
-def ask(query:str,file:str = typer.Option(None,"--file","-f")):
-    final_query = query
-    if file:
-        filepath,content = find_and_read_file(file)
-        if filepath is None:
-            console.print(f"[red]File '{file}' not found in the current project.[/red]")
-            raise typer.Exit(1)
-        if not content:
-            console.print(f"[yellow]Warning: '{file}' is empty![/yellow]")
-            raise typer.Exit(1)
-        console.print(f"[dim]Injecting context from: {filepath}[/dim]")
-        final_query += "\n\nFile Content: \n\n" + content
-        console.print(final_query)
-    render_stream(get_streaming_response(final_query))
 
 @app.command()
 def chat(query:str):
@@ -208,21 +191,13 @@ def debug():
 @app.command()
 def commit(file:str = typer.Option(None,"--file","-f")):
     COMMIT_PROMPT = read_prompt_from_file("prompts/commit_prompt.txt")
-    command = ["git","diff","--staged"]
-    filepath,_ = find_and_read_file(file)
-    if filepath:
-        command.append(filepath)
-    result = subprocess.run(command,capture_output=True,text=True)
-    staged_changes = result.stdout
-    if not staged_changes:
-        console.print("[yellow]No staged changes found. Please run 'git add' first.[/yellow]")
-        raise typer.Exit(1)
     
-    commit_genration_prompt = f"{COMMIT_PROMPT} \n\n{staged_changes.strip()}"
+    commit_genration_prompt = f"{COMMIT_PROMPT}"
+    if file:
+        commit_genration_prompt += f"Use only {file} file chnages to generate commit message."
     try:
         with console.status("preparing session..."):
             chat_session = get_chat_session()
-        display_welcome()
         run_agent_loop(chat_session,commit_genration_prompt)
         console.print()
         while (query := console.input("[green]You:[/] ")) != "exit":

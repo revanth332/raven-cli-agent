@@ -6,7 +6,7 @@ from google.genai import types
 from dotenv import load_dotenv
 import os
 
-from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command
+from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory
 
 load_dotenv()
 
@@ -41,9 +41,23 @@ def get_llm_config():
         client=client,
         callable=execute_command
     )
+    save_to_project_memory_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_to_project_memory)
+    log_successful_debug_dec = types.FunctionDeclaration.from_callable(client=client, callable=log_successful_debug)
+    save_concept_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_concept)
     tools = [
         # types.Tool(google_search=types.GoogleSearch),
-        types.Tool(function_declarations=[save_to_memory_declaration,find_file_declaration,write_file_declaration,read_file_declaration,create_file_declaration,execute_command_declaration])
+        types.Tool(
+            function_declarations=[
+                save_to_memory_declaration,
+                save_to_project_memory_dec,
+                log_successful_debug_dec,
+                save_concept_dec,
+                find_file_declaration,
+                write_file_declaration,
+                read_file_declaration,
+                create_file_declaration,
+                execute_command_declaration
+            ])
     ]
     config = types.GenerateContentConfig(
         tools=tools,
