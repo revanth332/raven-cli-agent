@@ -165,13 +165,17 @@ def ask(query:str,file:str = typer.Option(None,"--file","-f")):
     render_stream(get_streaming_response(final_query))
 
 @app.command()
-def chat():
+def chat(query:str):
     try:
         with console.status("preparing session..."):
             chat_session = get_chat_session()
         display_welcome()
+        if query:
+            console.print(f"[green]You:[/] {query}")
+            console.print()
+            run_agent_loop(chat_session,query)
+            console.print()
         while (query := console.input("[green]You:[/] ")) != "exit":
-            # render_stream(chat_session.send_message_stream(query))
             run_agent_loop(chat_session,query)
             console.print()
     except KeyboardInterrupt:
@@ -188,10 +192,18 @@ def debug():
     else:
         piped_logs = sys.stdin.read()
         debug_prompt = f"{DEBUG_PROMPT}\n\n{piped_logs}"
-        with console.status("debugging..."):
-            response = get_response(debug_prompt)
-        console.print()
-        console.print(Markdown(response))
+        try:
+            with console.status("preparing session..."):
+                chat_session = get_chat_session()
+            run_agent_loop(chat_session,debug_prompt)
+            console.print()
+            while (query := console.input("[green]You:[/] ")) != "exit":
+                run_agent_loop(chat_session,query)
+                console.print()
+        except KeyboardInterrupt:
+            console.print()
+            console.rule("Chat closed")
+            raise typer.Exit(1)
 
 @app.command()
 def commit(file:str = typer.Option(None,"--file","-f")):
@@ -201,49 +213,25 @@ def commit(file:str = typer.Option(None,"--file","-f")):
     if filepath:
         command.append(filepath)
     result = subprocess.run(command,capture_output=True,text=True)
-    staged_changes = result.stdout.strip()
+    staged_changes = result.stdout
     if not staged_changes:
         console.print("[yellow]No staged changes found. Please run 'git add' first.[/yellow]")
         raise typer.Exit(1)
     
-    commit_genration_prompt = f"{COMMIT_PROMPT} \n\n{staged_changes}"
-    with console.status("generating commit message..."):
-        commit_message = get_response(commit_genration_prompt)
-    console.print(f"[green]{commit_message}[/green]")
-
-    is_user_confirmed = typer.confirm("Commit with this message?")
-    if is_user_confirmed:
-        subprocess.run(["git","commit","-m",commit_message])
-        console.print("[green]✔ commited the code successfully[green]")
-    else:
-        console.print("[yellow]commit aborted[/yellow]")
-
-@app.command()
-def run(instruction:str):
-    CMD_PROMPT = read_prompt_from_file("prompts/cmd_prompt.txt")
-    command_generation_prompt = f"""{CMD_PROMPT}\n\n {instruction}"""
+    commit_genration_prompt = f"{COMMIT_PROMPT} \n\n{staged_changes.strip()}"
     try:
-        with console.status("generating command..."):
-            command_info = get_response(command_generation_prompt)
-            command_info_json = json.loads(command_info.strip().replace("```json", "").replace("```", ""))
-        command = command_info_json.get('command', 'NONE').strip()
-        description = command_info_json.get('description', '')
-        if command == "NONE":
-            console.print(f"[yellow]{description}[/yellow]")
-            return
-
-        console.print(f"[bold cyan]{command}[/bold cyan]")
-        console.print(f"Info: {description}")
-        should_execute_command = typer.confirm("Execute this command?")
-        if should_execute_command:
-            subprocess.run(command,shell=True)
-        else:
-            console.print("[yellow]Command execution termiated[/yellow]")
-    except json.JSONDecodeError:
-        console.print("[red]Error: The AI did not return a valid command format.[/red]")
-        console.print(f"[dim]Raw output: {command_info}[/dim]")
-    except Exception as e:
-        console.print(f"[red]{e}[/red]")
+        with console.status("preparing session..."):
+            chat_session = get_chat_session()
+        display_welcome()
+        run_agent_loop(chat_session,commit_genration_prompt)
+        console.print()
+        while (query := console.input("[green]You:[/] ")) != "exit":
+            run_agent_loop(chat_session,query)
+            console.print()
+    except KeyboardInterrupt:
+        console.print()
+        console.rule("Chat closed")
+        raise typer.Exit(1)
 
 if __name__ == "__main__":
     app()

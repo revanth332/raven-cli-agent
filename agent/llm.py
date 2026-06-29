@@ -51,7 +51,7 @@ def get_llm_config():
             types.Part.from_text(text=f"""
                 {memory_content}
                 CRITICAL INSTRUCTION:
-                1. If you found a new preference, a project detail, or learning new concept during the conversation with the user, you MUST use the `save_to_memory` tool to remember it.
+                1. If you found a new preference, a project detail, or learning new concept during the conversation with the user interactions like doubts resolving, code commiting etc., you MUST use the `save_to_memory` tool to remember it. For example if a user asks a question related to a new concept then save those details into memory as learning with max 2 lines only mentioning that user learnt this concept. If he commits something then based on the code save the task details into memory etc. It should be like a smart history,
                 2. You have the power to navigate and read/write files in the local directory. Use these tools autonomously to solve developer tasks.
                 3. You can execute terminal commands on the user's Windows machine to run tests, check git status, build projects, or spin up servers.
             """
