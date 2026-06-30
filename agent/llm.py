@@ -78,7 +78,7 @@ def get_llm_config():
 
                 CRITICAL INSTRUCTIONS FOR MEMORY MANAGEMENT:
                 1. If the user mentions a global personal preference or detail, use `save_to_memory`.
-                2. If the user mentions details, setup, or constraints or user commits code changes specific ONLY to this active project ('{project_name}'), use `save_to_project_memory`. Calling this tool after every commit is mandatory. 
+                2. If the user mentions details, setup, or constraints or user commits code changes specific ONLY to this active project ('{project_name}'), use `save_to_project_memory`. Calling this tool after every commit is mandatory. No need to wait until pushing the code to remote repo. 
                 3. If you help the user successfully resolve a debugging session or program error, immediately use `log_successful_debug` to document the error and the fix so you can reference it later.
                 4. If you have been discussing a complex architectural concept, design pattern, or framework extensively with the user (usually indicated by them asking deep or multiple consecutive questions about it), use `save_concept` to document a comprehensive markdown explanation of it. Do not ask for permission.
                 5. Every detail that is being added to the memory files should be like a log with timestamp. To get current timestamp use `get_current_timestamp`. Example: [timestamp]- <documentation/fact/log/...etc.,>
