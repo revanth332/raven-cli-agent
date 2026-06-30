@@ -6,7 +6,7 @@ from rich.align import Align
 from rich.live import Live
 from rich.markdown import Markdown
 from agent.llm import get_response,get_chat_session,get_streaming_response
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,write_file,create_file,execute_command
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,write_file,create_file,execute_command,get_current_timestamp
 from google.genai import types
 
 import sys
@@ -24,7 +24,8 @@ TOOL_REGISTRY = {
     "read_file":read_file,
     "write_file":write_file,
     "create_file":create_file,
-    "execute_command":execute_command
+    "execute_command":execute_command,
+    "get_current_timestamp":get_current_timestamp
 }
 
 def display_welcome():

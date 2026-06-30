@@ -6,7 +6,7 @@ from google.genai import types
 from dotenv import load_dotenv
 import os
 
-from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name
+from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp
 
 load_dotenv()
 
@@ -43,6 +43,10 @@ def get_llm_config():
         client=client,
         callable=execute_command
     )
+    get_current_timestamp_declaration = types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=get_current_timestamp
+    )
     save_to_project_memory_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_to_project_memory)
     log_successful_debug_dec = types.FunctionDeclaration.from_callable(client=client, callable=log_successful_debug)
     save_concept_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_concept)
@@ -58,7 +62,8 @@ def get_llm_config():
                 write_file_declaration,
                 read_file_declaration,
                 create_file_declaration,
-                execute_command_declaration
+                execute_command_declaration,
+                get_current_timestamp_declaration
             ])
     ]
     config = types.GenerateContentConfig(
@@ -73,9 +78,10 @@ def get_llm_config():
 
                 CRITICAL INSTRUCTIONS FOR MEMORY MANAGEMENT:
                 1. If the user mentions a global personal preference or detail, use `save_to_memory`.
-                2. If the user mentions details, setup, or constraints specific ONLY to this active project ('{project_name}'), use `save_to_project_memory`.
+                2. If the user mentions details, setup, or constraints or user commits code changes specific ONLY to this active project ('{project_name}'), use `save_to_project_memory`. 
                 3. If you help the user successfully resolve a debugging session or program error, immediately use `log_successful_debug` to document the error and the fix so you can reference it later.
                 4. If you have been discussing a complex architectural concept, design pattern, or framework extensively with the user (usually indicated by them asking deep or multiple consecutive questions about it), use `save_concept` to document a comprehensive markdown explanation of it. Do not ask for permission.
+                5. Each detail should be like a log with timestamp. To get current timestamp use `get_current_timestamp`.
                 """
             ),
         ])

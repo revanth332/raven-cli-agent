@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import subprocess
+from datetime import datetime
 
 def read_prompt_from_file(path:str):
     """
@@ -210,3 +211,13 @@ def execute_command(command: str) -> str:
         return output
     except Exception as e:
         return f"Failed to execute command. Error: {e}"
+    
+def get_current_timestamp():
+    """
+    Use this tool to get the exact current timestamp.
+    Returns:
+        current timestamp
+    """
+    now = datetime.now()
+    timestamp = now.isoformat(sep='T', timespec='seconds')
+    return timestamp
