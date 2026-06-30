@@ -1,4 +1,25 @@
-.env
+# Dependency/Virtual Environment
 venv/
+.env
+
+# Compiled Python files
 __pycache__/
+*.pyc
+*.o
+*.so
+*.egg
 *.egg-info/
+dist/
+build/
+
+# Temporary and Build Files
+.pytest_cache/
+*.log
+
+# IDE and Editor Files
+.vscode/
+.idea/
+
+# OS Specific Files
+.DS_Store
+Thumbs.db
