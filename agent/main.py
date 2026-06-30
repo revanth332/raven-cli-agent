@@ -5,14 +5,11 @@ from rich.text import Text
 from rich.align import Align
 from rich.live import Live
 from rich.markdown import Markdown
-from agent.llm import get_response,get_chat_session,get_streaming_response
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,write_file,create_file,execute_command,get_current_timestamp
+from agent.llm import get_chat_session
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,write_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp
 from google.genai import types
 
 import sys
-import os
-import subprocess
-import json
 from pathlib import Path
 
 app = typer.Typer()
@@ -25,7 +22,10 @@ TOOL_REGISTRY = {
     "write_file":write_file,
     "create_file":create_file,
     "execute_command":execute_command,
-    "get_current_timestamp":get_current_timestamp
+    "get_current_timestamp":get_current_timestamp,
+    "save_concept":save_concept,
+    "log_successful_debug":log_successful_debug,
+    "save_to_project_memory":save_to_project_memory,
 }
 
 def display_welcome():
@@ -121,29 +121,6 @@ def run_agent_loop(chat_session,intial_input):
 
         current_input = tool_responses
 
-def find_and_read_file(filename:str):
-    """Returns a tuple of (filepath, content) or (None, None)"""
-    IGNORE_DIRS = {'node_modules', '.git', 'venv', 'env', '.venv', '__pycache__', 'dist', 'build'}
-    matches = []
-    for root,dirs,files in os.walk("."):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
-
-        if filename in files:
-            matches.append(Path(root) / filename)
-
-    if not matches:
-        return None, None
-    if len(matches) > 1:
-        console.print(f"[yellow]Warning: Found {len(matches)} files named '{filename}'. Using {matches[0]}[/yellow]")
-
-    chosen_file = matches[0]
-    try:
-        content = chosen_file.read_text(encoding="utf-8")
-        return str(chosen_file),content.strip()
-    except Exception as e:
-        console.print(f"[red]Failed to read the file: {e}[/red]")
-        raise typer.Exit(1)
-
 @app.command()
 def test():
     print("testng..")
@@ -195,7 +172,9 @@ def git(file:str = typer.Option(None,"--file","-f")):
     
     commit_genration_prompt = f"{COMMIT_PROMPT}"
     if file:
-        commit_genration_prompt += f"Use only {file} file chnages to generate commit message."
+        commit_genration_prompt += f"Use only {file} file chnages using staged or cached to generate commit message for all the changes, as this is the main file that has the important changes."
+    else:
+        commit_genration_prompt += f"Use git commands like staged or cached to get the changes."
     try:
         with console.status("preparing session..."):
             chat_session = get_chat_session()

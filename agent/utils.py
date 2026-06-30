@@ -71,9 +71,9 @@ def save_to_project_memory(fact: str) -> str:
             f.write(f"\n- {fact}")
         return f"Fact successfully saved to the '{project_name}' project memory."
     except FileNotFoundError:
-        print(f"Error: File not found at {project_file}.")
+        return f"Error: File not found at {project_file}."
     except Exception as e:
-        print(f"An unexpected error occurred while reading '{project_file}': {e}")
+        return f"An unexpected error occurred while reading '{project_file}': {e}"
         
 
 def log_successful_debug(error_description: str, solution: str) -> str:
