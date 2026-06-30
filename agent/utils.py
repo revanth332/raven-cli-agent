@@ -123,8 +123,8 @@ def find_file(file_name:str):
             matches.append(Path(root) / file_name)
 
     if not matches:
-        return None
-    return matches
+        return f"File '{file_name}' not found."
+    return str([str(m) for m in matches])
 
 def read_file(file_path:str):
     """

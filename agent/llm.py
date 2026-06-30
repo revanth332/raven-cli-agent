@@ -6,7 +6,7 @@ from google.genai import types
 from dotenv import load_dotenv
 import os
 
-from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory
+from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name
 
 load_dotenv()
 
@@ -16,7 +16,9 @@ model = "gemini-flash-latest"
 
 def get_llm_config():
     client = get_genai_client()
-    memory_content = get_memory_content()
+    global_memory = get_memory_content()
+    project_memory = get_project_memory()
+    project_name = get_active_project_name()
     save_to_memory_declaration = types.FunctionDeclaration.from_callable(
         client=client,
         callable=save_to_memory
@@ -62,13 +64,19 @@ def get_llm_config():
     config = types.GenerateContentConfig(
         tools=tools,
         system_instruction=[
-            types.Part.from_text(text=f"""
-                {memory_content}
-                CRITICAL INSTRUCTION:
-                1. If you found a new preference, a project detail, or learning new concept during the conversation with the user interactions like doubts resolving, code commiting etc., you MUST use the `save_to_memory` tool to remember it. For example if a user asks a question related to a new concept then save those details into memory as learning with max 2 lines only mentioning that user learnt this concept. If he commits something then based on the code save the task details into memory etc. It should be like a smart history,
-                2. You have the power to navigate and read/write files in the local directory. Use these tools autonomously to solve developer tasks.
-                3. You can execute terminal commands on the user's Windows machine to run tests, check git status, build projects, or spin up servers.
-            """
+            types.Part.from_text(text=f"""You are Raven, an autonomous personal developer agent.
+                GLOBAL MEMORY:
+                {global_memory}
+
+                ACTIVE PROJECT MEMORY (Project Name: '{project_name}'):
+                {project_memory}
+
+                CRITICAL INSTRUCTIONS FOR MEMORY MANAGEMENT:
+                1. If the user mentions a global personal preference or detail, use `save_to_memory`.
+                2. If the user mentions details, setup, or constraints specific ONLY to this active project ('{project_name}'), use `save_to_project_memory`.
+                3. If you help the user successfully resolve a debugging session or program error, immediately use `log_successful_debug` to document the error and the fix so you can reference it later.
+                4. If you have been discussing a complex architectural concept, design pattern, or framework extensively with the user (usually indicated by them asking deep or multiple consecutive questions about it), use `save_concept` to document a comprehensive markdown explanation of it. Do not ask for permission.
+                """
             ),
         ])
     return config

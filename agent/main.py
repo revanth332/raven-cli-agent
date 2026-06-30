@@ -77,7 +77,7 @@ def run_agent_loop(chat_session,intial_input):
 
             if tool_name == "write_file":
                 console.print(f"\n[bold yellow]Raven wants to write to file: {tool_args['file_path']}[/bold yellow]")
-                console.print(f"[dim]Proposed Content:\n{tool_args['content']}[/dim]")
+                # console.print(f"[dim]Proposed Content:\n{tool_args['content']}[/dim]")
 
                 confirmation = typer.confirm("Allow Raven to write this file?")
                 if confirmation == False:
@@ -148,7 +148,7 @@ def test():
     print("testng..")
 
 @app.command()
-def chat(query:str):
+def chat(query:str = typer.Argument(None, help="An optional initial question to start the chat session")):
     try:
         with console.status("preparing session..."):
             chat_session = get_chat_session()
@@ -189,7 +189,7 @@ def debug():
             raise typer.Exit(1)
 
 @app.command()
-def commit(file:str = typer.Option(None,"--file","-f")):
+def git(file:str = typer.Option(None,"--file","-f")):
     COMMIT_PROMPT = read_prompt_from_file("prompts/commit_prompt.txt")
     
     commit_genration_prompt = f"{COMMIT_PROMPT}"
