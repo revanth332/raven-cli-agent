@@ -66,10 +66,15 @@ def save_to_project_memory(fact: str) -> str:
     """
     project_name = get_active_project_name()
     project_file = Path.home() / ".raven" / "projects" / f"{project_name}.md"
-    
-    with open(project_file, "a", encoding="utf-8") as f:
-        f.write(f"\n- {fact}")
-    return f"Fact successfully saved to the '{project_name}' project memory."
+    try:
+        with open(project_file, "a", encoding="utf-8") as f:
+            f.write(f"\n- {fact}")
+        return f"Fact successfully saved to the '{project_name}' project memory."
+    except FileNotFoundError:
+        print(f"Error: File not found at {project_file}.")
+    except Exception as e:
+        print(f"An unexpected error occurred while reading '{project_file}': {e}")
+        
 
 def log_successful_debug(error_description: str, solution: str) -> str:
     """
