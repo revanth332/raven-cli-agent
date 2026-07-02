@@ -226,3 +226,18 @@ def get_current_timestamp():
     now = datetime.now()
     timestamp = now.isoformat(sep='T', timespec='seconds')
     return timestamp
+
+def get_repo_map():
+    IGNORE_DIRS = {'node_modules', '.git', 'venv', 'env', '.venv', '__pycache__', 'dist', 'build'}
+    file_paths = []
+    for root,dirs,files in os.walk("."):
+        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        for file in files:
+            if file.startswith('.env'):
+                continue
+            path = Path(root) / file
+            file_paths.append(path.as_posix())
+    if not file_paths:
+        return "No files found in the current directory"
+
+    return "\n".join(file_paths)

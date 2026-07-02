@@ -6,7 +6,7 @@ from google.genai import types
 from dotenv import load_dotenv
 import os
 
-from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp
+from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map
 
 load_dotenv()
 
@@ -19,6 +19,7 @@ def get_llm_config():
     global_memory = get_memory_content()
     project_memory = get_project_memory()
     project_name = get_active_project_name()
+    repo_map = get_repo_map()
     save_to_memory_declaration = types.FunctionDeclaration.from_callable(
         client=client,
         callable=save_to_memory
@@ -75,6 +76,9 @@ def get_llm_config():
 
                 ACTIVE PROJECT MEMORY (Project Name: '{project_name}'):
                 {project_memory}
+
+                ACTIVE PROJECT STRUCTURE (Repo Map):
+                {repo_map}
 
                 CRITICAL INSTRUCTIONS FOR MEMORY MANAGEMENT:
                 1. If the user mentions a global personal preference or detail, use `save_to_memory`.

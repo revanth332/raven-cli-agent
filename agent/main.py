@@ -6,7 +6,7 @@ from rich.align import Align
 from rich.live import Live
 from rich.markdown import Markdown
 from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,write_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,write_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,get_repo_map
 from google.genai import types
 
 import sys
@@ -187,6 +187,7 @@ def git(file:str = typer.Option(None,"--file","-f")):
         console.print()
         console.rule("Chat closed")
         raise typer.Exit(1)
+
 
 if __name__ == "__main__":
     app()

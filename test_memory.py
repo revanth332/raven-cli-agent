@@ -1,4 +1,4 @@
-from agent.utils import save_to_memory, save_to_project_memory, log_successful_debug, save_concept, get_current_timestamp
+from agent.utils import save_to_memory, save_to_project_memory, log_successful_debug, save_concept, get_current_timestamp, get_repo_map
 
 def test_memory_functions():
     print("--- Starting Memory Functions Test ---")
@@ -33,7 +33,14 @@ def test_memory_functions():
     result_concept = save_concept(concept_name=concept, explanation=explanation)
     print(f"save_concept result: {result_concept}")
     
+    # 6. Test get_repo_map
+    print("\nAttempting to get repository map...")
+    repo_map = get_repo_map()
+    print("get_repo_map result:")
+    print(repo_map)
+    
     print("\n--- Test Complete ---")
+
 
 if __name__ == "__main__":
     test_memory_functions()
