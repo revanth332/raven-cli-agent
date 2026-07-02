@@ -19,8 +19,17 @@ def read_prompt_from_file(path:str):
         exit()
 
 def get_active_project_name() -> str:
-    """Returns the folder name of the current working directory."""
-    return os.path.basename(os.getcwd())
+    """ 
+    Determines the actual project root by walking up the directory tree and 
+    looking for project markers (.git, package.json, etc.).
+    Returns the name of the root folder.
+    """
+    current_dir = Path.cwd()
+    root_markers = ['.git', 'package.json', 'pyproject.toml', 'requirements.txt']
+    for directory in [current_dir,*current_dir.parents]:
+        if any((directory / marker).exists() for marker in root_markers):
+            return directory.name
+    return None
 
 def get_memory_content():
     """
@@ -36,7 +45,10 @@ def get_memory_content():
 
 def get_project_memory():
     """Loads or initializes memory specific to the active project folder."""
-    project_name = get_active_project_name() + ".md"
+    project_name = get_active_project_name()
+    if not project_name:
+        return None
+    project_name += ".md"
     project_memory_file = Path.home() / ".raven" / "projects" / project_name
     if not project_memory_file.exists():
         project_memory_file.parent.mkdir(parents=True,exist_ok=True)
@@ -227,16 +239,31 @@ def get_current_timestamp():
     timestamp = now.isoformat(sep='T', timespec='seconds')
     return timestamp
 
-def get_repo_map():
+def get_repo_map(max_files: int = 250):
+    """
+    Get the full repo strucure
+    """
     IGNORE_DIRS = {'node_modules', '.git', 'venv', 'env', '.venv', '__pycache__', 'dist', 'build'}
+    IGNORE_EXTS = {
+        '.zip', '.tar', '.gz', '.exe', '.dll', '.so', '.dylib',
+        '.mp4', '.mp3', '.wav', '.png', '.jpg', '.jpeg', '.gif', '.pdf', '.iso',
+        '.env'
+    }
+    active_project = get_active_project_name()
+    if not active_project:
+        return None
     file_paths = []
     for root,dirs,files in os.walk("."):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
         for file in files:
-            if file.startswith('.env'):
+            if any(file.lower().endswith(ext) for ext in IGNORE_EXTS):
                 continue
             path = Path(root) / file
             file_paths.append(path.as_posix())
+
+            if len(file_paths) >= max_files:
+                file_paths.append(f"\n... (Output truncated: reached {max_files} file limit. Directory is too large. Use `find_file` tool to locate specific files.)")
+                return "\n".join(file_paths)
     if not file_paths:
         return "No files found in the current directory"
 
