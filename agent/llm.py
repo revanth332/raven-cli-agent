@@ -6,7 +6,7 @@ from google.genai import types
 from dotenv import load_dotenv
 import os
 
-from agent.utils import get_memory_content,save_to_memory,read_file,write_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map
+from agent.utils import get_memory_content,save_to_memory,read_file,patch_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map
 
 load_dotenv()
 
@@ -28,9 +28,9 @@ def get_llm_config():
         client=client,
         callable=find_file
     )
-    write_file_declaration = types.FunctionDeclaration.from_callable(
+    patch_file_declaration = types.FunctionDeclaration.from_callable(
         client=client,
-        callable=write_file
+        callable=patch_file
     )
     read_file_declaration = types.FunctionDeclaration.from_callable(
         client=client,
@@ -60,7 +60,7 @@ def get_llm_config():
                 log_successful_debug_dec,
                 save_concept_dec,
                 find_file_declaration,
-                write_file_declaration,
+                patch_file_declaration,
                 read_file_declaration,
                 create_file_declaration,
                 execute_command_declaration,

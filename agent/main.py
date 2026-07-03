@@ -6,7 +6,7 @@ from rich.align import Align
 from rich.live import Live
 from rich.markdown import Markdown
 from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,write_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,get_repo_map
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,get_repo_map,patch_file
 from google.genai import types
 
 import sys
@@ -19,13 +19,13 @@ TOOL_REGISTRY = {
     "save_to_memory": save_to_memory,
     "find_file":find_file,
     "read_file":read_file,
-    "write_file":write_file,
     "create_file":create_file,
     "execute_command":execute_command,
     "get_current_timestamp":get_current_timestamp,
     "save_concept":save_concept,
     "log_successful_debug":log_successful_debug,
     "save_to_project_memory":save_to_project_memory,
+    "patch_file":patch_file
 }
 
 def display_welcome():
@@ -76,9 +76,13 @@ def run_agent_loop(chat_session,intial_input):
             tool_name = fc.name
             tool_args = fc.args
 
-            if tool_name == "write_file":
-                console.print(f"\n[bold yellow]Raven wants to write to file: {tool_args['file_path']}[/bold yellow]")
-                # console.print(f"[dim]Proposed Content:\n{tool_args['content']}[/dim]")
+            if tool_name == "patch_file":
+                console.print(f"\n[bold yellow]Raven wants to edit this file: {tool_args['file_path']}[/bold yellow]")
+                console.print("[bold red]--- EXISTING CODE TO REMOVE: ---[/bold red]")
+                console.print(tool_args['search_block'].strip())
+                console.print("[bold green]+++ NEW CODE TO INSERT: +++[/bold green]")
+                console.print(tool_args['replace_block'].strip())
+                console.print("-" * 40)
 
                 confirmation = typer.confirm("Allow Raven to write this file?")
                 if confirmation == False:

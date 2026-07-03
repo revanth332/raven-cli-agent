@@ -124,6 +124,41 @@ def save_concept(concept_name: str, explanation: str) -> str:
     concept_file.write_text(f"# Concept: {concept_name}\n\n{explanation}\n", encoding="utf-8")
     return f"Concept '{concept_name}' successfully documented."
 
+
+
+def patch_file(file_path:str,search_block:str,replace_block:str):
+    """
+    Use this tool to safely edit a file by replacing an exact, unique block of existing text with new text.
+    Args:
+        file_path: The relative or absolute path of the file to edit.
+        search_block: The exact existing block of text in the file that needs to be replaced.
+        replace_block: The new text block that will replace the search_block.
+    """
+    try:
+        path = Path(file_path)
+        if not path.exists():
+            return f"Error: File '{file_path}' does not exist."
+        
+        content = path.read_text(encoding='utf-8')
+
+        content_norm = content.replace("\r\n","\n")
+        search_block_norm = search_block.replace("\r\n","\n")
+        replace_block_norm = replace_block.replace("\r\n","\n")
+
+        occurrences = content_norm.count(search_block_norm)
+
+        if occurrences == 0:
+            return f"Error: Could not find the exact text block you wanted to replace in '{file_path}'."
+        if occurrences > 1:
+            return f"Error: The search_block matches {occurrences} locations in '{file_path}'. Please provide more surrounding lines to make it unique."
+
+        updated_content = content_norm.replace(search_block_norm,replace_block_norm)
+        path.write_text(updated_content,encoding='utf-8')
+        return f"Successfully updated '{file_path}'."
+        
+    except Exception as e:
+        return f"Failed to patch file '{file_path}': {e}"
+
 def find_file(file_name:str):
     """
     Use this tool to search for a specific file in the current project directory.
@@ -158,21 +193,6 @@ def read_file(file_path:str):
         return f"File {file_path} not found. Error: {e}"
     except:
         return f"Error reading file '{file_path}': {e}"
-
-def write_file(file_path:str,content:str):
-    """
-    Use this tool to write cotent into a file.
-    Args:
-        file_path: Full path of the file
-        content: The text content to write into the file.
-    """
-    try:
-        Path(file_path).write_text(content, encoding="utf-8")
-        return f"Successfully wrote content to '{file_path}'."
-    except FileNotFoundError as e:
-        return f"File {file_path} not found. Error: {e}"
-    except:
-        return f"Error while writing into the file: {file_path}"
     
 def create_file(file_path: str, content: str = "") -> str:
     """
