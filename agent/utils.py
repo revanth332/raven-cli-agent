@@ -335,3 +335,22 @@ def get_repo_map(max_files: int = 250):
         return "No files found in the current directory"
 
     return "\n".join(file_paths)
+
+def delete_file(file_path: str) -> str:
+
+    """
+    Deletes a file at the specified path.
+    Args:
+        file_path: The path of the file to delete.
+    Returns:
+        A success or error message.
+    """
+    try:
+        path = Path(file_path)
+        if not path.exists():
+            return f"Error: File '{file_path}' does not exist."
+        
+        path.unlink() # Delete the file
+        return f"Successfully deleted file '{file_path}'."
+    except Exception as e:
+        return f"Error deleting file '{file_path}': {e}"
