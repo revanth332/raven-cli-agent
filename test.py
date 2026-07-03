@@ -1,7 +1,9 @@
 
-def add(a,b):
-    return a+b
+def is_palindrome(s):
+    return str(s) == str(s)[::-1]
+
 
 
 if __name__ == "__main__":
-    print(f"5 + 3 = {add(5, 3)}")
+    print(f"Is 'madam' a palindrome? {is_palindrome('madam')}")
+    print(f"Is 121 a palindrome? {is_palindrome(121)}")

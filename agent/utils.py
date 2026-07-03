@@ -2,6 +2,11 @@ from pathlib import Path
 import os
 import subprocess
 from datetime import datetime
+import shutil
+import time
+import json
+
+_files_backed_up_this_turn = set()
 
 def read_prompt_from_file(path:str):
     """
@@ -56,7 +61,6 @@ def get_project_memory():
         project_memory_file.write_text(default_project_memory, encoding="utf-8")
     return project_memory_file.read_text(encoding='utf-8')
 
-
 def save_to_memory(information:str,category:str):
     """
     Use this tool to save important facts, user preferences, project details, or newly learned concepts to long-term memory.
@@ -87,7 +91,6 @@ def save_to_project_memory(fact: str) -> str:
     except Exception as e:
         return f"An unexpected error occurred while reading '{project_file}': {e}"
         
-
 def log_successful_debug(error_description: str, solution: str) -> str:
     """
     Logs a successfully resolved error and its detailed solution to global debug history for future reference.
@@ -108,7 +111,6 @@ def log_successful_debug(error_description: str, solution: str) -> str:
         f.write(log_entry)
     return "Debug session successfully logged in global history."
 
-
 def save_concept(concept_name: str, explanation: str) -> str:
     """
     Saves a detailed markdown explanation of a concept, design pattern, or architecture that the user is deeply exploring or has high interest in.
@@ -124,7 +126,50 @@ def save_concept(concept_name: str, explanation: str) -> str:
     concept_file.write_text(f"# Concept: {concept_name}\n\n{explanation}\n", encoding="utf-8")
     return f"Concept '{concept_name}' successfully documented."
 
+def start_new_backup_turn():
+    """
+    Called every time the user hits Enter. Resets the backup tracker.
+    """
+    global _files_backed_up_this_turn
+    _files_backed_up_this_turn.clear()
 
+    registry_path = Path.home() / ".raven" / "backups" / "undo_registry.json"
+    registry_path.parent.mkdir(parents=True,exist_ok=True)
+    registry_path.write_text("[]",encoding="utf-8")
+
+def backup_file(file_path:str):
+    """
+    Creates a backup file from the file path ONLY IF it hasn't been backed up yet this turn.
+    """
+    global _files_backed_up_this_turn
+    try:
+        original_file = Path(file_path)
+        if not original_file.exists():
+            return
+        if str(original_file) in _files_backed_up_this_turn:
+            return
+        backup_dir = Path.home() / ".raven" / "backups"
+        backup_dir.mkdir(parents=True,exist_ok=True)
+
+        safe_name = f"{original_file.name}_{int(time.time())}"
+        backup_file = backup_dir / safe_name
+
+        shutil.copy2(original_file,backup_file)
+
+        registry_file = backup_dir / "undo_registry.json"
+        try:
+            registry = json.loads(registry_file.read_text(encoding='utf-8'))
+        except:
+            registry = []
+        registry.append({
+            "original":str(original_file),
+            "backup":str(backup_file)
+        })
+        
+        registry_file.write_text(json.dumps(registry),encoding='utf-8')
+        _files_backed_up_this_turn.add(str(original_file))
+    except Exception as e:
+        print(f"Failed to backup the file: {e}")
 
 def patch_file(file_path:str,search_block:str,replace_block:str):
     """
@@ -151,6 +196,8 @@ def patch_file(file_path:str,search_block:str,replace_block:str):
             return f"Error: Could not find the exact text block you wanted to replace in '{file_path}'."
         if occurrences > 1:
             return f"Error: The search_block matches {occurrences} locations in '{file_path}'. Please provide more surrounding lines to make it unique."
+        
+        backup_file(file_path)
 
         updated_content = content_norm.replace(search_block_norm,replace_block_norm)
         path.write_text(updated_content,encoding='utf-8')
@@ -159,11 +206,11 @@ def patch_file(file_path:str,search_block:str,replace_block:str):
     except Exception as e:
         return f"Failed to patch file '{file_path}': {e}"
 
-def find_file(file_name:str):
+def find_file(file_path:str):
     """
     Use this tool to search for a specific file in the current project directory.
     Args:
-        file_name: The exact name of the file to search for.
+        file_path: The exact name of the file to search for.
     Returns:
         A list of matching filepaths, or a message saying no matches were found.
     """
@@ -172,11 +219,11 @@ def find_file(file_name:str):
     for root,dirs,files in os.walk("."):
         dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
 
-        if file_name in files:
-            matches.append(Path(root) / file_name)
+        if file_path in files:
+            matches.append(Path(root) / file_path)
 
     if not matches:
-        return f"File '{file_name}' not found."
+        return f"File '{file_path}' not found."
     return str([str(m) for m in matches])
 
 def read_file(file_path:str):

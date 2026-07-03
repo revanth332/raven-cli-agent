@@ -6,26 +6,78 @@ from rich.align import Align
 from rich.live import Live
 from rich.markdown import Markdown
 from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,get_repo_map,patch_file
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn
 from google.genai import types
 
 import sys
 from pathlib import Path
+import json
+import shutil
 
 app = typer.Typer()
 console = Console()
 
 TOOL_REGISTRY = {
-    "save_to_memory": save_to_memory,
-    "find_file":find_file,
-    "read_file":read_file,
-    "create_file":create_file,
-    "execute_command":execute_command,
-    "get_current_timestamp":get_current_timestamp,
-    "save_concept":save_concept,
-    "log_successful_debug":log_successful_debug,
-    "save_to_project_memory":save_to_project_memory,
-    "patch_file":patch_file
+    "save_to_memory": {
+        "fn": save_to_memory, 
+        "display_name": "Remember", 
+        "display_arg": "fact", 
+        "ignore_display": False
+    },
+    "find_file": {
+        "fn": find_file, 
+        "display_name": "Find", 
+        "display_arg": "file_name", # Note: you used file_name in your find_file function! 
+        "ignore_display": False
+    },
+    "read_file": {
+        "fn": read_file, 
+        "display_name": "Read", 
+        "display_arg": "file_path", 
+        "ignore_display": False
+    },
+    "create_file": {
+        "fn": create_file, 
+        "display_name": "Create", 
+        "display_arg": "file_path", 
+        "ignore_display": False
+    },
+    "execute_command": {
+        "fn": execute_command, 
+        "display_name": "Execute", 
+        "display_arg": "command", 
+        "ignore_display": True
+    },
+    "get_current_timestamp": {
+        "fn": get_current_timestamp, 
+        "display_name": "Time", 
+        "display_arg": None, 
+        "ignore_display": True # Awesome use case for this! Hides background checks.
+    },
+    "save_concept": {
+        "fn": save_concept, 
+        "display_name": "Document Concept", 
+        "display_arg": "concept_name", 
+        "ignore_display": False
+    },
+    "log_successful_debug": {
+        "fn": log_successful_debug, 
+        "display_name": "Log Fix", 
+        "display_arg": "error_description", 
+        "ignore_display": False
+    },
+    "save_to_project_memory": {
+        "fn": save_to_project_memory, 
+        "display_name": "Project Memory", 
+        "display_arg": "fact", 
+        "ignore_display": False
+    },
+    "patch_file": {
+        "fn": patch_file, 
+        "display_name": "Patch", 
+        "display_arg": "file_path", 
+        "ignore_display": True
+    }
 }
 
 def display_welcome():
@@ -77,26 +129,29 @@ def run_agent_loop(chat_session,intial_input):
             tool_args = fc.args
 
             if tool_name == "patch_file":
-                console.print(f"\n[bold yellow]Raven wants to edit this file: {tool_args['file_path']}[/bold yellow]")
-                console.print("[bold red]--- EXISTING CODE TO REMOVE: ---[/bold red]")
-                console.print(tool_args['search_block'].strip())
-                console.print("[bold green]+++ NEW CODE TO INSERT: +++[/bold green]")
-                console.print(tool_args['replace_block'].strip())
-                console.print("-" * 40)
-
-                confirmation = typer.confirm("Allow Raven to write this file?")
-                if confirmation == False:
-                    result = "Error: User denied permission to write to this file."
-                    tool_responses.append(
-                        types.Part.from_function_response(
-                            name=tool_name,
-                            response={"result":result}
-                        )
-                    )
-                    continue
+                file_path = tool_args.get('file_path', 'Unknown')
+                console.print(f"\n[bold green]• Update[/bold green]([dim]{file_path}[/dim])")
+                
+                search_lines = tool_args.get('search_block', '').rstrip().split('\n')
+                replace_lines = tool_args.get('replace_block', '').rstrip().split('\n')
+                
+                # Print Red Background for removed lines
+                for line in search_lines:
+                    # We use Text() to prevent Rich from crashing on code brackets []
+                    t = Text(f"- {line}")
+                    t.stylize("bold white on red")
+                    console.print(t)
+                    
+                # Print Green Background for added lines
+                for line in replace_lines:
+                    t = Text(f"+ {line}")
+                    t.stylize("bold white on dark_green") # dark_green is easier on the eyes!
+                    console.print(t)
+                
+                console.print()
 
             if tool_name == "execute_command":
-                console.print(f"\n[bold red]WARNING: Raven wants to execute terminal command: {tool_args['command']}[/bold red]")
+                console.print(f"\n[bold red]• Execute[/bold red]([dim]{tool_args['command']}[/dim])")
                 
                 confirmed = typer.confirm("Allow Raven to execute this command?")
                 if not confirmed:
@@ -106,11 +161,18 @@ def run_agent_loop(chat_session,intial_input):
                     )
                     continue
             
-            console.print(f"\n[dim italic]Raven is executing: {tool_name}({tool_args})[/dim italic]\n")
 
             if tool_name in TOOL_REGISTRY:
+                tool_meta = TOOL_REGISTRY[tool_name]
+                
+                if not tool_meta.get("ignore_display"):
+                    display_name = tool_meta["display_name"]
+                    arg_key = tool_meta["display_arg"]
+                    
+                    display_val = tool_args.get(arg_key, "") if arg_key else ""
+                    console.print(f"[bold green]• {display_name}[/bold green]([dim]{display_val if len(display_val) <= 12 else display_val[:13]+"..."}[/dim])")
                 try:
-                    result = TOOL_REGISTRY[tool_name](**tool_args)
+                    result = TOOL_REGISTRY[tool_name]["fn"](**tool_args)
                 except Exception as e:
                     result = f"Error executing {tool_name}: {e}"
             else:
@@ -141,6 +203,25 @@ def chat(query:str = typer.Argument(None, help="An optional initial question to 
             run_agent_loop(chat_session,query)
             console.print()
         while (query := console.input("[green]You:[/] ")) != "exit":
+            if query == '/undo':
+                registry_file = Path.home() / ".raven" / "backups" / "undo_registry.json"
+                if registry_file.exists():
+                    try:
+                        registry = json.loads(registry_file.read_text(encoding='utf-8'))
+                        if not registry:
+                            console.print("[yellow]No edits were made in the last turn to undo.[/yellow]\n")
+                            continue
+                        for entry in registry:
+                            shutil.copy2(Path(entry["backup"]),Path(entry["original"]))
+                        
+                        registry_file.write_text("[]",encoding='utf-8')
+                        console.print()
+                    except Exception as e:
+                        console.print(f"[red]Failed to undo: {e}[/red]\n")
+                else:
+                    console.print("[yellow]No recent edits to undo.[/yellow]\n")
+                continue
+            start_new_backup_turn()
             run_agent_loop(chat_session,query)
             console.print()
     except KeyboardInterrupt:
