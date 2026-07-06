@@ -6,7 +6,7 @@ from rich.align import Align
 from rich.live import Live
 from rich.markdown import Markdown
 from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map
 from google.genai import types
 
 import sys
@@ -77,7 +77,13 @@ TOOL_REGISTRY = {
         "display_name": "Patch", 
         "display_arg": "file_path", 
         "ignore_display": True
-    }
+    },
+    "update_architecture_map": {
+        "fn": update_architecture_map, 
+        "display_name": "Update Architecture Map", 
+        "display_arg": None, # We don't need to print the massive mermaid code to the terminal
+        "ignore_display": False
+    },
 }
 
 def display_welcome():

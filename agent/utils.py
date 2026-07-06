@@ -30,11 +30,39 @@ def get_active_project_name() -> str:
     Returns the name of the root folder.
     """
     current_dir = Path.cwd()
-    root_markers = ['.git', 'package.json', 'pyproject.toml', 'requirements.txt']
+    root_markers = {'.git', 'package.json', 'pyproject.toml', 'requirements.txt'}
     for directory in [current_dir,*current_dir.parents]:
         if any((directory / marker).exists() for marker in root_markers):
             return directory.name
     return None
+
+def get_project_root() -> Path:
+    """Returns the Path object for the root of the project."""
+    current_dir = Path.cwd()
+    root_markers = {'.git', 'package.json', 'pyproject.toml', 'requirements.txt'}
+    
+    for directory in [current_dir, *current_dir.parents]:
+        if any((directory / marker).exists() for marker in root_markers):
+            return directory
+    return current_dir
+
+def update_architecture_map(mermaid_code: str, explanation: str):
+    """
+    Creates or updates the architecture.md file with a Mermaid.js diagram of the project.
+    Args:
+        mermaid_code: The raw Mermaid.js graph code (e.g., 'graph TD\n A-->B'). Do not include markdown backticks.
+        explanation: A brief text explanation of the architecture.
+    """
+    try:
+        active_dir = get_project_root()
+        if not active_dir:
+            return "No active project directory found."
+        archtecture_file = active_dir / 'architecture.md'
+        content = f"Project architecture:\n\n {explanation} \n\n ```mermaid\n{mermaid_code}\n```\n"
+        archtecture_file.write_text(content,'utf-8')
+        return f"Successfully generated architecture map at {archtecture_file.name}."
+    except Exception as e:
+        return f"Failed to update architecture map: {e}"
 
 def get_memory_content():
     """
