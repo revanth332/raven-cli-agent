@@ -6,7 +6,7 @@ from google.genai import types
 from dotenv import load_dotenv
 import os
 
-from agent.utils import get_memory_content,save_to_memory,read_file,patch_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map,read_prompt_from_file,update_architecture_map
+from agent.utils import get_memory_content,save_to_memory,read_file,patch_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map,read_prompt_from_file,update_architecture_map,run_ui_test
 
 load_dotenv()
 
@@ -14,12 +14,15 @@ _genai_client = None
 model = "gemini-flash-latest"
 # model = "gemini-3-flash-preview"
 
-def get_llm_config():
+def get_llm_config(is_coach:bool):
     client = get_genai_client()
     global_memory = get_memory_content()
     project_memory = get_project_memory()
     project_name = get_active_project_name()
     repo_map = get_repo_map()
+    COACH_PROMPT = ""
+    if is_coach:
+        COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.txt")
     save_to_memory_declaration = types.FunctionDeclaration.from_callable(
         client=client,
         callable=save_to_memory
@@ -52,6 +55,10 @@ def get_llm_config():
         client=client,
         callable=update_architecture_map
     )
+    run_ui_test_declaration = types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=run_ui_test
+    )
     save_to_project_memory_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_to_project_memory)
     log_successful_debug_dec = types.FunctionDeclaration.from_callable(client=client, callable=log_successful_debug)
     save_concept_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_concept)
@@ -69,18 +76,19 @@ def get_llm_config():
                 create_file_declaration,
                 execute_command_declaration,
                 get_current_timestamp_declaration,
-                update_architecture_map_declaration
+                update_architecture_map_declaration,
+                run_ui_test_declaration
             ])
     ]
     config = types.GenerateContentConfig(
         tools=tools,
         system_instruction=[
-            types.Part.from_text(text=read_prompt_from_file('prompts/system_prompt.txt').format(
-                global_memory=global_memory,
-                project_name=project_name,
-                project_memory=project_memory,
-                repo_map=repo_map
-            )
+            types.Part.from_text(text=read_prompt_from_file('prompts/system_prompt.txt')
+                                .replace("{global_memory}", global_memory)
+                                .replace("{project_name}", project_name)
+                                .replace("{project_memory}", project_memory)
+                                .replace("{repo_map}", repo_map)
+                                .replace("{coach_prompt}", COACH_PROMPT)
             ),
         ])
     return config
@@ -95,10 +103,10 @@ def get_genai_client():
         _genai_client = genai.Client()
     return _genai_client
 
-def get_chat_session():
+def get_chat_session(is_coach=False):
     """Initializes and returns an interactive chat object."""
     client = get_genai_client()
-    return client.chats.create(model=model,config=get_llm_config())
+    return client.chats.create(model=model,config=get_llm_config(is_coach))
 
 def get_streaming_response(query):
     client = get_genai_client()

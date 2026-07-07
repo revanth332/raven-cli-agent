@@ -5,6 +5,7 @@ from datetime import datetime
 import shutil
 import time
 import json
+import tempfile
 
 _files_backed_up_this_turn = set()
 
@@ -382,3 +383,43 @@ def delete_file(file_path: str) -> str:
         return f"Successfully deleted file '{file_path}'."
     except Exception as e:
         return f"Error deleting file '{file_path}': {e}"
+
+def run_ui_test(test_script: str) -> str:
+    """
+    Executes a Playwright Python script to perform UI automation, scraping, or E2E testing.
+    Args:
+        test_script: The complete, runnable Python code using the Playwright sync API.
+    Returns:
+        The standard output and standard error from the test script execution.
+    """
+    # Create a temporary python file
+    with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False, encoding='utf-8') as temp_file:
+        # Prepend the necessary playwright imports in case Raven forgets them
+        boiler_plate = """from playwright.sync_api import sync_playwright\nimport sys\n\n"""
+        temp_file.write(boiler_plate + test_script)
+        temp_file_path = temp_file.name
+
+    try:
+        # Run the script using the existing execute_command function we built earlier!
+        # Make sure execute_command is imported in this file, or just use subprocess here.
+        import subprocess
+        result = subprocess.run(
+            f"python {temp_file_path}", 
+            shell=True, 
+            capture_output=True, 
+            text=True, 
+            encoding="utf-8", 
+            errors="ignore"
+        )
+        
+        output = f"Exit Code: {result.returncode}\n"
+        if result.stdout:
+            output += f"STDOUT:\n{result.stdout}\n"
+        if result.stderr:
+            output += f"STDERR:\n{result.stderr}\n"
+            
+        return output
+    finally:
+        # Clean up the temporary file so we don't clutter the user's hard drive
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)

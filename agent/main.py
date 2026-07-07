@@ -6,7 +6,7 @@ from rich.align import Align
 from rich.live import Live
 from rich.markdown import Markdown
 from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map,run_ui_test
 from google.genai import types
 
 import sys
@@ -81,7 +81,13 @@ TOOL_REGISTRY = {
     "update_architecture_map": {
         "fn": update_architecture_map, 
         "display_name": "Update Architecture Map", 
-        "display_arg": None, # We don't need to print the massive mermaid code to the terminal
+        "display_arg": None,
+        "ignore_display": False
+    },
+    "run_ui_test": {
+        "fn": run_ui_test, 
+        "display_name": "Browser", 
+        "display_arg": None,
         "ignore_display": False
     },
 }
@@ -167,6 +173,16 @@ def run_agent_loop(chat_session,intial_input):
                     )
                     continue
             
+            if tool_name == "run_ui_test":
+                console.print(f"\n[bold red]• Browser[/bold red]()")
+
+                confirmed = typer.confirm("Raven wants to run a UI Automation Script. Allow?")
+                if not confirmed:
+                    result = "Error: User denied permission to execute this automation script."
+                    tool_responses.append(
+                        types.Part.from_function_response(name=tool_name, response={"result": result})
+                    )
+                    continue
 
             if tool_name in TOOL_REGISTRY:
                 tool_meta = TOOL_REGISTRY[tool_name]
@@ -198,11 +214,13 @@ def test():
     print("testng..")
 
 @app.command()
-def chat(query:str = typer.Argument(None, help="An optional initial question to start the chat session")):
+def chat(query:str = typer.Argument(None, help="An optional initial question to start the chat session"),coach:bool = typer.Option(False,"--coach",help="Enable Socratic mentor mode.")):
     try:
         with console.status("preparing session..."):
-            chat_session = get_chat_session()
+            chat_session = get_chat_session(is_coach=coach)
         display_welcome()
+        if coach:
+            console.print("[bold magenta]Coach Mode Activated! Raven will guide you, not code for you.[/bold magenta]\n")
         if query:
             console.print(f"[green]You:[/] {query}")
             console.print()
