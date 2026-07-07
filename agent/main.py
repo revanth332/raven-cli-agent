@@ -5,8 +5,10 @@ from rich.text import Text
 from rich.align import Align
 from rich.live import Live
 from rich.markdown import Markdown
+import questionary
+from questionary import Style
 from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map,run_ui_test
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map,run_ui_test,inspect_dom,update_llm_model
 from google.genai import types
 
 import sys
@@ -16,6 +18,11 @@ import shutil
 
 app = typer.Typer()
 console = Console()
+
+chat_style = Style([
+            ('question', 'fg:#06B6D4 bold'),
+            ('answer', 'fg:#06B6D4'),
+        ])
 
 TOOL_REGISTRY = {
     "save_to_memory": {
@@ -27,7 +34,7 @@ TOOL_REGISTRY = {
     "find_file": {
         "fn": find_file, 
         "display_name": "Find", 
-        "display_arg": "file_name", # Note: you used file_name in your find_file function! 
+        "display_arg": "file_name",
         "ignore_display": False
     },
     "read_file": {
@@ -88,24 +95,38 @@ TOOL_REGISTRY = {
         "fn": run_ui_test, 
         "display_name": "Browser", 
         "display_arg": None,
+        "ignore_display": True
+    },
+    "inspect_dom": {
+        "fn": inspect_dom,
+        "display_name": "Inspect Webpage",
+        "display_arg": "url",
         "ignore_display": False
     },
 }
 
 def display_welcome():
-    reva_text = Text("Raven", style="green")
-    # 2. Create the Panel (the box)
+    # ASCII text logo spelling out 'RAVEN'
+    raven_logo = """
+ ██████╗  █████╗ ██╗   ██╗███████╗███╗   ██╗
+ ██╔══██╗██╔══██╗██║   ██║██╔════╝████╗  ██║
+ ██████╔╝███████║██║   ██║█████╗  ██╔██╗ ██║
+ ██╔══██╗██╔══██║╚██╗ ██╔╝██╔══╝  ██║╚██╗██║
+ ██║  ██║██║  ██║ ╚████╔╝ ███████╗██║ ╚████║
+ ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝
+    """
+    
+    # 1. Print a little spacing and the logo in sky blue color
+    console.print(f"[#06B6D4]{raven_logo}[/#06B6D4]")
+    
+    # 2. Add a simple panel welcome message
     welcome_panel = Panel(
-        Align.center(reva_text),title="[bold white]CLI AGENT[/bold white]",
-        subtitle="[dim]v0.1.0[/dim]",
-        border_style="green",
-        padding=(1, 10),
+        Align.center("[bold white]Welcome to Raven CLI! How can I help you today?[/bold white]"),
+        border_style="#06B6D4",
         expand=False
     )
-    # 3. Print a little spacing and the panel
-    console.print("\n")
     console.print(welcome_panel)
-    console.print("[dim italic]System ready. How can I help you today?[/dim italic]\n")
+    console.print()
 
 def render_stream(generator):
     full_response = ""
@@ -157,13 +178,13 @@ def run_agent_loop(chat_session,intial_input):
                 # Print Green Background for added lines
                 for line in replace_lines:
                     t = Text(f"+ {line}")
-                    t.stylize("bold white on dark_green") # dark_green is easier on the eyes!
+                    t.stylize("bold white on dark_green")
                     console.print(t)
                 
                 console.print()
 
             if tool_name == "execute_command":
-                console.print(f"\n[bold red]• Execute[/bold red]([dim]{tool_args['command']}[/dim])")
+                console.print(f"\n[bold red]• Execute[/bold red]([dim]{tool_args['command']}[/dim])\n")
                 
                 confirmed = typer.confirm("Allow Raven to execute this command?")
                 if not confirmed:
@@ -174,7 +195,7 @@ def run_agent_loop(chat_session,intial_input):
                     continue
             
             if tool_name == "run_ui_test":
-                console.print(f"\n[bold red]• Browser[/bold red]()")
+                console.print(f"\n[bold red]• Browser[/bold red]()\n")
 
                 confirmed = typer.confirm("Raven wants to run a UI Automation Script. Allow?")
                 if not confirmed:
@@ -192,7 +213,7 @@ def run_agent_loop(chat_session,intial_input):
                     arg_key = tool_meta["display_arg"]
                     
                     display_val = tool_args.get(arg_key, "") if arg_key else ""
-                    console.print(f"[bold green]• {display_name}[/bold green]([dim]{display_val if len(display_val) <= 12 else display_val[:13]+"..."}[/dim])")
+                    console.print(f"\n[bold green]• {display_name}[/bold green]([dim]{display_val if len(display_val) <= 12 else display_val[:13]+"..."}[/dim])\n")
                 try:
                     result = TOOL_REGISTRY[tool_name]["fn"](**tool_args)
                 except Exception as e:
@@ -214,19 +235,26 @@ def test():
     print("testng..")
 
 @app.command()
-def chat(query:str = typer.Argument(None, help="An optional initial question to start the chat session"),coach:bool = typer.Option(False,"--coach",help="Enable Socratic mentor mode.")):
+def chat(coach:bool = typer.Option(False,"--coach",help="Enable Socratic mentor mode.")):
     try:
         with console.status("preparing session..."):
             chat_session = get_chat_session(is_coach=coach)
         display_welcome()
         if coach:
             console.print("[bold magenta]Coach Mode Activated! Raven will guide you, not code for you.[/bold magenta]\n")
-        if query:
-            console.print(f"[green]You:[/] {query}")
-            console.print()
-            run_agent_loop(chat_session,query)
-            console.print()
-        while (query := console.input("[green]You:[/] ")) != "exit":
+        while (True):
+            query = questionary.text(
+                ">", 
+                qmark="",
+                style=chat_style
+            ).ask()
+
+            if query is None or query.strip().lower() == "exit":
+                break
+                
+            if not query.strip():
+                continue
+
             if query == '/undo':
                 registry_file = Path.home() / ".raven" / "backups" / "undo_registry.json"
                 if registry_file.exists():
@@ -297,6 +325,27 @@ def git(file:str = typer.Option(None,"--file","-f")):
         console.rule("Chat closed")
         raise typer.Exit(1)
 
+@app.command()
+def model():
+    model = questionary.select("Select the model:",choices=["gemini-3.5-flash","gemini-3.1-flash-lite","gemini-3.1-pro-preview","gemini-3-flash-preview"]).ask()
+    update_llm_model(model)
+
+@app.command()
+def report():
+    time_period = questionary.select("Select time period:",choices=["Week","Month","3 Months","6 Months","Year"]).ask()
+    REPORT_PROMPT = read_prompt_from_file("prompts/report_prompt.txt")
+    try:
+        with console.status("preparing session..."):
+            chat_session = get_chat_session()
+        run_agent_loop(chat_session,REPORT_PROMPT.replace("{timeperiod}",time_period))
+        console.print()
+        while (query := console.input("[green]You:[/] ")) != "exit":
+            run_agent_loop(chat_session,query)
+            console.print()
+    except KeyboardInterrupt:
+        console.print()
+        console.rule("Chat closed")
+        raise typer.Exit(1)
 
 if __name__ == "__main__":
     app()

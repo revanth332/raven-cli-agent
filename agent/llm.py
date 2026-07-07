@@ -6,13 +6,13 @@ from google.genai import types
 from dotenv import load_dotenv
 import os
 
-from agent.utils import get_memory_content,save_to_memory,read_file,patch_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map,read_prompt_from_file,update_architecture_map,run_ui_test
+from agent.utils import get_memory_content,save_to_memory,read_file,patch_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map,read_prompt_from_file,update_architecture_map,run_ui_test,inspect_dom,get_llm_config
 
 load_dotenv()
 
 _genai_client = None
-model = "gemini-flash-latest"
-# model = "gemini-3-flash-preview"
+model_config = get_llm_config()
+model = model_config.get("model","gemini-3-flash-preview")
 
 def get_llm_config(is_coach:bool):
     client = get_genai_client()
@@ -59,6 +59,10 @@ def get_llm_config(is_coach:bool):
         client=client,
         callable=run_ui_test
     )
+    inspect_dom_declaration = types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=inspect_dom
+    )
     save_to_project_memory_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_to_project_memory)
     log_successful_debug_dec = types.FunctionDeclaration.from_callable(client=client, callable=log_successful_debug)
     save_concept_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_concept)
@@ -77,7 +81,8 @@ def get_llm_config(is_coach:bool):
                 execute_command_declaration,
                 get_current_timestamp_declaration,
                 update_architecture_map_declaration,
-                run_ui_test_declaration
+                run_ui_test_declaration,
+                inspect_dom_declaration
             ])
     ]
     config = types.GenerateContentConfig(

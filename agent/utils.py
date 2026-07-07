@@ -6,6 +6,8 @@ import shutil
 import time
 import json
 import tempfile
+from playwright.sync_api import sync_playwright
+
 
 _files_backed_up_this_turn = set()
 
@@ -35,7 +37,7 @@ def get_active_project_name() -> str:
     for directory in [current_dir,*current_dir.parents]:
         if any((directory / marker).exists() for marker in root_markers):
             return directory.name
-    return None
+    return ""
 
 def get_project_root() -> Path:
     """Returns the Path object for the root of the project."""
@@ -81,7 +83,7 @@ def get_project_memory():
     """Loads or initializes memory specific to the active project folder."""
     project_name = get_active_project_name()
     if not project_name:
-        return None
+        return ""
     project_name += ".md"
     project_memory_file = Path.home() / ".raven" / "projects" / project_name
     if not project_memory_file.exists():
@@ -110,6 +112,8 @@ def save_to_project_memory(fact: str) -> str:
         fact: A short, concise fact about the current project to remember.
     """
     project_name = get_active_project_name()
+    if not project_name:
+        return "No active project found. Should save to global memory."
     project_file = Path.home() / ".raven" / "projects" / f"{project_name}.md"
     try:
         with open(project_file, "a", encoding="utf-8") as f:
@@ -135,6 +139,8 @@ def log_successful_debug(error_description: str, solution: str) -> str:
         
     project_name = get_active_project_name()
     log_entry = f"\n## Error: {error_description}\n- **Project**: {project_name}\n- **Solution**: {solution}\n"
+    if not project_name:
+        log_entry = f"\n## Error: {error_description}\n- **Solution**: {solution}\n"
     
     with open(debug_file, "a", encoding="utf-8") as f:
         f.write(log_entry)
@@ -246,7 +252,11 @@ def find_file(file_path:str):
     IGNORE_DIRS = {'node_modules', '.git', 'venv', 'env', '.venv', '__pycache__', 'dist', 'build'}
     matches = []
     for root,dirs,files in os.walk("."):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        # Filter directories dynamically to skip standard ignored folders and any custom venvs
+        dirs[:] = [
+            d for d in dirs 
+            if d not in IGNORE_DIRS and not (Path(root) / d / "pyvenv.cfg").exists()
+        ]
 
         if file_path in files:
             matches.append(Path(root) / file_path)
@@ -347,10 +357,14 @@ def get_repo_map(max_files: int = 250):
     }
     active_project = get_active_project_name()
     if not active_project:
-        return None
+        return ""
     file_paths = []
     for root,dirs,files in os.walk("."):
-        dirs[:] = [d for d in dirs if d not in IGNORE_DIRS]
+        # Skip standard ignore dirs and dynamically detect/skip custom virtual environments
+        dirs[:] = [
+            d for d in dirs 
+            if d not in IGNORE_DIRS and not (Path(root) / d / "pyvenv.cfg").exists()
+        ]
         for file in files:
             if any(file.lower().endswith(ext) for ext in IGNORE_EXTS):
                 continue
@@ -383,6 +397,82 @@ def delete_file(file_path: str) -> str:
         return f"Successfully deleted file '{file_path}'."
     except Exception as e:
         return f"Error deleting file '{file_path}': {e}"
+
+def update_llm_model(model:str):
+    """
+    Updates the agent configurations like model etc.,
+    """
+    config_file = Path.home() / ".raven" / "config.json"
+    config = {}
+    if config_file.exists():
+        try:
+            config = json.loads(config_file.read_text(encoding="utf-8"))
+        except Exception as e:
+            print(f"Error updaing the model config: {e}")
+        config["model"] = model
+    else:
+        config = {"model":model}
+    config_file.write_text(json.dumps(config),encoding='utf-8')
+
+def get_llm_config():
+    """
+    Provides the LLM configurations like model etc.,
+    """
+    config_file = Path.home() / ".raven" / "config.json"
+    try:
+        config = json.loads(config_file.read_text(encoding='utf-8'))
+        return config
+    except:
+        print("Error Loading the model config")
+        return {}
+
+
+def inspect_dom(url: str) -> str:
+    """
+    Analyzes a webpage and returns a list of interactive elements (buttons, inputs, links) 
+    and their exact CSS selectors. Use this BEFORE writing UI automation scripts to ensure 
+    you are using the correct selectors.
+    """
+    
+    try:
+        with sync_playwright() as p:
+            browser = p.chromium.launch(headless=True)
+            page = browser.new_page()
+            # Wait until network is mostly idle to ensure React/Vue apps have rendered
+            page.goto(url, wait_until="networkidle", timeout=15000)
+            
+            # Inject JS to map out interactive elements
+            element_map = page.evaluate('''() => {
+                const elements = document.querySelectorAll('input, button, a, select, textarea');
+                return Array.from(elements).map(el => {
+                    // Try to build a reliable CSS selector
+                    let selector = el.tagName.toLowerCase();
+                    if (el.id) {
+                        selector = '#' + el.id;
+                    } else if (el.name) {
+                        selector = `${selector}[name="${el.name}"]`;
+                    } else if (el.className && typeof el.className === 'string') {
+                        selector = `${selector}.${el.className.split(' ').join('.')}`;
+                    }
+                    
+                    // Grab contextual text so the LLM knows what this element does
+                    const text = el.innerText || el.placeholder || el.value || el.ariaLabel || 'No text';
+                    
+                    return `Type: ${el.tagName} | Context: "${text.trim().substring(0, 50)}" | Selector: \`${selector}\``;
+                }).filter(item => item !== null);
+            }''')
+            
+            browser.close()
+            
+            if not element_map:
+                return "No interactive elements found on the page."
+                
+            # Deduplicate and format for the LLM
+            unique_elements = list(set(element_map))
+            return "INTERACTIVE ELEMENTS FOUND:\n" + "\n".join(unique_elements)
+            
+    except Exception as e:
+        return f"Failed to inspect DOM: {e}"
 
 def run_ui_test(test_script: str) -> str:
     """
