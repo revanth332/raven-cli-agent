@@ -465,3 +465,35 @@ def run_ui_test(test_script: str) -> str:
         # Clean up the temporary file so we don't clutter the user's hard drive
         if os.path.exists(temp_file_path):
             os.remove(temp_file_path)
+
+def get_staged_git_changes():
+    """
+    Use this tool to retrieve the current staged git changes.
+    """
+    try:
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"], capture_output=True)
+        if result.returncode == 0:
+            return "No staged changes found. Please stage files before committing."
+        diff_output = subprocess.run(["git", "diff", "--cached"], capture_output=True, text=True).stdout
+        return diff_output
+    except subprocess.CalledProcessError as e:
+        return f"Failed to get the staged changes {e}"
+    
+def commit_staged_git_changes(message:str,is_verified:bool):
+    """
+    Use this tool to commit the code with a commit message. Commit can be verfied or unverified(--no-verify).
+
+    Args:
+        message: commit message related to the code changes
+        is_verified: True/False to decide whether include '--no-verify' in commit command
+    Returns:
+        Success or error message regarding the commit operation
+    """
+    try:
+        command = ["git", "commit", "-m", message]
+        if is_verified:
+            command.append("--no-verify")
+        subprocess.run(command, check=True)
+        return "Successfully committed the changes"
+    except subprocess.CalledProcessError as e:
+        return "Failed to commit:[/bold red] {e}"

@@ -6,7 +6,7 @@ from google.genai import types
 from dotenv import load_dotenv
 import os
 
-from agent.utils import get_memory_content,save_to_memory,read_file,patch_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map,read_prompt_from_file,update_architecture_map,run_ui_test,get_llm_config
+from agent.utils import get_memory_content,save_to_memory,read_file,patch_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map,read_prompt_from_file,update_architecture_map,run_ui_test,get_llm_config,get_staged_git_changes,commit_staged_git_changes
 from agent.indexer import search_codebase
 
 load_dotenv()
@@ -64,9 +64,26 @@ def get_llm_config(is_coach:bool):
         client=client,
         callable=search_codebase
     )
-    save_to_project_memory_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_to_project_memory)
-    log_successful_debug_dec = types.FunctionDeclaration.from_callable(client=client, callable=log_successful_debug)
-    save_concept_dec = types.FunctionDeclaration.from_callable(client=client, callable=save_concept)
+    save_to_project_memory_dec = types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=save_to_project_memory
+    )
+    log_successful_debug_dec = types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=log_successful_debug
+    )
+    save_concept_dec = types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=save_concept
+    )
+    get_staged_git_changes_dec = types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=get_staged_git_changes
+    )
+    commit_staged_git_changes_dec = types.FunctionDeclaration.from_callable(
+        client=client,
+        callable=commit_staged_git_changes
+    )
     tools = [
         # types.Tool(google_search=types.GoogleSearch),
         types.Tool(
@@ -83,7 +100,9 @@ def get_llm_config(is_coach:bool):
                 get_current_timestamp_declaration,
                 update_architecture_map_declaration,
                 run_ui_test_declaration,
-                search_codebase_declaration
+                search_codebase_declaration,
+                get_staged_git_changes_dec,
+                commit_staged_git_changes_dec
             ])
     ]
     config = types.GenerateContentConfig(
