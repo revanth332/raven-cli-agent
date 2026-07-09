@@ -8,7 +8,8 @@ from rich.markdown import Markdown
 import questionary
 from questionary import Style
 from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map,run_ui_test,inspect_dom,update_llm_model
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map,run_ui_test,update_llm_model
+from agent.indexer import search_codebase
 from google.genai import types
 
 import sys
@@ -34,7 +35,7 @@ TOOL_REGISTRY = {
     "find_file": {
         "fn": find_file, 
         "display_name": "Find", 
-        "display_arg": "file_name",
+        "display_arg": "file_path",
         "ignore_display": False
     },
     "read_file": {
@@ -97,12 +98,12 @@ TOOL_REGISTRY = {
         "display_arg": None,
         "ignore_display": True
     },
-    "inspect_dom": {
-        "fn": inspect_dom,
-        "display_name": "Inspect Webpage",
-        "display_arg": "url",
+    "search_codebase":{
+        "fn": search_codebase,
+        "display_name": "Searching Codebase",
+        "display_arg": "query",
         "ignore_display": False
-    },
+    }
 }
 
 def display_welcome():
@@ -147,7 +148,10 @@ def run_agent_loop(chat_session,intial_input):
         function_calls = []
 
         with Live(Markdown(""),refresh_per_second=10,console=console) as live:
-            generator = chat_session.send_message_stream(current_input)
+            try:
+                generator = chat_session.send_message_stream(current_input)
+            except:
+                console.print("[red]Model exhausted[/red]")
             for chunk in generator:
                 if hasattr(chunk,'text') and chunk.text:
                     final_response += chunk.text
@@ -213,7 +217,7 @@ def run_agent_loop(chat_session,intial_input):
                     arg_key = tool_meta["display_arg"]
                     
                     display_val = tool_args.get(arg_key, "") if arg_key else ""
-                    console.print(f"\n[bold green]• {display_name}[/bold green]([dim]{display_val if len(display_val) <= 12 else display_val[:13]+"..."}[/dim])\n")
+                    console.print(f"\n[bold green]• {display_name}[/bold green]([dim]{display_val if len(display_val) <= 30 else display_val[:13]+"..."}[/dim])\n")
                 try:
                     result = TOOL_REGISTRY[tool_name]["fn"](**tool_args)
                 except Exception as e:
@@ -304,26 +308,35 @@ def debug():
             raise typer.Exit(1)
 
 @app.command()
-def git(file:str = typer.Option(None,"--file","-f")):
-    COMMIT_PROMPT = read_prompt_from_file("prompts/commit_prompt.txt")
+def commit():
+    """Automated git commit with staged changes check and user confirmation."""
+    import subprocess
     
-    commit_genration_prompt = f"{COMMIT_PROMPT}"
-    if file:
-        commit_genration_prompt += f"Use only {file} file chnages using staged or cached to generate commit message for all the changes, as this is the main file that has the important changes."
+    # 1. Check for staged files
+    result = subprocess.run(["git", "diff", "--cached", "--quiet"], capture_output=True)
+    if result.returncode == 0:
+        console.print("[yellow]No staged changes found. Please stage files before committing.[/yellow]")
+        return
+
+    # 2. Generate commit message via LLM
+    COMMIT_PROMPT = read_prompt_from_file("prompts/commit_prompt.txt")
+    diff_output = subprocess.run(["git", "diff", "--cached"], capture_output=True, text=True).stdout
+    
+    with console.status("[bold green]Generating commit message..."):
+        chat_session = get_chat_session()
+        response = chat_session.send_message(f"{COMMIT_PROMPT}\n\nDiff:\n{diff_output}")
+        commit_message = response.text.strip().replace('"', '')
+
+    # 3. Confirmation
+    console.print(f"\n[bold]Suggested commit message:[/bold]\n[cyan]{commit_message}[/cyan]\n")
+    if typer.confirm("Do you want to commit with this message?"):
+        try:
+            subprocess.run(["git", "commit", "-m", commit_message], check=True)
+            console.print("[bold green]Successfully committed![/bold green]")
+        except subprocess.CalledProcessError as e:
+            console.print(f"[bold red]Failed to commit:[/bold red] {e}")
     else:
-        commit_genration_prompt += f"Use git commands like staged or cached to get the changes."
-    try:
-        with console.status("preparing session..."):
-            chat_session = get_chat_session()
-        run_agent_loop(chat_session,commit_genration_prompt)
-        console.print()
-        while (query := console.input("[green]You:[/] ")) != "exit":
-            run_agent_loop(chat_session,query)
-            console.print()
-    except KeyboardInterrupt:
-        console.print()
-        console.rule("Chat closed")
-        raise typer.Exit(1)
+        console.print("[yellow]Commit aborted by user.[/yellow]")
 
 @app.command()
 def model():

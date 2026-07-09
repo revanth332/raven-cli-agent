@@ -13,7 +13,10 @@ dependencies = [
     "python-dotenv",
     "google-genai",
     "playwright",
-    "questionary"
+    "questionary",
+    "tree-sitter",
+    "tree-sitter-python",
+    "chromadb"
 ]
 
 [project.scripts]

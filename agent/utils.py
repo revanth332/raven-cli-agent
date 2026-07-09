@@ -426,54 +426,6 @@ def get_llm_config():
         print("Error Loading the model config")
         return {}
 
-
-def inspect_dom(url: str) -> str:
-    """
-    Analyzes a webpage and returns a list of interactive elements (buttons, inputs, links) 
-    and their exact CSS selectors. Use this BEFORE writing UI automation scripts to ensure 
-    you are using the correct selectors.
-    """
-    
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page()
-            # Wait until network is mostly idle to ensure React/Vue apps have rendered
-            page.goto(url, wait_until="networkidle", timeout=15000)
-            
-            # Inject JS to map out interactive elements
-            element_map = page.evaluate('''() => {
-                const elements = document.querySelectorAll('input, button, a, select, textarea');
-                return Array.from(elements).map(el => {
-                    // Try to build a reliable CSS selector
-                    let selector = el.tagName.toLowerCase();
-                    if (el.id) {
-                        selector = '#' + el.id;
-                    } else if (el.name) {
-                        selector = `${selector}[name="${el.name}"]`;
-                    } else if (el.className && typeof el.className === 'string') {
-                        selector = `${selector}.${el.className.split(' ').join('.')}`;
-                    }
-                    
-                    // Grab contextual text so the LLM knows what this element does
-                    const text = el.innerText || el.placeholder || el.value || el.ariaLabel || 'No text';
-                    
-                    return `Type: ${el.tagName} | Context: "${text.trim().substring(0, 50)}" | Selector: \`${selector}\``;
-                }).filter(item => item !== null);
-            }''')
-            
-            browser.close()
-            
-            if not element_map:
-                return "No interactive elements found on the page."
-                
-            # Deduplicate and format for the LLM
-            unique_elements = list(set(element_map))
-            return "INTERACTIVE ELEMENTS FOUND:\n" + "\n".join(unique_elements)
-            
-    except Exception as e:
-        return f"Failed to inspect DOM: {e}"
-
 def run_ui_test(test_script: str) -> str:
     """
     Executes a Playwright Python script to perform UI automation, scraping, or E2E testing.
