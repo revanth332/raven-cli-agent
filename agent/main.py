@@ -9,7 +9,7 @@ from rich.markdown import Markdown
 import questionary
 from questionary import Style
 from agent.llm import get_chat_session,get_response
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map,run_ui_test,update_llm_model,get_staged_git_changes,commit_staged_git_changes
+from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map,run_ui_test,update_llm_model,get_staged_git_changes,commit_staged_git_changes,get_active_llm_model
 from agent.indexer import search_codebase
 from google.genai import types
 
@@ -233,7 +233,7 @@ def run_agent_loop(chat_session,intial_input):
                     continue
 
             if tool_name == "commit_staged_git_changes":
-                console.print(f"[bold cyan]• Commit[/bold cyan]([dim]{tool_args['message']}[/dim])")
+                console.print(f"[bold cyan]• Commit[/bold cyan]([dim]{tool_args['message']}[/dim]{',[red]unverified[/red]' if not tool_args['is_verified'] else ''})")
                 confirmed = typer.confirm("Raven wants to commit the changes. Allow?")
                 if not confirmed:
                     result = "Error: User denied permission to commit the changes."
@@ -249,7 +249,7 @@ def run_agent_loop(chat_session,intial_input):
                     arg_key = tool_meta["display_arg"]
                     
                     display_val = tool_args.get(arg_key, "") if arg_key else ""
-                    console.print(f"[bold cyan]• {display_name}[/bold cyan]([dim]{display_val if len(display_val) <= 30 else display_val[:13]+"..."}[/dim])")
+                    console.print(f"[bold cyan]• {display_name}[/bold cyan]([dim]{display_val}[/dim])")
                 try:
                     result = TOOL_REGISTRY[tool_name]["fn"](**tool_args)
                 except Exception as e:
@@ -375,7 +375,7 @@ def commit():
         return
 
     diff_output = subprocess.run(["git", "diff", "--cached"], capture_output=True, text=True).stdout
-    debug_prompt = f"Generate commit message based on the given diff.\n\nDiff:\n{diff_output}"
+    debug_prompt = f"Generate commit message based on the given diff, commit and push the code. Give main priority to the project related git preferences while performing git operations.\n\nDiff:\n{diff_output}"
     try:
         with console.status("preparing session..."):
             chat_session = get_chat_session()
@@ -396,8 +396,11 @@ def model():
     (e.g., gemini-3.5-flash, gemini-3.1-pro-preview) and saves your choice
     globally for future commands and chat sessions.
     """
+    active_model = get_active_llm_model()
+    console.print(f"[magenta]Active Model: [/magenta][dim]{active_model}[/dim]")
     model = questionary.select("Select the model:",choices=["gemini-3.5-flash","gemini-3.1-flash-lite","gemini-3.1-pro-preview","gemini-3-flash-preview"]).ask()
-    update_llm_model(model)
+    if model:
+        update_llm_model(model)
 
 @app.command()
 def report():

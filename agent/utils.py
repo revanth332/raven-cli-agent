@@ -414,6 +414,20 @@ def update_llm_model(model:str):
         config = {"model":model}
     config_file.write_text(json.dumps(config),encoding='utf-8')
 
+def get_active_llm_model():
+    """
+    Provides the current active LLM model
+    """
+    config_file = Path.home() / ".raven" / "config.json"
+    if config_file.exists():
+        try:
+            config = json.loads(config_file.read_text(encoding="utf-8"))
+            return config["model"]
+        except Exception as e:
+            return None
+    return None
+        
+
 def get_llm_config():
     """
     Provides the LLM configurations like model etc.,
@@ -491,7 +505,7 @@ def commit_staged_git_changes(message:str,is_verified:bool):
     """
     try:
         command = ["git", "commit", "-m", message]
-        if is_verified:
+        if not is_verified:
             command.append("--no-verify")
         subprocess.run(command, check=True)
         return "Successfully committed the changes"
