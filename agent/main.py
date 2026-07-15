@@ -18,6 +18,7 @@ from pathlib import Path
 import json
 import shutil
 import subprocess
+import time
 
 app = typer.Typer()
 console = Console()
@@ -171,27 +172,36 @@ def render_stream(generator):
 def run_agent_loop(chat_session,intial_input):
     """The core multi-turn engine of Raven"""
     current_input = intial_input
-
+    max_retries = 5
     while True:
         final_response = ""
         function_calls = []
-
-        with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console) as live:
-            try:
-                generator = chat_session.send_message_stream(current_input)
-            except:
-                console.print("[red]Model exhausted[/red]")
-            for chunk in generator:
-                if chunk.function_calls:
-                    function_calls.extend(chunk.function_calls)
-                    continue
-                if hasattr(chunk,'text') and chunk.text:
-                    final_response += chunk.text
-                    live.update(Markdown(final_response))
-            
-            # Clear or hide the live thinking display if no text was streamed (i.e., only function calls were found)
-            if not final_response:
-                live.update(Text(""))
+        with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console,transient=True) as live:
+            for attempt in range(max_retries):
+                try:
+                    generator = chat_session.send_message_stream(current_input)
+                    for chunk in generator:
+                        if chunk.function_calls:
+                            function_calls.extend(chunk.function_calls)
+                            continue
+                        if hasattr(chunk,'text') and chunk.text:
+                            final_response += chunk.text
+                            live.update(Markdown(final_response))
+                    break
+                except Exception as api_error:
+                    error_str = str(api_error)
+                    if "429" in error_str or "exhausted" in error_str or "quota" in error_str:
+                        if attempt < max_retries - 1:
+                            msg = f"⏳ *API Rate Limit hit. (Retrying in {sleep_time}s)*"
+                            console.print(Markdown(msg))
+                            sleep_time = 2**(attempt+1)
+                            time.sleep(sleep_time)
+                            continue
+                        raise api_error
+                
+                # Clear or hide the live thinking display if no text was streamed (i.e., only function calls were found)
+                if not final_response:
+                    live.update(Text(""))
         if len(function_calls) == 0:
             break
         tool_responses = []

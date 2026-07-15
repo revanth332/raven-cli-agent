@@ -311,7 +311,8 @@ class RavenTUI(App):
         start_time = time.time()
         try:
             thinking_container = self.query_one("#thinking_container")
-            full_response = Text()
+            text_response = ""
+            tool_logs = Text()
             while True:
                 function_calls = []
                 max_retries = 5
@@ -326,8 +327,11 @@ class RavenTUI(App):
                                 function_calls.extend(chunk.function_calls)
                                 continue
                             if hasattr(chunk,"text") and chunk.text:
-                                full_response.append(chunk.text)
-                                self.call_from_thread(raven_card.update, full_response)
+                                text_response += chunk.text
+                                if tool_logs:
+                                    self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                                else:
+                                    self.call_from_thread(raven_card.update, Markdown(text_response))
                                 self.call_from_thread(raven_card.scroll_visible)
                         break
                     except Exception as api_error:
@@ -345,7 +349,7 @@ class RavenTUI(App):
                             raise api_error
                 if thinking_message:
                     self.call_from_thread(thinking_message.remove)
-                    
+
                 if len(function_calls) == 0:
                     break
 
@@ -369,38 +373,48 @@ class RavenTUI(App):
                                 result = "Error: User denied permission."
                                 tool_responses.append(types.Part.from_function_response(name=tool_name, response={"result": result}))
                                 continue
+                            tool_logs.append(f"\n• {tool_name}")
+                            tool_logs.append(f"({str(tool_args)[:100]})\n",style="dim white")
+                            if text_response:
+                                self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                            else:
+                                self.call_from_thread(raven_card.update, tool_logs)
+                            self.call_from_thread(raven_card.scroll_visible)
 
                         if tool_name == "patch_file":
                             file_path = tool_args.get("file_path", "Unknown")
                             search_block = tool_args.get("search_block", "")
                             replace_block = tool_args.get("replace_block", "")
                             
-                            full_response.append(f"\n\n• Update")
-                            full_response.append(f"({file_path})\n",style="dim white")
+                            tool_logs.append(f"\n• Update")
+                            tool_logs.append(f"({file_path})\n",style="dim white")
                             if search_block or replace_block:
                                 search_block_lines = search_block.rstrip().split("\n")
                                 replace_block_lines = replace_block.rstrip().split("\n")
-                                full_response.append("   |_ Updated ",style="dim white")
-                                full_response.append(f"{file_path} ")
-                                full_response.append("with ",style="dim white")
-                                full_response.append(f"{len(replace_block_lines)} ")
-                                full_response.append("addition and ",style="dim white")
-                                full_response.append(f"{len(search_block_lines)} ")
-                                full_response.append("removal\n",style="dim white")
+                                tool_logs.append("   |_ Updated ",style="dim white")
+                                tool_logs.append(f"{file_path} ")
+                                tool_logs.append("with ",style="dim white")
+                                tool_logs.append(f"{len(replace_block_lines)} ")
+                                tool_logs.append("addition and ",style="dim white")
+                                tool_logs.append(f"{len(search_block_lines)} ")
+                                tool_logs.append("removal\n",style="dim white")
                                 if search_block:
                                     for line in search_block_lines:
-                                        full_response.append("       ")
-                                        full_response.append(f"- {line}\n",style="white on #961b1b")
+                                        tool_logs.append("       ")
+                                        tool_logs.append(f"- {line}\n",style="white on #961b1b")
                                 if replace_block:
                                     if not search_block:
                                         # If there's no search block, we still need standard styling
                                         pass
                                     for line in replace_block_lines:
-                                        full_response.append("       ")
-                                        full_response.append(f"+ {line}\n",style="white on #26753a")
+                                        tool_logs.append("       ")
+                                        tool_logs.append(f"+ {line}\n",style="white on #26753a")
                             
-                            full_response.append("\n\n")
-                            self.call_from_thread(raven_card.update,full_response)
+                            tool_logs.append("\n")
+                            if text_response:
+                                self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                            else:
+                                self.call_from_thread(raven_card.update, tool_logs)
                             self.call_from_thread(raven_card.scroll_visible)
                         elif not tool_meta.get("ignore_display"):
                             display_name = tool_meta["display_name"]
@@ -408,9 +422,12 @@ class RavenTUI(App):
                             display_val = tool_args.get(arg_key, "") if arg_key else ""
                             
                             # Add a bold bullet circle before the tool name
-                            full_response.append(f"\n\n• {display_name}")
-                            full_response.append(f"({display_val})",style="dim white")
-                            self.call_from_thread(raven_card.update,full_response)
+                            tool_logs.append(f"\n• {display_name}")
+                            tool_logs.append(f"({display_val})\n",style="dim white")
+                            if text_response:
+                                self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                            else:
+                                self.call_from_thread(raven_card.update, tool_logs)
                             self.call_from_thread(raven_card.scroll_visible)
                         try:
                             result = tool_meta["fn"](**tool_args)
@@ -429,8 +446,11 @@ class RavenTUI(App):
             else:
                 time_str = f"{elapsed:.1f}s"
             
-            full_response.append(f"\n\nGeneration took {time_str}",style="dim white")
-            self.call_from_thread(raven_card.update,full_response)
+            tool_logs.append(f"\n\nGeneration took {time_str}",style="dim white")
+            if text_response:
+                self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+            else:
+                self.call_from_thread(raven_card.update, tool_logs)
             self.call_from_thread(raven_card.scroll_visible)
                 
         except Exception as e:
