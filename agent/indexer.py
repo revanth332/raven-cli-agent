@@ -178,10 +178,19 @@ def index_project():
                         ext = Path(file).suffix
                         chunks = chunk_code_file(file_path,content,ext)
                     else:
-                        chunks = chunk_text_file(file_path,content,ext)
+                        chunks = chunk_text_file(file_path,content)
 
+                    # Keep track of IDs to ensure uniqueness within the file
+                    id_counts = {}
                     for chunk in chunks:
-                        chunk_id = f"{file_path}::{chunk['type']}::{chunk['name']}"
+                        base_id = f"{file_path}::{chunk['type']}::{chunk['name']}"
+                        if base_id in id_counts:
+                            id_counts[base_id] += 1
+                            chunk_id = f"{base_id}_{id_counts[base_id]}"
+                        else:
+                            id_counts[base_id] = 1
+                            chunk_id = base_id
+
                         documents.append(chunk['content'])
                         metadatas.append({
                                 "file_path": chunk['file_path'],
@@ -204,7 +213,7 @@ def index_project():
 
     if documents:
         print(f"Embedding and Indexing {len(documents)} semantic chunks...")
-        # Upsert adds new chunks and overwrites old ones if the ID matches
+            # Upsert adds new chunks and overwrites old ones if the ID matches
         collection.upsert(
             documents=documents,
             metadatas=metadatas,
@@ -221,6 +230,7 @@ def search_codebase(query:str,top_results:int = 3):
     Args:
         query: The natural language question or code keywords to search for.
     """
+    index_project()
     collection = get_vector_db()
 
     result = collection.query(

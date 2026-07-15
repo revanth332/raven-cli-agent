@@ -103,7 +103,7 @@ TOOL_REGISTRY = {
     "search_codebase":{
         "fn": search_codebase,
         "display_name": "Searching Codebase",
-        "display_arg": "query",
+        "display_arg": "",
         "ignore_display": False
     },
     "get_staged_git_changes":{
@@ -134,9 +134,20 @@ def display_welcome():
     # 1. Print a little spacing and the logo in sky blue color
     console.print(f"[#06B6D4]{raven_logo}[/#06B6D4]")
     
+    # Get welcome info
+    active_model = get_active_llm_model()
+    current_project = Path.cwd().name
+    
     # 2. Add a simple panel welcome message
+    welcome_message = (
+        "[bold white]Welcome to Raven CLI! How can I help you today?[/bold white]\n\n"
+        f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}\n"
+        f"[bold #06B6D4]Current Project:[/bold #06B6D4] {current_project}\n"
+        f"[bold #06B6D4]Agent Version:[/bold #06B6D4] 1.0.0 (Raven Personal AI Developer Agent)"
+    )
+    
     welcome_panel = Panel(
-        Align.center("[bold white]Welcome to Raven CLI! How can I help you today?[/bold white]"),
+        Align.center(welcome_message),
         border_style="#06B6D4",
         expand=False
     )

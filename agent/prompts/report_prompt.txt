@@ -1,6 +1,9 @@
 Created a detailed report on what user working from past {time_period} on current active project based on project memory. Project memory has logs with timestamps. You can extract past week or months based on the timestamps
 Refer the following example.
 EXAMPLE:
-This/These week/month/3months/.. I worked on following:
+This/These {time_period} I worked on following:
 - Created a request form for GCP request and integrated the apis
 - ...
+
+Finally:
+Save the report in a file with name <time_period>_report.py

@@ -15,7 +15,7 @@ _genai_client = None
 model_config = get_llm_config()
 model = model_config.get("model","gemini-3-flash-preview")
 
-def get_llm_config(is_coach:bool):
+def get_model_config(is_coach:bool):
     client = get_genai_client()
     global_memory = get_memory_content()
     project_memory = get_project_memory()
@@ -131,7 +131,7 @@ def get_genai_client():
 def get_chat_session(is_coach=False):
     """Initializes and returns an interactive chat object."""
     client = get_genai_client()
-    return client.chats.create(model=model,config=get_llm_config(is_coach))
+    return client.chats.create(model=model,config=get_model_config(is_coach))
 
 def get_streaming_response(query):
     client = get_genai_client()
@@ -147,7 +147,7 @@ def get_streaming_response(query):
     for chunk in client.models.generate_content_stream(
         model=model,
         contents=contents,
-        config=get_llm_config()
+        config=get_model_config()
     ):
         if text := chunk.text:
             yield text
@@ -168,7 +168,7 @@ def get_response(query):
     response = client.models.generate_content(
         model=model,
         contents=contents,
-        config=get_llm_config()
+        config=get_model_config()
     )
 
     return response.text
