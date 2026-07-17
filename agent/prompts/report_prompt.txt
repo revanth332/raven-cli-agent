@@ -1,9 +1,12 @@
-Created a detailed report on what user working from past {time_period} on current active project based on project memory. Project memory has logs with timestamps. You can extract past week or months based on the timestamps
-Refer the following example.
+Steps to generate <time_period>_report.md:
+- Get the current timestamp using `get_current_timestamp` tool.
+- Based on the ACTIVE PROJECT MEMORY you already know, extract the work that is done within the {time_period} span by comparing timestamps.
+- Create a brief report.
+- Refer the following example.
 EXAMPLE:
 This/These {time_period} I worked on following:
 - Created a request form for GCP request and integrated the apis
 - ...
 
-Finally:
-Save the report in a file with name <time_period>_report.py
+- FINALLY save the report in a file with name <time_period>_report.md
+- DON'T provide the report response in the conversation. Just report file creation with content in it is enough.

@@ -192,9 +192,9 @@ def run_agent_loop(chat_session,intial_input):
                     error_str = str(api_error)
                     if "429" in error_str or "exhausted" in error_str or "quota" in error_str:
                         if attempt < max_retries - 1:
+                            sleep_time = 2**(attempt+1)
                             msg = f"⏳ *API Rate Limit hit. (Retrying in {sleep_time}s)*"
                             console.print(Markdown(msg))
-                            sleep_time = 2**(attempt+1)
                             time.sleep(sleep_time)
                             continue
                         raise api_error
@@ -444,6 +444,26 @@ def report():
         console.print()
         console.rule("Chat closed")
         raise typer.Exit(1)
+
+@app.command()
+def eval():
+    """Runs the autonomous evaluation suite to verify Raven's patching accuracy."""
+    from agent.evals import run_eval_suite
+    run_eval_suite()
+
+@app.command()
+def tui():
+    """
+    Launch the multi-modal Textual UI.
+    """
+    from agent.tui import RavenTUI
+    try:
+        tui_app = RavenTUI()
+        tui_app.run()
+    except Exception as e:
+        console.print(f"[red]Error launching TUI: {e}[/red]")
+        raise typer.Exit(1)
+
 
 if __name__ == "__main__":
     app()
