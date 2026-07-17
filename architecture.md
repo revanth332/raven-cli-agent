@@ -1,11 +1,29 @@
 Project architecture:
 
- The core architecture follows a standard CLI agent pattern. `agent/main.py` acts as the entry point, routing commands to `agent/llm.py` for AI processing and to `agent/utils.py` for system interactions (like file operations and command execution). The `agent/llm.py` module depends heavily on the contextual prompts stored in the `agent/prompts/` directory. 
+ Updated the architecture map to reflect the new Textual multi-modal TUI interface (`agent/tui.py`), the codebase indexer (`agent/indexer.py`), the autonomous evals suite (`agent/evals.py`), and how they integrate into the system. 
 
  ```mermaid
 graph TD
-    A[agent/main.py] -- Routes AI Commands --> B(agent/llm.py)
-    A -- Uses for System Calls --> D(agent/utils.py)
-    B -- Loads Prompts --> C{agent/prompts/}
-    B -- Uses Utilities --> D
+    subgraph CLI / Interface Layer
+        M[agent/main.py] -->|CLI Commands & Entrypoint| T[agent/tui.py]
+    end
+
+    subgraph Core Logic Layer
+        T -->|Asynchronous Interaction| L[agent/llm.py]
+        M -->|Standard Console Loop| L
+        L -->|Semantic Vector Search| I[agent/indexer.py]
+    end
+
+    subgraph Prompt Templates
+        L -->|Loads Prompts| P{agent/prompts/}
+    end
+
+    subgraph System & Action Layer
+        L -->|Direct File Mod & Command Exec| U[agent/utils.py]
+        M -->|File/Command Utils| U
+    end
+
+    subgraph Testing & Validation
+        E[agent/evals.py] -->|Autonomous Evals Suite| L
+    end
 ```
