@@ -1,17 +1,22 @@
-# agent/tui.py
+
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Input, Static, Button, Label
+from textual.widgets import Footer, Static, Button, Label, TextArea
+from textual.binding import Binding
+from textual.message import Message
 from textual.containers import VerticalScroll,Horizontal,Grid,Vertical
-from textual.screen import ModalScreen
+from textual.widgets import OptionList
+from textual.widgets.option_list import Option
 from rich.markdown import Markdown
 from textual import work
-from agent.llm import get_chat_session
 from google.genai import types
 import threading
 from agent.main import TOOL_REGISTRY
 import time
 from rich.console import Group
 from rich.text import Text
+
+from agent.llm import get_chat_session
+from agent.utils import read_prompt_from_file
 
 raven_logo = """
  ██████╗  █████╗ ██╗   ██╗███████╗███╗   ██╗
@@ -21,6 +26,46 @@ raven_logo = """
  ██║  ██║██║  ██║ ╚████╔╝ ███████╗██║ ╚████║
  ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝
     """
+
+DEBUG_PROMPT = read_prompt_from_file("prompts/debug_prompt.txt")
+COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.txt")
+REPORT_PROMPT = read_prompt_from_file("prompts/report_prompt.txt")
+
+SLASH_COMMANDS = {
+    "/coach":{
+        "description":"Activate coach mode",
+        "placeholder":"/coach",
+        "system_prompt":COACH_PROMPT
+    },
+    "/debug":{
+        "description":"Activate debug mode",
+        "placeholder":"/debug",
+        "system_prompt":DEBUG_PROMPT
+    },
+    "/report":{
+        "description":"Generate past work report",
+        "placeholder":"/report <week/month/..>",
+        "system_prompt":REPORT_PROMPT
+    }
+}
+
+class ChatInput(TextArea):
+    BINDINGS = [
+        Binding("enter", "submit", "Submit", priority=True),
+        Binding("shift+enter", "newline", "Newline", priority=True),
+    ]
+
+    class Submitted(Message):
+        def __init__(self, text_area: "ChatInput", value: str) -> None:
+            self.text_area = text_area
+            self.value = value
+            super().__init__()
+
+    def action_submit(self) -> None:
+        self.post_message(self.Submitted(self, self.text))
+
+    def action_newline(self) -> None:
+        self.insert("\n")
 
 class PermissionBox(Static):
     """An inline safety box that renders directly inside the chat history."""
@@ -157,13 +202,25 @@ class RavenTUI(App):
         color: #ECFDF5;
     }
 
-    Input {
+    ChatInput {
         border: solid #06B6D4; /* Brilliant double sky-blue border */
         margin: 1 1;
         padding: 0 1;
         color: #F8FAFC;         /* Bright text while typing */
+        height: auto;
+        min-height: 3;
+        max-height: 10;
         background: transparent;
     }
+    
+    ChatInput > .text-area--background {
+        background: transparent;
+    }
+    
+    ChatInput:focus {
+        border: solid #06B6D4;
+    }
+    
     .permission-msg {
         padding: 1 1;
         margin: 1 0;
@@ -203,21 +260,82 @@ class RavenTUI(App):
         dock: bottom;
         height: auto;
     }
+    #autocomplete_list {
+        display: none;
+        layer: overlay;
+        dock: bottom;
+        offset-y: -6;
+        height: 6;
+        width: 1fr;
+        max-height:8;
+        background:#1e1e1e;
+        border:tall #00d7af;
+    }
     """
     # Define system hotkeys for the footer
     BINDINGS = [
+        ("escape", "cancel_generation", "Stop Generation"),
         ("q", "quit", "Quit"),
         ("ctrl+c", "quit", "Exit"),
     ]
 
+    active_suggestions = []
     def on_mount(self):
         """Runs the exact moment the UI mounts to the screen."""
         self.chat_session = None
 
         self.permission_event = threading.Event()
+        self.cancel_event = threading.Event()
         self.permission_result = False
+        self.is_generating = False
 
         self.initialize_ai()
+
+    def action_cancel_generation(self):
+        """Interrupts the active AI generation."""
+        self.cancel_event.set()
+        # Close option list if it's open, just in case
+        autocomplete = self.query_one("#autocomplete_list", OptionList)
+        if autocomplete.styles.display == "block":
+            autocomplete.styles.display = "none"
+
+    def on_text_area_changed(self, event):
+        val = event.text_area.text.strip()
+        autocomplete = self.query_one("#autocomplete_list",OptionList)
+        if val.startswith("/") and " " not in val:
+            matches = [(cmd,info) for cmd,info in SLASH_COMMANDS.items() if cmd.startswith(val)]
+            if matches:
+                autocomplete.clear_options()
+                self.active_suggestions = [m[0] for m in matches]
+
+                for cmd,info in matches:
+                    autocomplete.add_option(Option(prompt=f"{cmd:<10} - {info['description']}"))
+                autocomplete.styles.display = "block"
+                return
+        autocomplete.styles.display = "none"
+    
+    def on_key(self,event):
+        autocomplete = self.query_one("#autocomplete_list",OptionList)
+
+        if autocomplete.styles.display == "block":
+            if event.key == "down":
+                autocomplete.action_cursor_down()
+                event.prevent_default()
+            elif event.key == "up":
+                autocomplete.action_cursor_up()
+                event.prevent_default()
+            elif event.key in ["tab","enter"]:
+                selected_id = autocomplete.highlighted
+                if selected_id is not None and selected_id < len(self.active_suggestions):
+                    cmd = self.active_suggestions[selected_id]
+
+                    chat_input = self.query_one("#chat_input", ChatInput)
+                    chat_input.text = cmd + " "
+                    chat_input.action_cursor_line_end()
+
+                    autocomplete.styles.display = "none"
+                    event.prevent_default()
+            
 
     def ask_permission_ui(self,title:str,message:str):
         """Pushes the modal to the screen and handles the result."""
@@ -252,7 +370,7 @@ class RavenTUI(App):
         with VerticalScroll(id="history") as history:
             # Add a welcome card on boot
             yield Horizontal(
-                Static(f"[bold #06B6D4]{raven_logo}[/bold #06B6D4]", classes="logo-text"),
+                # Static(f"[bold #06B6D4]{raven_logo}[/bold #06B6D4]", classes="logo-text"),
                 Static(
                     f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
                     f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
@@ -263,15 +381,20 @@ class RavenTUI(App):
                 ),
                 id="welcome-container"
             )
+        yield OptionList(id="autocomplete_list")
         # Create a single docked container at the bottom
         with Vertical(id="bottom_bar"):
             yield Horizontal(id="thinking_container")
-            yield Input(placeholder="Ask Raven something... (Type 'exit' to quit)")
+            yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
             yield Footer()
 
     # --- EVENT HANDLERS ---
-    def on_input_submitted(self, event: Input.Submitted) -> None:
+    def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         """Triggers when the user presses 'Enter' in the input box."""
+        if self.is_generating:
+            self.notify("A response is currently generating. Please wait or press Esc to cancel.", title="Busy", severity="warning")
+            return
+
         user_input = event.value.strip()
         
         if not user_input:
@@ -280,10 +403,11 @@ class RavenTUI(App):
         if user_input.lower() in ["exit", "quit"]:
             self.exit()
             return
-
+        
+        self.query_one('#autocomplete_list',OptionList).styles.display = "none"
         # Clear the input box immediately for the next question
-        input_widget = event.input
-        input_widget.value = ""
+        input_widget = event.text_area
+        input_widget.text = ""
 
         # 1. Echo the user's message into the scrollable history area
         history_container = self.query_one("#history")
@@ -294,11 +418,24 @@ class RavenTUI(App):
         user_card.update(Markdown(user_input))
         history_container.mount(user_card)
 
+        if user_input.startswith("/"):
+            parts = user_input.split(" ",1)
+            cmd = parts[0].lower()
+            query = parts[1].lower().strip() if len(parts) > 1 else ""
+
+            if cmd == "/report":
+                user_input = SLASH_COMMANDS[cmd]['system_prompt'].replace("{timeperiod}",query)
+            elif query:
+                user_input = f"{SLASH_COMMANDS[cmd]['system_prompt']}\n {query}"
+            else:
+                self.notify(f"Unknown command {cmd}.", title="System", severity="error")
+
         # 2. Echo a mock response from Raven for now
         raven_card = Static()
         history_container.mount(raven_card)
         raven_card.scroll_visible()
 
+        self.is_generating = True
         self.stream_response(user_input,raven_card)
         
     
@@ -309,11 +446,15 @@ class RavenTUI(App):
             self.call_from_thread(raven_card.update, "[red]AI is still initializing. Please try again.[/red]")
             return
         start_time = time.time()
+        self.cancel_event.clear()
         try:
             thinking_container = self.query_one("#thinking_container")
             text_response = ""
             tool_logs = Text()
             while True:
+                if self.cancel_event.is_set():
+                    break
+                    
                 function_calls = []
                 max_retries = 5
                 thinking_message = ThinkingMessage("")
@@ -322,6 +463,8 @@ class RavenTUI(App):
                         self.call_from_thread(thinking_container.mount,thinking_message)
                         generator = self.chat_session.send_message_stream(query)
                         for chunk in generator:
+                            if self.cancel_event.is_set():
+                                break
 
                             if hasattr(chunk,"function_calls") and chunk.function_calls:
                                 function_calls.extend(chunk.function_calls)
@@ -350,11 +493,18 @@ class RavenTUI(App):
                 if thinking_message:
                     self.call_from_thread(thinking_message.remove)
 
+                if self.cancel_event.is_set():
+                    tool_logs.append("\n\nGeneration stopped by user.")
+                    break
+
                 if len(function_calls) == 0:
                     break
 
                 tool_responses = []
                 for fc in function_calls:
+                    if self.cancel_event.is_set():
+                        break
+                        
                     tool_name = fc.name
                     tool_args = fc.args
 
@@ -455,6 +605,8 @@ class RavenTUI(App):
                 
         except Exception as e:
             self.call_from_thread(raven_card.update, Markdown(f"**Error:** {e}"))
+        finally:
+            self.is_generating = False
 
 
 # --- To run it directly for testing ---
