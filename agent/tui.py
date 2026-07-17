@@ -349,6 +349,13 @@ class RavenTUI(App):
         
         # Scroll down so the user immediately sees the buttons
         box.scroll_visible()
+
+    def scroll_to_bottom(self):
+        """Scrolls the chat history container to the very bottom."""
+        try:
+            self.query_one("#history").scroll_end(animate=False)
+        except Exception:
+            pass
     
     @work(thread=True)
     def initialize_ai(self):
@@ -433,7 +440,7 @@ class RavenTUI(App):
         # 2. Echo a mock response from Raven for now
         raven_card = Static()
         history_container.mount(raven_card)
-        raven_card.scroll_visible()
+        self.scroll_to_bottom()
 
         self.is_generating = True
         self.stream_response(user_input,raven_card)
@@ -475,7 +482,7 @@ class RavenTUI(App):
                                     self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                                 else:
                                     self.call_from_thread(raven_card.update, Markdown(text_response))
-                                self.call_from_thread(raven_card.scroll_visible)
+                                self.call_from_thread(self.scroll_to_bottom)
                         break
                     except Exception as api_error:
                         if thinking_message:                                                                                                                                
@@ -529,7 +536,7 @@ class RavenTUI(App):
                                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                             else:
                                 self.call_from_thread(raven_card.update, tool_logs)
-                            self.call_from_thread(raven_card.scroll_visible)
+                            self.call_from_thread(self.scroll_to_bottom)
 
                         if tool_name == "patch_file":
                             file_path = tool_args.get("file_path", "Unknown")
@@ -565,7 +572,7 @@ class RavenTUI(App):
                                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                             else:
                                 self.call_from_thread(raven_card.update, tool_logs)
-                            self.call_from_thread(raven_card.scroll_visible)
+                            self.call_from_thread(self.scroll_to_bottom)
                         elif not tool_meta.get("ignore_display"):
                             display_name = tool_meta["display_name"]
                             arg_key = tool_meta["display_arg"]
@@ -578,7 +585,7 @@ class RavenTUI(App):
                                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                             else:
                                 self.call_from_thread(raven_card.update, tool_logs)
-                            self.call_from_thread(raven_card.scroll_visible)
+                            self.call_from_thread(self.scroll_to_bottom)
                         try:
                             result = tool_meta["fn"](**tool_args)
                         except Exception as e:
@@ -601,7 +608,7 @@ class RavenTUI(App):
                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
             else:
                 self.call_from_thread(raven_card.update, tool_logs)
-            self.call_from_thread(raven_card.scroll_visible)
+            self.call_from_thread(self.scroll_to_bottom)
                 
         except Exception as e:
             self.call_from_thread(raven_card.update, Markdown(f"**Error:** {e}"))

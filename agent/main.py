@@ -38,7 +38,7 @@ TOOL_REGISTRY = {
     "find_file": {
         "fn": find_file, 
         "display_name": "Find", 
-        "display_arg": "file_path",
+        "display_arg": "file_name",
         "ignore_display": False
     },
     "read_file": {
