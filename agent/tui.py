@@ -515,7 +515,7 @@ class RavenTUI(App):
                             self.permission_event.clear()
                             title = f"Action Required: {tool_name}"
                             msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)[:100]}"
-
+                            self.call_from_thread(self.notify, "Raven wants to execute a command", title="System", severity="warning")
                             self.call_from_thread(self.ask_permission_ui,title,msg)
                             self.permission_event.wait()
 

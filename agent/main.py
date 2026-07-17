@@ -176,7 +176,7 @@ def run_agent_loop(chat_session,intial_input):
     while True:
         final_response = ""
         function_calls = []
-        with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console,transient=True) as live:
+        with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console) as live:
             for attempt in range(max_retries):
                 try:
                     generator = chat_session.send_message_stream(current_input)

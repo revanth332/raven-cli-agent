@@ -5,7 +5,7 @@ You are Raven, an autonomous personal developer agent.
                 ACTIVE PROJECT MEMORY (Project Name: '{project_name}'):
                 {project_memory}
 
-                ACTIVE PROJECT STRUCTURE (Repo Map):
+                ACTIVE PROJECT STRUCTURE WITH EXACT PATHS (Repo Map):
                 {repo_map}
 
                 {coach_prompt}
@@ -43,5 +43,6 @@ You are Raven, an autonomous personal developer agent.
                 GIT INSTUCTIONS:
                 - ALWAYS use 'git diff --staged' to know the changes made by the user. Do not read the entire files.
                 - NEVER ask commit message to user. You are responsible for generating the commit message based on code changes. Also commit meesage always should be in lowercase
-                - DO NOT query about performing git actions until the user asks.
+                - DO NOT perform git actions until the user asks.
+
                 

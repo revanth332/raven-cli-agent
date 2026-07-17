@@ -5,6 +5,10 @@ from google import genai
 from google.genai import types
 from dotenv import load_dotenv
 import os
+import logging
+
+# Suppress the automatic function calling warning from google-genai
+logging.getLogger("google_genai").setLevel(logging.ERROR)
 
 from agent.utils import get_memory_content,save_to_memory,read_file,patch_file,find_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_project_memory,get_active_project_name,get_current_timestamp,get_repo_map,read_prompt_from_file,update_architecture_map,run_ui_test,get_llm_config,get_staged_git_changes,commit_staged_git_changes
 from agent.indexer import search_codebase
@@ -103,7 +107,8 @@ def get_model_config(is_coach:bool):
                 search_codebase_declaration,
                 get_staged_git_changes_dec,
                 commit_staged_git_changes_dec
-            ])
+            ]),
+            {"google_search": {}}
     ]
     config = types.GenerateContentConfig(
         tools=tools,
@@ -127,6 +132,8 @@ def get_genai_client():
             raise ValueError("Geni AI creds are missing!!!")
         _genai_client = genai.Client()
     return _genai_client
+
+
 
 def get_chat_session(is_coach=False):
     """Initializes and returns an interactive chat object."""

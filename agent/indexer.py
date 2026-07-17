@@ -143,6 +143,7 @@ def index_project():
 
     if not collection:
         print("Unable to find a project to index")
+        return "Unable to find a project to index. Codebase searching is not possible"
 
     IGNORE_DIRS = {'node_modules', '.git', 'venv', 'env', '.venv', '__pycache__', 'dist', 'build', '.agents'}
     CODE_EXTS = (".py", ".js", ".jsx", ".ts", ".tsx")

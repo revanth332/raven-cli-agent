@@ -241,28 +241,32 @@ def patch_file(file_path:str,search_block:str,replace_block:str):
     except Exception as e:
         return f"Failed to patch file '{file_path}': {e}"
 
-def find_file(file_path:str):
+def find_file(file_name:str):
     """
     Use this tool to search for a specific file in the current project directory.
+    Accepts both simple filenames (e.g., 'auth.py') and relative/partial paths (e.g., 'security/auth.py').
     Args:
-        file_path: The exact name of the file to search for.
+        file_name: The file name or exact partial relative path to search for.
     Returns:
         A list of matching filepaths, or a message saying no matches were found.
     """
     IGNORE_DIRS = {'node_modules', '.git', 'venv', 'env', '.venv', '__pycache__', 'dist', 'build'}
     matches = []
+    normalized_file_path = Path(file_name).as_posix()
     for root,dirs,files in os.walk("."):
         # Filter directories dynamically to skip standard ignored folders and any custom venvs
         dirs[:] = [
             d for d in dirs 
             if d not in IGNORE_DIRS and not (Path(root) / d / "pyvenv.cfg").exists()
         ]
-
-        if file_path in files:
-            matches.append(Path(root) / file_path)
+        for file in files:
+            rel_path = Path(root) / file
+            rel_path = rel_path.as_posix()
+            if file == normalized_file_path or rel_path.endswith(normalized_file_path):
+                matches.append(rel_path)
 
     if not matches:
-        return f"File '{file_path}' not found."
+        return f"File '{file_name}' not found."
     return str([str(m) for m in matches])
 
 def read_file(file_path:str):
