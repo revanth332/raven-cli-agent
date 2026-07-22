@@ -43,6 +43,9 @@ This is a Python-based Command Line Interface (CLI) agent, likely designed for a
 3.  **Environment Variables:**
     The project uses a `.env` file for configuration. Please create or update it with necessary environment variables required for the agent to function.
 
+4.  VertexAI setup:
+    https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/start
+
 ## ▶️ Running the Agent
 
 To execute the CLI agent, you would typically run it via the installed entry point or directly via Python.

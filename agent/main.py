@@ -181,11 +181,14 @@ def run_agent_loop(chat_session,intial_input):
                 try:
                     generator = chat_session.send_message_stream(current_input)
                     for chunk in generator:
-                        if chunk.function_calls:
-                            function_calls.extend(chunk.function_calls)
+                        if not chunk.choices:
                             continue
-                        if hasattr(chunk,'text') and chunk.text:
-                            final_response += chunk.text
+                        delta = chunk.choices[0].delta
+                        if delta.tool_calls:
+                            function_calls.extend(delta.tool_calls)
+                            continue
+                        if delta.content:
+                            final_response += delta.content
                             live.update(Markdown(final_response))
                     break
                 except Exception as api_error:
@@ -286,6 +289,124 @@ def run_agent_loop(chat_session,intial_input):
             )
 
         current_input = tool_responses
+
+# def run_agent_loop(chat_session,intial_input):
+#     """The core multi-turn engine of Raven"""
+#     current_input = intial_input
+#     max_retries = 5
+#     while True:
+#         final_response = ""
+#         function_calls = []
+#         with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console) as live:
+#             for attempt in range(max_retries):
+#                 try:
+#                     generator = chat_session.send_message_stream(current_input)
+#                     for chunk in generator:
+#                         if chunk.function_calls:
+#                             function_calls.extend(chunk.function_calls)
+#                             continue
+#                         if hasattr(chunk,'text') and chunk.text:
+#                             final_response += chunk.text
+#                             live.update(Markdown(final_response))
+#                     break
+#                 except Exception as api_error:
+#                     error_str = str(api_error)
+#                     if "429" in error_str or "exhausted" in error_str or "quota" in error_str:
+#                         if attempt < max_retries - 1:
+#                             sleep_time = 2**(attempt+1)
+#                             msg = f"⏳ *API Rate Limit hit. (Retrying in {sleep_time}s)*"
+#                             console.print(Markdown(msg))
+#                             time.sleep(sleep_time)
+#                             continue
+#                         raise api_error
+                
+#                 # Clear or hide the live thinking display if no text was streamed (i.e., only function calls were found)
+#                 if not final_response:
+#                     live.update(Text(""))
+#         if len(function_calls) == 0:
+#             break
+#         tool_responses = []
+#         for fc in function_calls:
+#             tool_name = fc.name
+#             tool_args = fc.args
+
+#             if tool_name == "patch_file":
+#                 file_path = tool_args.get('file_path', 'Unknown')
+#                 console.print(f"[bold cyan]• Update[/bold cyan]([dim]{file_path}[/dim])")
+                
+#                 search_lines = tool_args.get('search_block', '').rstrip().split('\n')
+#                 replace_lines = tool_args.get('replace_block', '').rstrip().split('\n')
+                
+#                 # Print Red Background for removed lines
+#                 for line in search_lines:
+#                     # We use Text() to prevent Rich from crashing on code brackets []
+#                     t = Text(f"- {line}")
+#                     t.stylize("bold white on red")
+#                     console.print(t)
+                    
+#                 # Print Green Background for added lines
+#                 for line in replace_lines:
+#                     t = Text(f"+ {line}")
+#                     t.stylize("bold white on dark_green")
+#                     console.print(t)
+                
+#                 console.print()
+
+#             if tool_name == "execute_command":
+#                 console.print(f"[bold red]• Execute[/bold red]([dim]{tool_args['command']}[/dim])")
+                
+#                 confirmed = typer.confirm("Allow Raven to execute this command?")
+#                 if not confirmed:
+#                     result = "Error: User denied permission to execute this terminal command."
+#                     tool_responses.append(
+#                         types.Part.from_function_response(name=tool_name, response={"result": result})
+#                     )
+#                     continue
+            
+#             if tool_name == "run_ui_test":
+#                 console.print(f"[bold red]• Browser[/bold red]()")
+
+#                 confirmed = typer.confirm("Raven wants to run a UI Automation Script. Allow?")
+#                 if not confirmed:
+#                     result = "Error: User denied permission to execute this automation script."
+#                     tool_responses.append(
+#                         types.Part.from_function_response(name=tool_name, response={"result": result})
+#                     )
+#                     continue
+
+#             if tool_name == "commit_staged_git_changes":
+#                 console.print(f"[bold cyan]• Commit[/bold cyan]([dim]{tool_args['message']}[/dim]{',[red]unverified[/red]' if not tool_args['is_verified'] else ''})")
+#                 confirmed = typer.confirm("Raven wants to commit the changes. Allow?")
+#                 if not confirmed:
+#                     result = "Error: User denied permission to commit the changes."
+#                     tool_responses.append(
+#                         types.Part.from_function_response(name=tool_name, response={"result": result})
+#                     )
+#                     continue
+#             if tool_name in TOOL_REGISTRY:
+#                 tool_meta = TOOL_REGISTRY[tool_name]
+                
+#                 if not tool_meta.get("ignore_display"):
+#                     display_name = tool_meta["display_name"]
+#                     arg_key = tool_meta["display_arg"]
+                    
+#                     display_val = tool_args.get(arg_key, "") if arg_key else ""
+#                     console.print(f"[bold cyan]• {display_name}[/bold cyan]([dim]{display_val}[/dim])")
+#                 try:
+#                     result = TOOL_REGISTRY[tool_name]["fn"](**tool_args)
+#                 except Exception as e:
+#                     result = f"Error executing {tool_name}: {e}"
+#             else:
+#                 result = f"Error: Tool {tool_name} not found in registry."
+        
+#             tool_responses.append(
+#                 types.Part.from_function_response(
+#                     name=tool_name,
+#                     response={"result":result}
+#                 )
+#             )
+
+#         current_input = tool_responses
 
 def start_chat_session(chat_session):
     while (True):
@@ -419,7 +540,7 @@ def model():
     """
     active_model = get_active_llm_model()
     console.print(f"[magenta]Active Model: [/magenta][dim]{active_model}[/dim]")
-    model = questionary.select("Select the model:",choices=["gemini-3.5-flash","gemini-3.1-flash-lite","gemini-3.1-pro-preview","gemini-3-flash-preview"]).ask()
+    model = questionary.select("Select the model:",choices=["google/gemini-3.6-flash","google/gemini-3.5-flash","google/gemini-3.1-flash-lite","google/gemini-3.1-pro-preview","google/gemini-3-flash-preview"]).ask()
     if model:
         update_llm_model(model)
 

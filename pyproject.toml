@@ -12,6 +12,7 @@ dependencies = [
     "rich>=13.0.0",
     "python-dotenv",
     "google-genai",
+    "openai",
     "playwright",
     "questionary",
     "tree-sitter",
