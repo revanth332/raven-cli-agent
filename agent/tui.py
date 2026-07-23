@@ -521,7 +521,7 @@ class RavenTUI(App):
                         if tool_name in ["execute_command", "run_ui_test"]:
                             self.permission_event.clear()
                             title = f"Action Required: {tool_name}"
-                            msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)[:100]}"
+                            msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)}"
                             self.call_from_thread(self.notify, "Raven wants to execute a command", title="System", severity="warning")
                             self.call_from_thread(self.ask_permission_ui,title,msg)
                             self.permission_event.wait()
@@ -531,7 +531,7 @@ class RavenTUI(App):
                                 tool_responses.append(types.Part.from_function_response(name=tool_name, response={"result": result}))
                                 continue
                             tool_logs.append(f"\n• {tool_name}")
-                            tool_logs.append(f"({str(tool_args)[:100]})\n",style="dim white")
+                            tool_logs.append(f"({str(tool_args)})\n",style="dim white")
                             if text_response:
                                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                             else:
