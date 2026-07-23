@@ -321,19 +321,40 @@ class OpenRouterChatSession:
         project_name = get_active_project_name()
         repo_map = get_repo_map()
         COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.txt") if is_coach else ""
+
         self.system_prompt = read_prompt_from_file('prompts/system_prompt.txt').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT)
+        self.messages = [{"role":"system","content":self.system_prompt}]
 
     def send_message_stream(self,query):
+        """
+        Sends the current chat history stream. 
+        If a query is passed, it appends it as a new user message first.
+        If query is None, it continues the loop (e.g., passing back tool outputs).
+        """
+        if query is not None:
+            self.messages.append({"role":"user","content":query})
+        print(self.messages)
         tools = get_openai_tools()
         response = self.client.chat.completions.create(
             model=self.model_name,
-            messages=[{"role":"system","content":self.system_prompt},{"role":"user","content":query}],
+            messages=self.messages,
             tools=tools,
             stream=True
         )
 
         return response
-
+    def add_message(self,role,content=None,tool_call_id=None,name=None,tool_calls=None):
+        """Helper to append structured assistant or tool returns to history"""
+        msg = {"role":role}
+        if content is not None:
+            msg["content"] = content
+        if tool_call_id is not None:
+            msg["tool_call_id"] = tool_call_id
+        if name is not None:
+            msg["name"] = name
+        if tool_calls is not None:
+            msg["tool_calls"] = None
+        self.messages.append(msg)
 
 def get_model_config(is_coach:bool):
     client = get_genai_client()
@@ -453,12 +474,13 @@ def get_genai_client():
                 raise ValueError("Geni AI creds are missing!!!")
 
             credentials,_ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-            credentials.refresh(google.auth.transport.Request())
+            credentials.refresh(google.auth.transport.requests.Request())
             api_key = credentials.token
-            base_url = f"https://{LOCATION}-aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/openapi"
+            base_url = f"https://{LOCATION+'-' if LOCATION != 'global' else ''}aiplatform.googleapis.com/v1/projects/{PROJECT_ID}/locations/{LOCATION}/endpoints/openapi"
         else:
             base_url = "https://openrouter.ai/api/v1"
             api_key = os.getenv("OPENROUTER_API_KEY")
+        print(base_url)
         _genai_client = OpenAI(
             base_url=base_url,
             api_key=api_key

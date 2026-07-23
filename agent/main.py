@@ -175,7 +175,7 @@ def run_agent_loop(chat_session,intial_input):
     max_retries = 5
     while True:
         final_response = ""
-        function_calls = []
+        function_calls = {}
         with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console) as live:
             for attempt in range(max_retries):
                 try:
@@ -185,7 +185,16 @@ def run_agent_loop(chat_session,intial_input):
                             continue
                         delta = chunk.choices[0].delta
                         if delta.tool_calls:
-                            function_calls.extend(delta.tool_calls)
+                            for tool_call in delta.tool_calls:
+                                tool_idx = tool_call.index
+                                if tool_idx not in function_calls:
+                                    function_calls[tool_idx] = {"id":"","name":"","arguments":""}
+                                if tool_call.id:
+                                    function_calls[tool_idx]["id"] = tool_call.id
+                                if tool_call.function.name:
+                                    function_calls[tool_idx]["name"] += tool_call.function.name
+                                if tool_call.function.arguments:
+                                    function_calls[tool_idx]["arguments"] += tool_call.function.arguments
                             continue
                         if delta.content:
                             final_response += delta.content
@@ -203,14 +212,24 @@ def run_agent_loop(chat_session,intial_input):
                         raise api_error
                 
                 # Clear or hide the live thinking display if no text was streamed (i.e., only function calls were found)
-                if not final_response:
-                    live.update(Text(""))
-        if len(function_calls) == 0:
+            if not final_response:
+                live.update(Text(""))
+        if not function_calls:
             break
-        tool_responses = []
-        for fc in function_calls:
-            tool_name = fc.name
-            tool_args = fc.args
+        tool_calls_to_append = []
+        tool_responses_to_append = []
+        for _,fc in function_calls.items():
+            tool_name = fc["name"]
+            tool_args = json.loads(fc["arguments"])
+
+            tool_calls_to_append.append({
+                "id":fc["id"],
+                "type":"function",
+                "function":{
+                    "name":fc["name"],
+                    "arguments":fc["arguments"]
+                }
+            })
 
             if tool_name == "patch_file":
                 file_path = tool_args.get('file_path', 'Unknown')
@@ -231,39 +250,48 @@ def run_agent_loop(chat_session,intial_input):
                     t = Text(f"+ {line}")
                     t.stylize("bold white on dark_green")
                     console.print(t)
-                
+
                 console.print()
 
-            if tool_name == "execute_command":
+            elif tool_name == "execute_command":
                 console.print(f"[bold red]• Execute[/bold red]([dim]{tool_args['command']}[/dim])")
                 
                 confirmed = typer.confirm("Allow Raven to execute this command?")
                 if not confirmed:
                     result = "Error: User denied permission to execute this terminal command."
-                    tool_responses.append(
-                        types.Part.from_function_response(name=tool_name, response={"result": result})
-                    )
+                    tool_responses_to_append.append({
+                        "role": "tool",
+                        "tool_call_id": fc["id"],
+                        "name": fc["name"],
+                        "content": result
+                    })
                     continue
             
-            if tool_name == "run_ui_test":
+            elif tool_name == "run_ui_test":
                 console.print(f"[bold red]• Browser[/bold red]()")
 
                 confirmed = typer.confirm("Raven wants to run a UI Automation Script. Allow?")
                 if not confirmed:
                     result = "Error: User denied permission to execute this automation script."
-                    tool_responses.append(
-                        types.Part.from_function_response(name=tool_name, response={"result": result})
-                    )
+                    tool_responses_to_append.append({
+                                            "role": "tool",
+                                            "tool_call_id": fc["id"],
+                                            "name": fc["name"],
+                                            "content": result
+                                        })
                     continue
 
-            if tool_name == "commit_staged_git_changes":
+            elif tool_name == "commit_staged_git_changes":
                 console.print(f"[bold cyan]• Commit[/bold cyan]([dim]{tool_args['message']}[/dim]{',[red]unverified[/red]' if not tool_args['is_verified'] else ''})")
                 confirmed = typer.confirm("Raven wants to commit the changes. Allow?")
                 if not confirmed:
                     result = "Error: User denied permission to commit the changes."
-                    tool_responses.append(
-                        types.Part.from_function_response(name=tool_name, response={"result": result})
-                    )
+                    tool_responses_to_append.append({
+                                        "role": "tool",
+                                        "tool_call_id": fc["id"],
+                                        "name": fc["name"],
+                                        "content": result
+                                    })
                     continue
             if tool_name in TOOL_REGISTRY:
                 tool_meta = TOOL_REGISTRY[tool_name]
@@ -281,14 +309,17 @@ def run_agent_loop(chat_session,intial_input):
             else:
                 result = f"Error: Tool {tool_name} not found in registry."
         
-            tool_responses.append(
-                types.Part.from_function_response(
-                    name=tool_name,
-                    response={"result":result}
-                )
-            )
-
-        current_input = tool_responses
+            tool_responses_to_append.append({
+                                        "role": "tool",
+                                        "tool_call_id": fc["id"],
+                                        "name": fc["name"],
+                                        "content": json.dumps(result)
+                                    })
+        
+        chat_session.add_message("assistant",tool_calls=tool_calls_to_append)
+        for tool_response in tool_responses_to_append:
+            chat_session.add_message(role="tool",tool_call_id=tool_response["tool_call_id"],name=tool_response["name"],content=tool_response["content"])
+        current_input = None
 
 # def run_agent_loop(chat_session,intial_input):
 #     """The core multi-turn engine of Raven"""
@@ -540,7 +571,7 @@ def model():
     """
     active_model = get_active_llm_model()
     console.print(f"[magenta]Active Model: [/magenta][dim]{active_model}[/dim]")
-    model = questionary.select("Select the model:",choices=["google/gemini-3.6-flash","google/gemini-3.5-flash","google/gemini-3.1-flash-lite","google/gemini-3.1-pro-preview","google/gemini-3-flash-preview"]).ask()
+    model = questionary.select("Select the model:",choices=["google/gemini-3.6-flash","google/gemini-3.5-flash","google/gemini-3.1-flash-lite","google/gemini-3.1-pro-preview","google/gemini-3-flash-preview","google/gemma-4-31b-it:free","nvidia/nemotron-3-super-120b-a12b:free","moonshotai/kimi-k2.6","z-ai/glm-5.2"]).ask()
     if model:
         update_llm_model(model)
 
