@@ -333,7 +333,6 @@ class OpenRouterChatSession:
         """
         if query is not None:
             self.messages.append({"role":"user","content":query})
-        print(self.messages)
         tools = get_openai_tools()
         response = self.client.chat.completions.create(
             model=self.model_name,
@@ -353,7 +352,7 @@ class OpenRouterChatSession:
         if name is not None:
             msg["name"] = name
         if tool_calls is not None:
-            msg["tool_calls"] = None
+            msg["tool_calls"] = tool_calls
         self.messages.append(msg)
 
 def get_model_config(is_coach:bool):

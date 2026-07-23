@@ -209,7 +209,7 @@ def run_agent_loop(chat_session,intial_input):
                             console.print(Markdown(msg))
                             time.sleep(sleep_time)
                             continue
-                        raise api_error
+                    raise api_error
                 
                 # Clear or hide the live thinking display if no text was streamed (i.e., only function calls were found)
             if not final_response:
