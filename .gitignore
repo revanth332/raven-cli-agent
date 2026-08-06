@@ -26,3 +26,4 @@ Thumbs.db
 
 # Untracked files
 testing.py
+.raven/

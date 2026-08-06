@@ -300,7 +300,7 @@ def create_file(file_path: str, content: str = "") -> str:
         
         # Guard clause: Prevent wiping out an existing file
         if path.exists():
-            return f"Error: File '{file_path}' already exists. Use write_file to overwrite it."
+            return f"Error: File '{file_path}' already exists."
             
         # Ensure parent directories exist before creating the file
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -417,19 +417,6 @@ def update_llm_model(model:str):
     else:
         config = {"model":model}
     config_file.write_text(json.dumps(config),encoding='utf-8')
-
-def get_active_llm_model():
-    """
-    Provides the current active LLM model
-    """
-    config_file = Path.home() / ".raven" / "config.json"
-    if config_file.exists():
-        try:
-            config = json.loads(config_file.read_text(encoding="utf-8"))
-            return config["model"]
-        except Exception as e:
-            return None
-    return None
         
 
 def get_llm_config():
