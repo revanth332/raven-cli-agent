@@ -27,9 +27,13 @@ raven_logo = """
  ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝
     """
 
-DEBUG_PROMPT = read_prompt_from_file("prompts/debug_prompt.txt")
-COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.txt")
-REPORT_PROMPT = read_prompt_from_file("prompts/report_prompt.txt")
+DEBUG_PROMPT = read_prompt_from_file("prompts/debug_prompt.md")
+COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.md")
+REPORT_PROMPT = read_prompt_from_file("prompts/report_prompt.md")
+REVIEW_PROMPT = read_prompt_from_file("prompts/review_prompt.md")
+PLAN_PROMPT = read_prompt_from_file("prompts/plan_prompt.md")
+ASK_PROMPT = read_prompt_from_file("prompts/ask_prompt.md")
+EXPLAIN_PROMPT=read_prompt_from_file("prompts/explain_prompt.md")
 
 SLASH_COMMANDS = {
     "/coach":{
@@ -46,6 +50,26 @@ SLASH_COMMANDS = {
         "description":"Generate past work report",
         "placeholder":"/report <week/month/..>",
         "system_prompt":REPORT_PROMPT
+    },
+    "/plan":{
+        "description":"Generate a comprehensive plan",
+        "placeholder":"/plan",
+        "system_prompt":PLAN_PROMPT
+    },
+    "/review":{
+        "description":"Generates a comprehensive code review",
+        "placeholder":"/review <week/month/..>",
+        "system_prompt":REVIEW_PROMPT
+    },
+    "/ask":{
+        "description":"Generates a architectural guidance",
+        "placeholder":"/ask <week/month/..>",
+        "system_prompt":ASK_PROMPT
+    },
+    "/explain":{
+        "description":"Generates a comprehensive explanation",
+        "placeholder":"/explain <week/month/..>",
+        "system_prompt":EXPLAIN_PROMPT
     }
 }
 
@@ -145,7 +169,6 @@ class ThinkingMessage(Static):
         super().update("● ")
 
 class RavenTUI(App):
-    # --- CLAUDE-STYLE CSS STYLING ---
     CSS = """
     Screen {
         color: #E2E8F0;      /* Crisp, bright off-white text */
@@ -432,10 +455,8 @@ class RavenTUI(App):
 
             if cmd == "/report":
                 user_input = SLASH_COMMANDS[cmd]['system_prompt'].replace("{timeperiod}",query)
-            elif query:
-                user_input = f"{SLASH_COMMANDS[cmd]['system_prompt']}\n {query}"
             else:
-                self.notify(f"Unknown command {cmd}.", title="System", severity="error")
+                user_input = f"{SLASH_COMMANDS[cmd]['system_prompt']}\n {query}"
 
         # 2. Echo a mock response from Raven for now
         raven_card = Static()

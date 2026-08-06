@@ -27,7 +27,7 @@ def get_model_config(is_coach:bool):
     repo_map = get_repo_map()
     COACH_PROMPT = ""
     if is_coach:
-        COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.txt")
+        COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.md")
     save_to_memory_declaration = types.FunctionDeclaration.from_callable(
         client=client,
         callable=save_to_memory
@@ -113,7 +113,7 @@ def get_model_config(is_coach:bool):
     config = types.GenerateContentConfig(
         tools=tools,
         system_instruction=[
-            types.Part.from_text(text=read_prompt_from_file('prompts/system_prompt.txt')
+            types.Part.from_text(text=read_prompt_from_file('prompts/system_prompt.md')
                                 .replace("{global_memory}", global_memory)
                                 .replace("{project_name}", project_name)
                                 .replace("{project_memory}", project_memory)
