@@ -39,7 +39,7 @@ TOOL_REGISTRY = {
         "fn": find_file, 
         "display_name": "Find", 
         "display_arg": "file_name",
-        "ignore_display": False
+        "ignore_display": True
     },
     "read_file": {
         "fn": read_file, 
@@ -63,7 +63,7 @@ TOOL_REGISTRY = {
         "fn": get_current_timestamp, 
         "display_name": "Time", 
         "display_arg": None, 
-        "ignore_display": True # Awesome use case for this! Hides background checks.
+        "ignore_display": True
     },
     "save_concept": {
         "fn": save_concept, 
@@ -115,9 +115,9 @@ TOOL_REGISTRY = {
     },
     "commit_staged_git_changes":{
         "fn": commit_staged_git_changes,
-        "display_name": "Commit chanegs",
-        "display_arg": "message",
-        "ignore_display": True
+        "display_name": "Commit changes",
+        "display_arg": ["message"],
+        "ignore_display": False
     },
 }
 
@@ -254,7 +254,7 @@ def run_agent_loop(chat_session,intial_input):
                     continue
 
             if tool_name == "commit_staged_git_changes":
-                console.print(f"[bold cyan]• Commit[/bold cyan]([dim]{tool_args['message']}[/dim]{',[red]unverified[/red]' if not tool_args['is_verified'] else ''})")
+                console.print(f"[bold cyan]• Commit[/bold cyan]([dim]{tool_args['message']}[/dim])")
                 confirmed = typer.confirm("Raven wants to commit the changes. Allow?")
                 if not confirmed:
                     result = "Error: User denied permission to commit the changes."

@@ -26,3 +26,5 @@ Thumbs.db
 
 # Untracked files
 testing.py
+node_modules/
+work/

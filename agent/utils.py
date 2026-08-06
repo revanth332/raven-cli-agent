@@ -497,20 +497,17 @@ def get_staged_git_changes():
     except subprocess.CalledProcessError as e:
         return f"Failed to get the staged changes {e}"
     
-def commit_staged_git_changes(message:str,is_verified:bool):
+def commit_staged_git_changes(message:str):
     """
-    Use this tool to commit the code with a commit message. Commit can be verfied or unverified(--no-verify).
+    Use this tool to commit the code with a commit message.
 
     Args:
         message: commit message related to the code changes
-        is_verified: True/False to decide whether include '--no-verify' in commit command
     Returns:
         Success or error message regarding the commit operation
     """
     try:
         command = ["git", "commit", "-m", message]
-        if not is_verified:
-            command.append("--no-verify")
         subprocess.run(command, check=True)
         return "Successfully committed the changes"
     except subprocess.CalledProcessError as e:

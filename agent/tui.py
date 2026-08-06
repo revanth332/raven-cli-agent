@@ -518,11 +518,10 @@ class RavenTUI(App):
                     if tool_name in TOOL_REGISTRY:
                         tool_meta = TOOL_REGISTRY[tool_name]
                         
-                        if tool_name in ["execute_command", "run_ui_test"]:
+                        if tool_name in ["execute_command", "run_ui_test","commit_staged_git_changes"]:
                             self.permission_event.clear()
                             title = f"Action Required: {tool_name}"
                             msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)}"
-                            self.call_from_thread(self.notify, "Raven wants to execute a command", title="System", severity="warning")
                             self.call_from_thread(self.ask_permission_ui,title,msg)
                             self.permission_event.wait()
 
@@ -530,7 +529,7 @@ class RavenTUI(App):
                                 result = "Error: User denied permission."
                                 tool_responses.append(types.Part.from_function_response(name=tool_name, response={"result": result}))
                                 continue
-                            tool_logs.append(f"\n• {tool_name}")
+                            tool_logs.append(f"\n• {tool_meta["display_name"]}")
                             tool_logs.append(f"({str(tool_args)})\n",style="dim white")
                             if text_response:
                                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
@@ -575,12 +574,17 @@ class RavenTUI(App):
                             self.call_from_thread(self.scroll_to_bottom)
                         elif not tool_meta.get("ignore_display"):
                             display_name = tool_meta["display_name"]
-                            arg_key = tool_meta["display_arg"]
-                            display_val = tool_args.get(arg_key, "") if arg_key else ""
-                            
-                            # Add a bold bullet circle before the tool name
                             tool_logs.append(f"\n• {display_name}")
-                            tool_logs.append(f"({display_val})\n",style="dim white")
+
+                            arg_keys = tool_meta["display_arg"]
+                            if arg_keys:
+                                if(isinstance(arg_keys,str)):
+                                    display_val = tool_args.get(arg_keys, "") if arg_keys else ""
+                                if(isinstance(arg_keys,list)):
+                                    display_val = ",".join([tool_args.get(key, "") for key in arg_keys])
+                                tool_logs.append(f"({display_val})\n",style="dim white")
+                            else:
+                                tool_logs.append("\n")
                             if text_response:
                                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                             else:
