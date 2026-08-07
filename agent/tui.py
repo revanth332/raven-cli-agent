@@ -1,14 +1,13 @@
 
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Static, Button, Label, TextArea
+from textual.widgets import Footer, Static, Button, TextArea
 from textual.binding import Binding
 from textual.message import Message
-from textual.containers import VerticalScroll,Horizontal,Grid,Vertical
+from textual.containers import VerticalScroll,Horizontal,Vertical
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 from rich.markdown import Markdown
 from textual import work
-from google.genai import types
 import threading
 from agent.main import TOOL_REGISTRY
 import time
@@ -16,7 +15,10 @@ from rich.console import Group
 from rich.text import Text
 
 from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file
+from agent.utils import read_prompt_from_file,get_active_project_name
+from agent.settings import settings
+
+import json
 
 raven_logo = """
  ██████╗  █████╗ ██╗   ██╗███████╗███╗   ██╗
@@ -385,6 +387,7 @@ class RavenTUI(App):
         """Background task to load credentials and initialize Gemini."""
         try:
             self.chat_session = get_chat_session()
+            self.is_generating = False
             self.call_from_thread(self.notify, "Raven AI Engine initialized!", title="System", severity="information")
         except Exception as e:
             self.call_from_thread(self.notify, f"Error initializing AI: {e}", title="Error", severity="error")
@@ -392,15 +395,13 @@ class RavenTUI(App):
     def compose(self) -> ComposeResult:
         """Assembles the physical widgets on the screen."""
         # VerticalScroll acts as our scrollable conversation container
-        from agent.utils import get_active_llm_model
-        from pathlib import Path
-        active_model = get_active_llm_model()
-        current_project = Path.cwd().name
+        active_model = settings.RAVEN_MODEL
+        current_project = get_active_project_name()
         
         with VerticalScroll(id="history") as history:
             # Add a welcome card on boot
             yield Horizontal(
-                # Static(f"[bold #06B6D4]{raven_logo}[/bold #06B6D4]", classes="logo-text"),
+                Static(f"[bold #06B6D4]{raven_logo}[/bold #06B6D4]", classes="logo-text"),
                 Static(
                     f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
                     f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
@@ -483,7 +484,7 @@ class RavenTUI(App):
                 if self.cancel_event.is_set():
                     break
                     
-                function_calls = []
+                function_calls = {}
                 max_retries = 5
                 thinking_message = ThinkingMessage("")
                 for attempt in range(max_retries):
@@ -493,12 +494,26 @@ class RavenTUI(App):
                         for chunk in generator:
                             if self.cancel_event.is_set():
                                 break
-
-                            if hasattr(chunk,"function_calls") and chunk.function_calls:
-                                function_calls.extend(chunk.function_calls)
+                            if not chunk.choices:
                                 continue
-                            if hasattr(chunk,"text") and chunk.text:
-                                text_response += chunk.text
+                            delta = chunk.choices[0].delta
+                            if hasattr(delta,"tool_calls") and delta.tool_calls:
+                                for tool_call in delta.tool_calls:
+                                    tool_idx = tool_call.index
+                                    if tool_idx not in function_calls:
+                                        function_calls[tool_idx] = {"id":"","name":"","arguments":""}
+                                    if tool_call.id:
+                                        function_calls[tool_idx]["id"] = tool_call.id
+                                    if tool_call.function.name:
+                                        function_calls[tool_idx]["name"] += tool_call.function.name
+                                    if tool_call.function.arguments:
+                                        function_calls[tool_idx]["arguments"] += tool_call.function.arguments
+                                    if getattr(tool_call, 'extra_content', None):
+                                        if isinstance(tool_call.extra_content,str): function_calls[tool_idx]["extra_content"] += tool_call.extra_content
+                                        else: function_calls[tool_idx]["extra_content"] = tool_call.extra_content
+                            
+                            if hasattr(delta,"content") and delta.content:
+                                text_response += delta.content
                                 if tool_logs:
                                     self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                                 else:
@@ -513,11 +528,11 @@ class RavenTUI(App):
                             if attempt < max_retries - 1:
                                 # Exponential backoff: 2, 4, 8, 16 seconds...
                                 sleep_time = 2 ** (attempt + 1) 
-                                msg = f"⏳ *API Rate Limit hit. (Retrying in {sleep_time}s)*"
+                                msg = f"*API Rate Limit hit. (Retrying in {sleep_time}s)*"
                                 self.call_from_thread(raven_card.update, Markdown(msg))
                                 time.sleep(sleep_time)
                                 continue
-                            raise api_error
+                        raise api_error
                 if thinking_message:
                     self.call_from_thread(thinking_message.remove)
 
@@ -525,16 +540,29 @@ class RavenTUI(App):
                     tool_logs.append("\n\nGeneration stopped by user.")
                     break
 
-                if len(function_calls) == 0:
+                if not function_calls:
                     break
 
-                tool_responses = []
-                for fc in function_calls:
+                tool_calls_to_append = []
+                tool_responses_to_append = []
+                for _,fc in function_calls.items():
                     if self.cancel_event.is_set():
                         break
                         
-                    tool_name = fc.name
-                    tool_args = fc.args
+                    tool_name = fc["name"]
+                    try:
+                        tool_args = json.loads(fc["arguments"])
+                    except Exception as e:
+                        raise e
+                    tool_calls_to_append.append({
+                        "id":fc["id"],
+                        "type":"function",
+                        "function":{
+                            "name":fc["name"],
+                            "arguments":fc["arguments"]
+                        },
+                        "extra_content":fc.get("extra_content","")
+                    })
 
                     if tool_name in TOOL_REGISTRY:
                         tool_meta = TOOL_REGISTRY[tool_name]
@@ -548,9 +576,14 @@ class RavenTUI(App):
 
                             if not self.permission_result:
                                 result = "Error: User denied permission."
-                                tool_responses.append(types.Part.from_function_response(name=tool_name, response={"result": result}))
+                                tool_responses_to_append.append({
+                                                            "role": "tool",
+                                                            "tool_call_id": fc["id"],
+                                                            "name": fc["name"],
+                                                            "content": result
+                                                        })
                                 continue
-                            tool_logs.append(f"\n• {tool_meta["display_name"]}")
+                            tool_logs.append(f"\n• {tool_meta['display_name']}")
                             tool_logs.append(f"({str(tool_args)})\n",style="dim white")
                             if text_response:
                                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
@@ -617,8 +650,16 @@ class RavenTUI(App):
                             result = f"Error: {e}"
                     else:
                         result = "Error: Tool not found."
-                    tool_responses.append(types.Part.from_function_response(name=tool_name, response={"result": result}))
-                query = tool_responses
+                    tool_responses_to_append.append({
+                                                "role": "tool",
+                                                "tool_call_id": fc["id"],
+                                                "name": fc["name"],
+                                                "content": json.dumps(result)
+                                            })
+                self.chat_session.add_message("assistant",tool_calls=tool_calls_to_append)
+                for tool_response in tool_responses_to_append:
+                    self.chat_session.add_message(role="tool",tool_call_id=tool_response["tool_call_id"],name=tool_response["name"],content=tool_response["content"])
+                query = None
 
             elapsed = time.time() - start_time
             if elapsed >= 60:
