@@ -8,10 +8,10 @@ from rich.spinner import Spinner
 from rich.markdown import Markdown
 import questionary
 from questionary import Style
-from agent.llm import get_chat_session
-from agent.utils import read_prompt_from_file,save_to_memory,find_file,read_file,create_file,execute_command,save_concept,log_successful_debug,save_to_project_memory,get_current_timestamp,patch_file,start_new_backup_turn,update_architecture_map,run_ui_test,get_staged_git_changes,commit_staged_git_changes
-from agent.indexer import search_codebase
-from agent.settings import settings
+from agent.core.llm import get_chat_session
+from agent.utils import read_prompt_from_file,start_new_backup_turn
+from agent.core.settings import settings
+from agent.tools.tool_registry import TOOL_REGISTRY
 
 import sys
 from pathlib import Path
@@ -29,99 +29,6 @@ chat_style = Style([
             ('question', 'fg:#06B6D4 bold'),
             ('answer', 'fg:#06B6D4'),
         ])
-
-TOOL_REGISTRY = {
-    "save_to_memory": {
-        "fn": save_to_memory, 
-        "display_name": "Remember", 
-        "display_arg": "fact", 
-        "ignore_display": False
-    },
-    "find_file": {
-        "fn": find_file, 
-        "display_name": "Find", 
-        "display_arg": "file_name",
-        "ignore_display": True
-    },
-    "read_file": {
-        "fn": read_file, 
-        "display_name": "Read", 
-        "display_arg": "file_path", 
-        "ignore_display": False
-    },
-    "create_file": {
-        "fn": create_file, 
-        "display_name": "Create", 
-        "display_arg": "file_path", 
-        "ignore_display": False
-    },
-    "execute_command": {
-        "fn": execute_command, 
-        "display_name": "Execute", 
-        "display_arg": "command", 
-        "ignore_display": True
-    },
-    "get_current_timestamp": {
-        "fn": get_current_timestamp, 
-        "display_name": "Time", 
-        "display_arg": None, 
-        "ignore_display": True
-    },
-    "save_concept": {
-        "fn": save_concept, 
-        "display_name": "Document Concept", 
-        "display_arg": "concept_name", 
-        "ignore_display": False
-    },
-    "log_successful_debug": {
-        "fn": log_successful_debug, 
-        "display_name": "Log Fix", 
-        "display_arg": "error_description", 
-        "ignore_display": False
-    },
-    "save_to_project_memory": {
-        "fn": save_to_project_memory, 
-        "display_name": "Project Memory", 
-        "display_arg": "fact", 
-        "ignore_display": False
-    },
-    "patch_file": {
-        "fn": patch_file, 
-        "display_name": "Patch", 
-        "display_arg": "file_path", 
-        "ignore_display": True
-    },
-    "update_architecture_map": {
-        "fn": update_architecture_map, 
-        "display_name": "Update Architecture Map", 
-        "display_arg": None,
-        "ignore_display": False
-    },
-    "run_ui_test": {
-        "fn": run_ui_test, 
-        "display_name": "Browser", 
-        "display_arg": None,
-        "ignore_display": True
-    },
-    "search_codebase":{
-        "fn": search_codebase,
-        "display_name": "Searching Codebase",
-        "display_arg": "",
-        "ignore_display": False
-    },
-    "get_staged_git_changes":{
-        "fn": get_staged_git_changes,
-        "display_name": "Search changes",
-        "display_arg": "",
-        "ignore_display": False
-    },
-    "commit_staged_git_changes":{
-        "fn": commit_staged_git_changes,
-        "display_name": "Commit changes",
-        "display_arg": ["message"],
-        "ignore_display": False
-    },
-}
 
 def display_welcome():
     # ASCII text logo spelling out 'RAVEN'
@@ -156,20 +63,6 @@ def display_welcome():
     )
     console.print(welcome_panel)
     console.print()
-
-def render_stream(generator):
-    full_response = ""
-    with Live(Markdown(full_response),refresh_per_second=10,console=console) as live:
-        for chunk in generator:
-            if chunk.function_calls:
-                continue
-            if hasattr(chunk,'text') and chunk.text:
-                full_response += chunk.text
-            elif isinstance(chunk,str):
-                full_response += chunk
-            live.update(Markdown(full_response))
-        if not full_response:
-            live.update(Text(""))
 
 def run_agent_loop(chat_session,intial_input):
     """The core multi-turn engine of Raven"""
@@ -507,7 +400,7 @@ def tui():
     """
     Launch the multi-modal Textual UI.
     """
-    from agent.tui import RavenTUI
+    from agent.terminal_ui.app import RavenTUI
     try:
         tui_app = RavenTUI()
         tui_app.run()

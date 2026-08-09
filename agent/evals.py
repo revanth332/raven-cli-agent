@@ -4,7 +4,7 @@ import shutil
 from pathlib import Path
 from pydantic import BaseModel, Field
 from google.genai import types
-from agent.llm import get_genai_client, get_chat_session
+from agent.core.llm import get_genai_client, get_chat_session
 from agent.main import run_agent_loop, console
 
 class GraderOutput(BaseModel):

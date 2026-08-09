@@ -4,7 +4,7 @@ import tree_sitter_javascript as tsjavascript
 import tree_sitter_typescript as tstypescript
 import os
 import chromadb
-from chromadb.api.types import EmbeddingFunction, Documents, Embeddings
+from chromadb.api.types import EmbeddingFunction, Documents
 from pathlib import Path
 
 def get_parser_and_query(ext:str):
@@ -115,7 +115,7 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
     def __init__(self):
         pass
     def __call__(self,input:Documents):
-        from agent.llm import get_genai_client
+        from agent.core.llm import get_genai_client
         client = get_genai_client()
         
         response = client.models.embed_content(model="text-embedding-004",contents=input)
@@ -251,39 +251,3 @@ def search_codebase(query:str,top_results:int = 3):
         formatted_results.append(f"{header}\n ```python\n{doc}\n```")
     
     return "\n\n".join(formatted_results)
-
-
-if __name__ == "__main__":
-    # code = ""
-    # with open("agent/main.py",'r',encoding='utf-8') as f:
-    #     code = f.read()
-    
-    chunks = chunk_code_file("indexer.py","""const ASTRA_ROLE_PREFIXES = ['ROLE_ASTRA_'];
-const YANTRA_ROLE_PREFIXES = ['ROLE_IOPS_'];
-
-interface RoleCategory = 'astra-only' | 'yantra-only' | 'mixed' | 'none';
-
-export const hasAstraRoles = (roles: string[]): boolean =>
-  roles.some(role => ASTRA_ROLE_PREFIXES.some(prefix => role.startsWith(prefix)));
-
-export const hasYantraRoles = (roles: string[]): boolean =>
-  roles.some(role => YANTRA_ROLE_PREFIXES.some(prefix => role.startsWith(prefix)));
-
-export const classifyRoles = (roles: string[]): RoleCategory => {
-  if (!roles || roles.length === 0) return 'none';
-
-  const astra = hasAstraRoles(roles);
-  const yantra = hasYantraRoles(roles);
-
-  if (astra && yantra) return 'mixed';
-  if (astra) return 'astra-only';
-  if (yantra) return 'yantra-only';
-
-  return 'none';
-};
-""",".tsx")
-    for i,chunk in enumerate(chunks):
-        chunk['content'] = chunk['content'][:100]+"..."
-        print(f"chunk {i+1} --> {chunk}\n")
-    # index_project()
-    # search_codebase("modify report command",2)

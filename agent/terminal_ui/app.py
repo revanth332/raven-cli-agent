@@ -1,24 +1,26 @@
-
+import threading
 from textual.app import App, ComposeResult
-from textual.widgets import Footer, Static, Button, TextArea
-from textual.binding import Binding
-from textual.message import Message
-from textual.containers import VerticalScroll,Horizontal,Vertical
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
-from rich.markdown import Markdown
+from textual.containers import VerticalScroll,Horizontal,Vertical
 from textual import work
-import threading
-from agent.main import TOOL_REGISTRY
-import time
+from textual.widgets import Footer, Static
+
+from rich.markdown import Markdown
 from rich.console import Group
 from rich.text import Text
 
-from agent.llm import get_chat_session
+from agent.tools.tool_registry import TOOL_REGISTRY
+from agent.core.llm import get_chat_session
 from agent.utils import read_prompt_from_file,get_active_project_name
-from agent.settings import settings
+from agent.core.settings import settings
+from agent.terminal_ui.chat_input import ChatInput
+from agent.terminal_ui.permission_box import PermissionBox
+from agent.terminal_ui.thinking_loader import ThinkingMessage
 
+from pathlib import Path
 import json
+import time
 
 raven_logo = """
  ██████╗  █████╗ ██╗   ██╗███████╗███╗   ██╗
@@ -28,7 +30,6 @@ raven_logo = """
  ██║  ██║██║  ██║ ╚████╔╝ ███████╗██║ ╚████║
  ╚═╝  ╚═╝╚═╝  ╚═╝  ╚═══╝  ╚══════╝╚═╝  ╚═══╝
     """
-
 DEBUG_PROMPT = read_prompt_from_file("prompts/debug_prompt.md")
 COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.md")
 REPORT_PROMPT = read_prompt_from_file("prompts/report_prompt.md")
@@ -75,100 +76,6 @@ SLASH_COMMANDS = {
     }
 }
 
-class ChatInput(TextArea):
-    BINDINGS = [
-        Binding("enter", "submit", "Submit", priority=True),
-        Binding("shift+enter", "newline", "Newline", priority=True),
-    ]
-
-    class Submitted(Message):
-        def __init__(self, text_area: "ChatInput", value: str) -> None:
-            self.text_area = text_area
-            self.value = value
-            super().__init__()
-
-    def action_submit(self) -> None:
-        self.post_message(self.Submitted(self, self.text))
-
-    def action_newline(self) -> None:
-        self.insert("\n")
-
-class PermissionBox(Static):
-    """An inline safety box that renders directly inside the chat history."""
-    
-    def __init__(self, title: str, message: str, callback):
-        # We give it the same base classes as a chat message, plus a specific alert class
-        super().__init__(classes="message permission-msg") 
-        self.title_text = title
-        self.message_text = message
-        self.callback = callback
-
-    def compose(self) -> ComposeResult:
-        # Display the warning text
-        yield Static(f"[bold red]{self.title_text}[/bold red]\n[dim]{self.message_text}[/dim]")
-        
-        # Display the buttons side-by-side
-        with Horizontal(id="perm-buttons"):
-            yield Button("Yes, Allow", id="yes", variant="success")
-            yield Button("No, Deny", id="no", variant="error")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Fires when the user clicks Yes or No."""
-        # 1. Remove the buttons so the chat history looks clean!
-        self.query_one("#perm-buttons").remove()
-        
-        # 2. Update the box to show what the user chose
-        if event.button.id == "yes":
-            self.mount(Static("[bold green]✔ Permission Granted[/bold green]"))
-            self.callback(True)
-        else:
-            self.mount(Static("[bold red]✖ Permission Denied[/bold red]"))
-            self.callback(False)
-        self.remove()
-
-class ThinkingMessage(Static):
-    """A message bubble that shows a typewriter animation until updated."""
-    FULL_TEXT = "Thinking..."
-
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.char_index = 0
-        self.direction = 1
-        self._timer = None
-        self._is_thinking = True
-
-    def on_mount(self) -> None:
-        self._timer = self.set_interval(0.1, self.tick)
-
-    def tick(self) -> None:
-        if not self._is_thinking:
-            return
-            
-        self.char_index += self.direction
-        if self.char_index >= len(self.FULL_TEXT):
-            self.char_index = len(self.FULL_TEXT)
-            self.direction = -1
-        elif self.char_index <= 0:
-            self.char_index = 0
-            self.direction = 1
-            
-        super().update(f"● {self.FULL_TEXT[:self.char_index]}")
-
-    def update(self, renderable="") -> None:
-        if self._is_thinking:
-            self._is_thinking = False
-            if self._timer:
-                self._timer.pause()
-        super().update(renderable)
-
-    def reset_thinking(self) -> None:
-        """Resets the state back to thinking and restarts the typewriter animation."""
-        self._is_thinking = True
-        self.char_index = 0
-        self.direction = 1
-        if self._timer:
-            self._timer.resume()
-        super().update("● ")
 
 class RavenTUI(App):
     CSS = """
@@ -220,7 +127,11 @@ class RavenTUI(App):
     }
     
     .user-msg {
-        color: #F1F5F9;
+        color: #F8FAFC;
+        background: #0F172A;
+        border: none;
+        border-left: heavy #06B6D4;
+        padding: 1 2;
     }
     
     .raven-msg {
@@ -228,14 +139,15 @@ class RavenTUI(App):
     }
 
     ChatInput {
-        border: solid #06B6D4; /* Brilliant double sky-blue border */
-        margin: 1 1;
-        padding: 0 1;
+        border: none;
+        border-left: heavy #06B6D4;
+        margin: 1 1 0 1;
+        padding: 1 2;
         color: #F8FAFC;         /* Bright text while typing */
         height: auto;
-        min-height: 3;
+        min-height: 4;
         max-height: 10;
-        background: transparent;
+        background: #0F172A;
     }
     
     ChatInput > .text-area--background {
@@ -243,7 +155,15 @@ class RavenTUI(App):
     }
     
     ChatInput:focus {
-        border: solid #06B6D4;
+        border: none;
+        border-left: heavy #22D3EE;
+        background: #1E293B;
+    }
+
+    #input_status {
+        margin: 0 1;
+        padding: 1 2;
+        height: auto;
     }
     
     .permission-msg {
@@ -287,14 +207,10 @@ class RavenTUI(App):
     }
     #autocomplete_list {
         display: none;
-        layer: overlay;
-        dock: bottom;
-        offset-y: -6;
-        height: 6;
-        width: 1fr;
-        max-height:8;
-        background:#1e1e1e;
-        border:tall #00d7af;
+        max-height: 8;
+        margin: 1 1 0 1;
+        background: #1e1e1e;
+        scrollbar-size: 1 1;
     }
     """
     # Define system hotkeys for the footer
@@ -323,10 +239,12 @@ class RavenTUI(App):
         autocomplete = self.query_one("#autocomplete_list", OptionList)
         if autocomplete.styles.display == "block":
             autocomplete.styles.display = "none"
+            self.query_one("#chat_input", ChatInput).styles.margin = (1, 1, 0, 1)
 
     def on_text_area_changed(self, event):
         val = event.text_area.text.strip()
         autocomplete = self.query_one("#autocomplete_list",OptionList)
+        chat_input = self.query_one("#chat_input", ChatInput)
         if val.startswith("/") and " " not in val:
             matches = [(cmd,info) for cmd,info in SLASH_COMMANDS.items() if cmd.startswith(val)]
             if matches:
@@ -336,9 +254,27 @@ class RavenTUI(App):
                 for cmd,info in matches:
                     autocomplete.add_option(Option(prompt=f"{cmd:<10} - {info['description']}"))
                 autocomplete.styles.display = "block"
+                chat_input.styles.margin = (0, 1, 0, 1)
                 return
         autocomplete.styles.display = "none"
+        chat_input.styles.margin = (1, 1, 0, 1)
     
+    def select_autocomplete_option(self):
+        autocomplete = self.query_one("#autocomplete_list", OptionList)
+        selected_id = autocomplete.highlighted
+        if selected_id is None and self.active_suggestions:
+            selected_id = 0
+
+        if selected_id is not None and selected_id < len(self.active_suggestions):
+            cmd = self.active_suggestions[selected_id]
+
+            chat_input = self.query_one("#chat_input", ChatInput)
+            chat_input.text = cmd + " "
+            chat_input.action_cursor_line_end()
+
+            autocomplete.styles.display = "none"
+            chat_input.styles.margin = (1, 1, 0, 1)
+
     def on_key(self,event):
         autocomplete = self.query_one("#autocomplete_list",OptionList)
 
@@ -350,16 +286,9 @@ class RavenTUI(App):
                 autocomplete.action_cursor_up()
                 event.prevent_default()
             elif event.key in ["tab","enter"]:
-                selected_id = autocomplete.highlighted
-                if selected_id is not None and selected_id < len(self.active_suggestions):
-                    cmd = self.active_suggestions[selected_id]
-
-                    chat_input = self.query_one("#chat_input", ChatInput)
-                    chat_input.text = cmd + " "
-                    chat_input.action_cursor_line_end()
-
-                    autocomplete.styles.display = "none"
-                    event.prevent_default()
+                self.select_autocomplete_option()
+                event.prevent_default()
+                event.stop()
             
 
     def ask_permission_ui(self,title:str,message:str):
@@ -397,6 +326,7 @@ class RavenTUI(App):
         # VerticalScroll acts as our scrollable conversation container
         active_model = settings.RAVEN_MODEL
         current_project = get_active_project_name()
+        project_or_folder = current_project if current_project else str(Path.cwd())
         
         with VerticalScroll(id="history") as history:
             # Add a welcome card on boot
@@ -406,17 +336,21 @@ class RavenTUI(App):
                     f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
                     f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
                     f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}\n"
-                    f"[bold #06B6D4]Current Project:[/bold #06B6D4] {current_project}\n"
+                    f"[bold #06B6D4]Current Project:[/bold #06B6D4] {project_or_folder}\n"
                     f"[bold #06B6D4]Agent Version:[/bold #06B6D4] 1.0.0 (Raven Personal AI Developer Agent)",
                     classes="version-text"
                 ),
                 id="welcome-container"
             )
-        yield OptionList(id="autocomplete_list")
         # Create a single docked container at the bottom
         with Vertical(id="bottom_bar"):
             yield Horizontal(id="thinking_container")
+            yield OptionList(id="autocomplete_list")
             yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
+            yield Static(
+                f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]",
+                id="input_status"
+            )
             yield Footer()
 
     # --- EVENT HANDLERS ---
@@ -436,6 +370,7 @@ class RavenTUI(App):
             return
         
         self.query_one('#autocomplete_list',OptionList).styles.display = "none"
+        self.query_one('#chat_input', ChatInput).styles.margin = (1, 1, 0, 1)
         # Clear the input box immediately for the next question
         input_widget = event.text_area
         input_widget.text = ""
@@ -444,8 +379,6 @@ class RavenTUI(App):
         history_container = self.query_one("#history")
         
         user_card = Static(classes="message user-msg")
-        user_card.border_title = "User"
-        user_card.styles.border = ("round", "#06B6D4")
         user_card.update(Markdown(user_input))
         history_container.mount(user_card)
 
