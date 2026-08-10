@@ -25,7 +25,10 @@ class Settings:
             self.config = {}
         for key,value in config.items():
             self.config[key] = value
+            if hasattr(self, key):
+                setattr(self, key, value)
         try:
+            self.config_file.parent.mkdir(parents=True, exist_ok=True)
             self.config_file.write_text(json.dumps(self.config),encoding="utf-8")
         except Exception as e:
             raise e

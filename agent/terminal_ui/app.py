@@ -17,6 +17,7 @@ from agent.core.settings import settings
 from agent.terminal_ui.chat_input import ChatInput
 from agent.terminal_ui.permission_box import PermissionBox
 from agent.terminal_ui.thinking_loader import ThinkingMessage
+from agent.terminal_ui.model_select_modal import ModelSelectModal
 
 from pathlib import Path
 import json
@@ -39,6 +40,11 @@ ASK_PROMPT = read_prompt_from_file("prompts/ask_prompt.md")
 EXPLAIN_PROMPT=read_prompt_from_file("prompts/explain_prompt.md")
 
 SLASH_COMMANDS = {
+    "/model":{
+        "description":"Switch active AI model",
+        "placeholder":"/model",
+        "system_prompt":""
+    },
     "/coach":{
         "description":"Activate coach mode",
         "placeholder":"/coach",
@@ -94,8 +100,39 @@ class RavenTUI(App):
         color: #64748B;      /* Dim keybind labels */
     }
 
+    #main_container {
+        height: 1fr;
+    }
+
+    #main_container.centered {
+        height: 1fr;
+        align: center middle;
+    }
+
+    #main_container.centered #history {
+        height: auto;
+        max-height: 50%;
+        width: 60%;
+        min-width: 50;
+        align: center middle;
+        content-align: center middle;
+        margin-bottom: 1;
+    }
+
+    #main_container.centered #bottom_bar {
+        dock: none;
+        height: auto;
+        width: 60%;
+        min-width: 50;
+        align: center middle;
+        padding: 0;
+        margin: 1 0;
+    }
+
     #welcome-container {
         align: center middle;
+        content-align: center middle;
+        width: 100%;
         height: auto;
     }
 
@@ -107,9 +144,10 @@ class RavenTUI(App):
 
     .version-text {
         width: auto;
-        height: 100%;
-        content-align: left middle;
-        padding-left: 2;
+        height: auto;
+        content-align: center middle;
+        text-align: center;
+        padding-top: 1;
     }
 
     #history {
@@ -128,7 +166,7 @@ class RavenTUI(App):
     
     .user-msg {
         color: #F8FAFC;
-        background: #0F172A;
+        background: #1e1e1e;
         border: none;
         border-left: heavy #06B6D4;
         padding: 1 2;
@@ -141,13 +179,13 @@ class RavenTUI(App):
     ChatInput {
         border: none;
         border-left: heavy #06B6D4;
-        margin: 1 1 0 1;
+        margin: 0;
         padding: 1 2;
         color: #F8FAFC;         /* Bright text while typing */
         height: auto;
         min-height: 4;
         max-height: 10;
-        background: #0F172A;
+        background: #1e1e1e;
     }
     
     ChatInput > .text-area--background {
@@ -157,13 +195,16 @@ class RavenTUI(App):
     ChatInput:focus {
         border: none;
         border-left: heavy #22D3EE;
-        background: #1E293B;
+        background: #1e1e1e;
     }
 
     #input_status {
-        margin: 0 1;
-        padding: 1 2;
+        border: none;
+        border-left: heavy #06B6D4;
+        margin: 0;
+        padding: 0 2 1 2;
         height: auto;
+        background: #1e1e1e;
     }
     
     .permission-msg {
@@ -197,20 +238,34 @@ class RavenTUI(App):
         border: round #ffffff;
     }
     #thinking_container {
-        height:auto;
+        height: auto;
         border: none;
-        margin:0 1;
+        margin-bottom: 1;
+        padding: 0 1;
     }
     #bottom_bar {
         dock: bottom;
         height: auto;
+        padding: 1 2 1 2;
     }
     #autocomplete_list {
         display: none;
-        max-height: 8;
-        margin: 1 1 0 1;
+        max-height: 10;
+        border: none;
+        border-left: heavy #06B6D4;
+        margin: 0;
+        padding: 1 0;
         background: #1e1e1e;
         scrollbar-size: 1 1;
+    }
+
+    #autocomplete_list > .option-list--option {
+        padding: 0 2;
+    }
+
+    #autocomplete_list > .option-list--option-highlighted {
+        background: #2d3748;
+        color: #38BDF8;
     }
     """
     # Define system hotkeys for the footer
@@ -239,7 +294,7 @@ class RavenTUI(App):
         autocomplete = self.query_one("#autocomplete_list", OptionList)
         if autocomplete.styles.display == "block":
             autocomplete.styles.display = "none"
-            self.query_one("#chat_input", ChatInput).styles.margin = (1, 1, 0, 1)
+            self.query_one("#chat_input", ChatInput).styles.margin = (0, 0, 0, 0)
 
     def on_text_area_changed(self, event):
         val = event.text_area.text.strip()
@@ -254,10 +309,10 @@ class RavenTUI(App):
                 for cmd,info in matches:
                     autocomplete.add_option(Option(prompt=f"{cmd:<10} - {info['description']}"))
                 autocomplete.styles.display = "block"
-                chat_input.styles.margin = (0, 1, 0, 1)
+                chat_input.styles.margin = (0, 0, 0, 0)
                 return
         autocomplete.styles.display = "none"
-        chat_input.styles.margin = (1, 1, 0, 1)
+        chat_input.styles.margin = (0, 0, 0, 0)
     
     def select_autocomplete_option(self):
         autocomplete = self.query_one("#autocomplete_list", OptionList)
@@ -269,11 +324,16 @@ class RavenTUI(App):
             cmd = self.active_suggestions[selected_id]
 
             chat_input = self.query_one("#chat_input", ChatInput)
+            autocomplete.styles.display = "none"
+            chat_input.styles.margin = (0, 0, 0, 0)
+
+            if cmd == "/model":
+                chat_input.text = ""
+                self.open_model_select_modal()
+                return
+
             chat_input.text = cmd + " "
             chat_input.action_cursor_line_end()
-
-            autocomplete.styles.display = "none"
-            chat_input.styles.margin = (1, 1, 0, 1)
 
     def on_key(self,event):
         autocomplete = self.query_one("#autocomplete_list",OptionList)
@@ -323,37 +383,57 @@ class RavenTUI(App):
 
     def compose(self) -> ComposeResult:
         """Assembles the physical widgets on the screen."""
-        # VerticalScroll acts as our scrollable conversation container
         active_model = settings.RAVEN_MODEL
         current_project = get_active_project_name()
         project_or_folder = current_project if current_project else str(Path.cwd())
         
-        with VerticalScroll(id="history") as history:
-            # Add a welcome card on boot
-            yield Horizontal(
-                Static(f"[bold #06B6D4]{raven_logo}[/bold #06B6D4]", classes="logo-text"),
-                Static(
-                    f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
-                    f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
-                    f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}\n"
-                    f"[bold #06B6D4]Current Project:[/bold #06B6D4] {project_or_folder}\n"
-                    f"[bold #06B6D4]Agent Version:[/bold #06B6D4] 1.0.0 (Raven Personal AI Developer Agent)",
-                    classes="version-text"
-                ),
-                id="welcome-container"
-            )
-        # Create a single docked container at the bottom
-        with Vertical(id="bottom_bar"):
-            yield Horizontal(id="thinking_container")
-            yield OptionList(id="autocomplete_list")
-            yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
-            yield Static(
-                f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]",
-                id="input_status"
-            )
-            yield Footer()
+        with Vertical(id="main_container", classes="centered"):
+            with VerticalScroll(id="history") as history:
+                # Add a welcome card on boot
+                yield Vertical(
+                    Static(
+                        f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
+                        f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
+                        f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}  │  "
+                        f"[bold #06B6D4]{'Project' if current_project else 'Folder'}:[/bold #06B6D4] {project_or_folder}\n"
+                        f"[bold #06B6D4]Agent Version:[/bold #06B6D4] 1.0.0 (Raven Personal AI Developer Agent)",
+                        classes="version-text"
+                    ),
+                    id="welcome-container"
+                )
+            with Vertical(id="bottom_bar"):
+                yield Horizontal(id="thinking_container")
+                yield OptionList(id="autocomplete_list")
+                yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
+                yield Static(
+                    f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]",
+                    id="input_status"
+                )
+        yield Footer()
 
     # --- EVENT HANDLERS ---
+    def update_status_bar(self) -> None:
+        try:
+            active_model = settings.RAVEN_MODEL
+            current_project = get_active_project_name()
+            project_or_folder = current_project if current_project else str(Path.cwd())
+            status_widget = self.query_one("#input_status", Static)
+            status_widget.update(
+                f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]"
+            )
+        except Exception:
+            pass
+
+    def open_model_select_modal(self) -> None:
+        def on_model_dismiss(selected_model: str | None) -> None:
+            if selected_model and selected_model != settings.RAVEN_MODEL:
+                settings.set_config({"RAVEN_MODEL": selected_model})
+                self.initialize_ai()
+                self.update_status_bar()
+                self.notify(f"Switched model to {selected_model}", title="Model Changed", severity="information")
+
+        self.push_screen(ModelSelectModal(current_model=settings.RAVEN_MODEL), on_model_dismiss)
+
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         """Triggers when the user presses 'Enter' in the input box."""
         if self.is_generating:
@@ -369,8 +449,19 @@ class RavenTUI(App):
             self.exit()
             return
         
+        if user_input.lower() == "/model" or user_input.lower().startswith("/model "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.open_model_select_modal()
+            return
+        
+        main_container = self.query_one("#main_container")
+        if main_container.has_class("centered"):
+            main_container.remove_class("centered")
+
         self.query_one('#autocomplete_list',OptionList).styles.display = "none"
-        self.query_one('#chat_input', ChatInput).styles.margin = (1, 1, 0, 1)
+        self.query_one('#chat_input', ChatInput).styles.margin = (0, 0, 0, 0)
         # Clear the input box immediately for the next question
         input_widget = event.text_area
         input_widget.text = ""
@@ -500,7 +591,7 @@ class RavenTUI(App):
                     if tool_name in TOOL_REGISTRY:
                         tool_meta = TOOL_REGISTRY[tool_name]
                         
-                        if tool_name in ["execute_command", "run_ui_test","commit_staged_git_changes"]:
+                        if tool_name in ["execute_command","commit_staged_git_changes"]:
                             self.permission_event.clear()
                             title = f"Action Required: {tool_name}"
                             msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)}"
@@ -516,8 +607,6 @@ class RavenTUI(App):
                                                             "content": result
                                                         })
                                 continue
-                            tool_logs.append(f"\n• {tool_meta['display_name']}")
-                            tool_logs.append(f"({str(tool_args)})\n",style="dim white")
                             if text_response:
                                 self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                             else:
@@ -569,7 +658,8 @@ class RavenTUI(App):
                                     display_val = tool_args.get(arg_keys, "") if arg_keys else ""
                                 if(isinstance(arg_keys,list)):
                                     display_val = ",".join([tool_args.get(key, "") for key in arg_keys])
-                                tool_logs.append(f"({display_val})\n",style="dim white")
+                                if display_val:
+                                    tool_logs.append(f"({display_val})\n",style="dim white")
                             else:
                                 tool_logs.append("\n")
                             if text_response:

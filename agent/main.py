@@ -168,20 +168,6 @@ def run_agent_loop(chat_session,intial_input):
                         })
                         continue
                 
-                elif tool_name == "run_ui_test":
-                    console.print(f"[bold red]• Browser[/bold red]()")
-
-                    confirmed = typer.confirm("Raven wants to run a UI Automation Script. Allow?")
-                    if not confirmed:
-                        result = "Error: User denied permission to execute this automation script."
-                        tool_responses_to_append.append({
-                                                "role": "tool",
-                                                "tool_call_id": fc["id"],
-                                                "name": fc["name"],
-                                                "content": result
-                                            })
-                        continue
-
                 elif tool_name == "commit_staged_git_changes":
                     console.print(f"[bold cyan]• Commit[/bold cyan]([dim]{tool_args['message']}[/dim]{',[red]unverified[/red]' if not tool_args['is_verified'] else ''})")
                     confirmed = typer.confirm("Raven wants to commit the changes. Allow?")

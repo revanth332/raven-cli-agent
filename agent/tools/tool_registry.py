@@ -379,7 +379,7 @@ TOOL_REGISTRY = {
         "fn": execute_command, 
         "display_name": "Execute", 
         "display_arg": "command", 
-        "ignore_display": True
+        "ignore_display": False
     },
     "get_current_timestamp": {
         "fn": get_current_timestamp, 
