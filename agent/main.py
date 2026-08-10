@@ -72,10 +72,14 @@ def run_agent_loop(chat_session,intial_input):
         while True:
             final_response = ""
             function_calls = {}
+            user_message_committed = current_input is None
             with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console) as live:
                 for attempt in range(max_retries):
                     try:
                         generator = chat_session.send_message_stream(current_input)
+                        if current_input is not None and not user_message_committed:
+                            chat_session.commit_user_message(current_input)
+                            user_message_committed = True
                         for chunk in generator:
                             if not chunk.choices:
                                 continue
@@ -112,6 +116,21 @@ def run_agent_loop(chat_session,intial_input):
                     # Clear or hide the live thinking display if no text was streamed (i.e., only function calls were found)
                 if not final_response:
                     live.update(Text(""))
+            if final_response or function_calls:
+                assistant_tool_calls = None
+                if function_calls:
+                    assistant_tool_calls = []
+                    for _,fc in function_calls.items():
+                        assistant_tool_calls.append({
+                            "id":fc["id"],
+                            "type":"function",
+                            "function":{
+                                "name":fc["name"],
+                                "arguments":fc["arguments"]
+                            },
+                            "extra_content":fc.get("extra_content","")
+                        })
+                chat_session.commit_assistant_message(content=final_response or None,tool_calls=assistant_tool_calls)
             if not function_calls:
                 break
             tool_calls_to_append = []
@@ -203,7 +222,6 @@ def run_agent_loop(chat_session,intial_input):
                                             "content": json.dumps(result)
                                         })
             
-            chat_session.add_message("assistant",tool_calls=tool_calls_to_append)
             for tool_response in tool_responses_to_append:
                 chat_session.add_message(role="tool",tool_call_id=tool_response["tool_call_id"],name=tool_response["name"],content=tool_response["content"])
             current_input = None

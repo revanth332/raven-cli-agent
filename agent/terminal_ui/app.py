@@ -511,10 +511,14 @@ class RavenTUI(App):
                 function_calls = {}
                 max_retries = 5
                 thinking_message = ThinkingMessage("")
+                user_message_committed = query is None
                 for attempt in range(max_retries):
                     try:
                         self.call_from_thread(thinking_container.mount,thinking_message)
                         generator = self.chat_session.send_message_stream(query)
+                        if query is not None and not user_message_committed:
+                            self.chat_session.commit_user_message(query)
+                            user_message_committed = True
                         for chunk in generator:
                             if self.cancel_event.is_set():
                                 break
@@ -563,6 +567,22 @@ class RavenTUI(App):
                 if self.cancel_event.is_set():
                     tool_logs.append("\n\nGeneration stopped by user.")
                     break
+
+                if text_response or function_calls:
+                    assistant_tool_calls = None
+                    if function_calls:
+                        assistant_tool_calls = []
+                        for _,fc in function_calls.items():
+                            assistant_tool_calls.append({
+                                "id":fc["id"],
+                                "type":"function",
+                                "function":{
+                                    "name":fc["name"],
+                                    "arguments":fc["arguments"]
+                                },
+                                "extra_content":fc.get("extra_content","")
+                            })
+                    self.chat_session.commit_assistant_message(content=text_response or None,tool_calls=assistant_tool_calls)
 
                 if not function_calls:
                     break
@@ -679,7 +699,6 @@ class RavenTUI(App):
                                                 "name": fc["name"],
                                                 "content": json.dumps(result)
                                             })
-                self.chat_session.add_message("assistant",tool_calls=tool_calls_to_append)
                 for tool_response in tool_responses_to_append:
                     self.chat_session.add_message(role="tool",tool_call_id=tool_response["tool_call_id"],name=tool_response["name"],content=tool_response["content"])
                 query = None

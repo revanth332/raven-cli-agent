@@ -1,5 +1,7 @@
 from dotenv import load_dotenv
 import logging
+from datetime import datetime, timedelta, timezone
+from threading import Lock
 
 from openai import OpenAI
 from google.auth import default
@@ -16,12 +18,47 @@ from agent.core.settings import settings
 load_dotenv()
 
 _genai_client = None
+_vertex_credentials = None
+_vertex_credentials_lock = Lock()
+_vertex_request = google.auth.transport.requests.Request()
+
+
+def _use_vertex_ai():
+    return str(settings.RAVEN_USE_VERTEX_AI).strip().lower() == "true"
+
+
+def _vertex_token_needs_refresh(credentials):
+    if not credentials.token:
+        return True
+
+    expiry = getattr(credentials, "expiry", None)
+    if expiry is None:
+        return True
+
+    if expiry.tzinfo is None:
+        now = datetime.utcnow()
+    else:
+        now = datetime.now(timezone.utc)
+
+    return expiry <= now + timedelta(minutes=5)
+
+
+def _get_vertex_access_token():
+    global _vertex_credentials
+
+    with _vertex_credentials_lock:
+        if _vertex_credentials is None:
+            _vertex_credentials,_ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+
+        if _vertex_token_needs_refresh(_vertex_credentials):
+            _vertex_credentials.refresh(_vertex_request)
+
+        return _vertex_credentials.token
 
 
 class AgentChatSession:
     def __init__(self,model_name,is_coach=False):
         self.model_name = model_name
-        self.client = get_genai_client()
 
         global_memory = get_memory_content()
         project_memory = get_project_memory()
@@ -38,18 +75,32 @@ class AgentChatSession:
         If a query is passed, it appends it as a new user message first.
         If query is None, it continues the loop (e.g., passing back tool outputs).
         """
+        request_messages = self.messages
         if query is not None:
-            self.messages.append({"role":"user","content":query})
-        response = self.client.chat.completions.create(
+            request_messages = self.messages + [self._create_message("user",content=query)]
+        response = get_genai_client().chat.completions.create(
             model=self.model_name,
-            messages=self.messages,
+            messages=request_messages,
             tools=raven_tools,
             stream=True,
         )
 
         return response
+
+    def commit_user_message(self,content):
+        if content is not None:
+            self.messages.append(self._create_message("user",content=content))
+
+    def commit_assistant_message(self,content=None,tool_calls=None):
+        if content is not None or tool_calls is not None:
+            self.messages.append(self._create_message("assistant",content=content,tool_calls=tool_calls))
+
     def add_message(self,role,content=None,tool_call_id=None,name=None,tool_calls=None):
         """Helper to append structured assistant or tool returns to history"""
+        msg = self._create_message(role,content=content,tool_call_id=tool_call_id,name=name,tool_calls=tool_calls)
+        self.messages.append(msg)
+
+    def _create_message(self,role,content=None,tool_call_id=None,name=None,tool_calls=None):
         msg = {"role":role}
         if content is not None:
             msg["content"] = content
@@ -59,21 +110,26 @@ class AgentChatSession:
             msg["name"] = name
         if tool_calls is not None:
             msg["tool_calls"] = tool_calls
-        self.messages.append(msg)
+        return msg
 
 
 def get_genai_client():
     global _genai_client
 
+    base_url = settings.RAVEN_BASE_URL
+    if _use_vertex_ai():
+        api_key = _get_vertex_access_token()
+
+        if not api_key or not base_url:
+            raise ValueError("Credentials are missing!!! Please use 'config' command to configure the credentials.")
+
+        return OpenAI(
+            base_url=base_url,
+            api_key=api_key
+        )
+
     if not _genai_client:
-        api_key = None
-        base_url = settings.RAVEN_BASE_URL
-        if str(settings.RAVEN_USE_VERTEX_AI).strip().lower() == "true":
-            credentials,_ = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
-            credentials.refresh(google.auth.transport.requests.Request())
-            api_key = credentials.token
-        else:
-            api_key = settings.RAVEN_API_KEY
+        api_key = settings.RAVEN_API_KEY
 
         if not api_key or not base_url:
             raise ValueError("Credentials are missing!!! Please use 'config' command to configure the credentials.")

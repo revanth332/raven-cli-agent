@@ -6,16 +6,10 @@ from textual.containers import Vertical, Horizontal
 from agent.core.settings import settings
 
 DEFAULT_MODELS = [
-    "google/gemini-2.5-flash-preview",
-    "google/gemini-2.5-pro",
-    "google/gemini-2.0-flash-001",
-    "anthropic/claude-3.5-sonnet",
-    "anthropic/claude-3.7-sonnet",
-    "openai/gpt-4o",
-    "openai/gpt-4o-mini",
-    "deepseek/deepseek-r1",
-    "deepseek/deepseek-chat",
-    "meta-llama/llama-3.3-70b-instruct",
+    "google/gemini-3.6-flash",
+    "google/gemini-3.5-flash",
+    "google/gemini-3.1-pro-preview",
+    "google/gemini-3-flash-preview",
 ]
 
 class ModelSelectModal(ModalScreen[str]):
