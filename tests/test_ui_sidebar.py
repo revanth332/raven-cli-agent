@@ -35,10 +35,13 @@ class TestConsumptionSidebar(unittest.TestCase):
                     "context_percent": 19.5,
                 }
 
-                sidebar.update_metrics(test_metrics)
+                sidebar.update_metrics(test_metrics, session_name="Test Session Title", project_name="test-project")
                 await pilot.pause()
 
                 rendered = str(sidebar.metrics_static.render())
+                self.assertIn("WORKSPACE & SESSION", rendered)
+                self.assertIn("test-project", rendered)
+                self.assertIn("Test Session Title", rendered)
                 self.assertIn("CONSUMPTION METRICS", rendered)
                 self.assertIn("19.5%", rendered)
                 self.assertIn("1,500", rendered)

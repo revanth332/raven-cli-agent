@@ -419,7 +419,10 @@ class RavenTUI(App):
             self.is_generating = False
             try:
                 sidebar = self.query_one(ConsumptionSidebar)
-                self.call_from_thread(sidebar.update_metrics, self.chat_session.get_context_usage())
+                session_title = getattr(self.chat_session, "session_title", "New Conversation")
+                current_project = get_active_project_name()
+                project_name = current_project if current_project else Path.cwd().name
+                self.call_from_thread(sidebar.update_metrics, self.chat_session.get_context_usage(), session_title, project_name)
             except Exception:
                 pass
             self.call_from_thread(self.notify, "Raven AI Engine initialized!", title="System", severity="information")
@@ -453,7 +456,7 @@ class RavenTUI(App):
                     yield OptionList(id="autocomplete_list")
                     yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
                     yield Static(
-                        f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
+                        f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
                         id="input_status"
                     )
             yield ConsumptionSidebar(id="sidebar")
@@ -463,14 +466,22 @@ class RavenTUI(App):
     def update_status_bar(self) -> None:
         try:
             active_model = settings.RAVEN_MODEL
-            current_project = get_active_project_name()
-            project_or_folder = current_project if current_project else str(Path.cwd())
             approve_status = "[bold #10B981]Auto (Safeguarded)[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
             session_title = getattr(self.chat_session, "session_title", "New Conversation") if self.chat_session else "New Conversation"
+            current_project = get_active_project_name()
+            project_name = current_project if current_project else Path.cwd().name
+
             status_widget = self.query_one("#input_status", Static)
             status_widget.update(
-                f"[dim #64748B]Session:[/dim #64748B] [bold #06B6D4]{session_title}[/bold #06B6D4]  │  [dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
+                f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
             )
+
+            try:
+                sidebar = self.query_one(ConsumptionSidebar)
+                metrics = self.chat_session.get_context_usage() if self.chat_session else None
+                sidebar.update_metrics(metrics=metrics, session_name=session_title, project_name=project_name)
+            except Exception:
+                pass
         except Exception:
             pass
 
@@ -883,7 +894,10 @@ class RavenTUI(App):
                 summary = self.chat_session.record_turn_usage(assistant_response=text_response)
                 try:
                     sidebar = self.query_one(ConsumptionSidebar)
-                    self.call_from_thread(sidebar.update_metrics, summary)
+                    session_title = getattr(self.chat_session, "session_title", "New Conversation")
+                    current_project = get_active_project_name()
+                    project_name = current_project if current_project else Path.cwd().name
+                    self.call_from_thread(sidebar.update_metrics, summary, session_title, project_name)
                 except Exception:
                     pass
                 

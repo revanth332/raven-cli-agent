@@ -37,9 +37,14 @@ class ConsumptionSidebar(Vertical):
     def on_mount(self):
         self.update_metrics()
 
-    def update_metrics(self, metrics: Dict[str, Any] | None = None):
+    def update_metrics(
+        self,
+        metrics: Dict[str, Any] | None = None,
+        session_name: str = "New Conversation",
+        project_name: str = "raven-cli-agent"
+    ):
         """
-        Updates the sidebar with fresh usage, context, and cost metrics.
+        Updates the sidebar with session/project context as well as usage, context, and cost metrics.
         """
         if metrics is None:
             metrics = {
@@ -84,16 +89,17 @@ class ConsumptionSidebar(Vertical):
 
         bar_str = f"[{bar_color}]" + "█" * filled_length + f"[dim white]" + "░" * empty_length + f"[/dim white][/{bar_color}]"
 
-        content = Text()
-        content.append("📊 METRICS & COST\n", style="bold cyan")
-        content.append("───────────────\n", style="dim grey")
-
-        # Context Section
-        content.append("🧠 Context Fill:\n", style="bold white")
-        content.append(f"{curr_context:,} / {max_context:,} tkn\n", style="dim white")
+        # Truncate long session / project names for side panel display
+        clean_session = session_name if len(session_name) <= 22 else session_name[:20] + ".."
+        clean_project = project_name if len(project_name) <= 22 else project_name[:20] + ".."
 
         # Render context bar using markup format in static
         text_markup = (
+            f"[bold #06B6D4]📁 WORKSPACE & SESSION[/bold #06B6D4]\n"
+            f"[dim #475569]────────────────────────────[/dim #475569]\n"
+            f"[bold #F8FAFC]Project:[/bold #F8FAFC] [bold #06B6D4]{clean_project}[/bold #06B6D4]\n"
+            f"[bold #F8FAFC]Session:[/bold #F8FAFC] [bold #06B6D4]{clean_session}[/bold #06B6D4]\n"
+            f"[dim #475569]────────────────────────────[/dim #475569]\n\n"
             f"[bold cyan]📊 CONSUMPTION METRICS[/bold cyan]\n"
             f"[dim #475569]────────────────────────────[/dim #475569]\n\n"
             f"[bold #F8FAFC]🧠 Context Fill:[/bold #F8FAFC] {context_pct:.1f}%\n"
