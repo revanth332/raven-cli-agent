@@ -10,6 +10,9 @@ DEFAULT_MODELS = [
     "google/gemini-3.5-flash",
     "google/gemini-3.1-pro-preview",
     "google/gemini-3-flash-preview",
+    "openrouter/free",
+    "cohere/north-mini-code:free",
+    "nvidia/nemotron-3-super-120b-a12b:free"
 ]
 
 class ModelSelectModal(ModalScreen[str]):

@@ -19,7 +19,9 @@ from agent.terminal_ui.chat_input import ChatInput
 from agent.terminal_ui.permission_box import PermissionBox
 from agent.terminal_ui.thinking_loader import ThinkingMessage
 from agent.terminal_ui.model_select_modal import ModelSelectModal
+from agent.terminal_ui.session_select_modal import SessionSelectModal
 from agent.terminal_ui.sidebar import ConsumptionSidebar
+from agent.core.session_manager import create_session, list_sessions
 
 from pathlib import Path
 import json
@@ -42,6 +44,21 @@ ASK_PROMPT = read_prompt_from_file("prompts/ask_prompt.md")
 EXPLAIN_PROMPT=read_prompt_from_file("prompts/explain_prompt.md")
 
 SLASH_COMMANDS = {
+    "/new":{
+        "description":"Start a new chat session",
+        "placeholder":"/new",
+        "system_prompt":""
+    },
+    "/sessions":{
+        "description":"List and switch chat sessions",
+        "placeholder":"/sessions",
+        "system_prompt":""
+    },
+    "/switch":{
+        "description":"Switch active chat session",
+        "placeholder":"/switch",
+        "system_prompt":""
+    },
     "/model":{
         "description":"Switch active AI model",
         "placeholder":"/model",
@@ -345,6 +362,16 @@ class RavenTUI(App):
                 self.open_model_select_modal()
                 return
 
+            if cmd in ["/sessions", "/switch"]:
+                chat_input.text = ""
+                self.open_session_select_modal()
+                return
+
+            if cmd == "/new":
+                chat_input.text = ""
+                self.start_new_session()
+                return
+
             chat_input.text = cmd + " "
             chat_input.action_cursor_line_end()
 
@@ -439,10 +466,77 @@ class RavenTUI(App):
             current_project = get_active_project_name()
             project_or_folder = current_project if current_project else str(Path.cwd())
             approve_status = "[bold #10B981]Auto (Safeguarded)[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
+            session_title = getattr(self.chat_session, "session_title", "New Conversation") if self.chat_session else "New Conversation"
             status_widget = self.query_one("#input_status", Static)
             status_widget.update(
-                f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
+                f"[dim #64748B]Session:[/dim #64748B] [bold #06B6D4]{session_title}[/bold #06B6D4]  │  [dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
             )
+        except Exception:
+            pass
+
+    def start_new_session(self) -> None:
+        new_sess = create_session(model_name=settings.RAVEN_MODEL)
+        self.chat_session = get_chat_session(session_id=new_sess["session_id"])
+        self.reload_history_ui()
+        self.update_status_bar()
+        self.notify("Started a fresh chat session!", title="Session Created", severity="information")
+
+    def open_session_select_modal(self) -> None:
+        def on_session_dismiss(selected_session_id: str | None) -> None:
+            if selected_session_id:
+                self.chat_session = get_chat_session(session_id=selected_session_id)
+                self.reload_history_ui()
+                self.update_status_bar()
+                try:
+                    sidebar = self.query_one(ConsumptionSidebar)
+                    sidebar.update_metrics(self.chat_session.get_context_usage())
+                except Exception:
+                    pass
+                self.notify(f"Switched session to '{self.chat_session.session_title}'", title="Session Changed", severity="information")
+
+        self.push_screen(SessionSelectModal(), on_session_dismiss)
+
+    def reload_history_ui(self) -> None:
+        try:
+            history_container = self.query_one("#history")
+            # Remove all children except welcome container if desired, or clear all
+            history_container.remove_children()
+
+            if not self.chat_session or len(self.chat_session.messages) <= 1:
+                # Mount default welcome container
+                active_model = settings.RAVEN_MODEL
+                current_project = get_active_project_name()
+                project_or_folder = current_project if current_project else str(Path.cwd())
+                welcome_widget = Vertical(
+                    Static(
+                        f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
+                        f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
+                        f"[bold #06B6D4]Session:[/bold #06B6D4] {getattr(self.chat_session, 'session_title', 'New Conversation')}  │  "
+                        f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}\n"
+                        f"[bold #06B6D4]{'Project' if current_project else 'Folder'}:[/bold #06B6D4] {project_or_folder}",
+                        classes="version-text"
+                    ),
+                    id="welcome-container"
+                )
+                history_container.mount(welcome_widget)
+            else:
+                main_container = self.query_one("#main_container")
+                if main_container.has_class("centered"):
+                    main_container.remove_class("centered")
+
+                for msg in self.chat_session.messages:
+                    role = msg.get("role")
+                    content = msg.get("content")
+                    if role == "user" and content:
+                        card = Static(classes="message user-msg")
+                        card.update(Markdown(content))
+                        history_container.mount(card)
+                    elif role == "assistant" and content:
+                        card = Static(classes="message raven-msg")
+                        card.update(Markdown(content))
+                        history_container.mount(card)
+
+            self.scroll_to_bottom()
         except Exception:
             pass
 
@@ -471,6 +565,20 @@ class RavenTUI(App):
             self.exit()
             return
         
+        if user_input.lower() in ["/sessions", "/switch"] or user_input.lower().startswith("/sessions ") or user_input.lower().startswith("/switch "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.open_session_select_modal()
+            return
+
+        if user_input.lower() == "/new" or user_input.lower().startswith("/new "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.start_new_session()
+            return
+
         if user_input.lower() == "/model" or user_input.lower().startswith("/model "):
             input_widget = event.text_area
             input_widget.text = ""

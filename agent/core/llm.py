@@ -16,6 +16,9 @@ from agent.tools.tool_registry import raven_tools
 from agent.core.settings import settings
 from agent.core.token_counter import count_tokens
 from agent.core.usage_tracker import UsageTracker
+from agent.core.session_manager import (
+    create_session, save_session, load_session, get_active_session_id, set_active_session_id
+)
 
 load_dotenv()
 
@@ -59,7 +62,7 @@ def _get_vertex_access_token():
 
 
 class AgentChatSession:
-    def __init__(self,model_name,is_coach=False):
+    def __init__(self, model_name, session_id=None, is_coach=False):
         self.model_name = model_name
 
         global_memory = get_memory_content()
@@ -69,9 +72,35 @@ class AgentChatSession:
         COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.md") if is_coach else ""
 
         self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT)
-        self.messages = [{"role":"system","content":self.system_prompt}]
+        
+        session_data = load_session(session_id) if session_id else None
+        if not session_data:
+            target_id = session_id or get_active_session_id()
+            session_data = load_session(target_id) if target_id else None
+
+        if not session_data:
+            session_data = create_session(model_name=self.model_name)
+
+        self.session_id = session_data["session_id"]
+        self.session_title = session_data.get("title", "New Conversation")
+        set_active_session_id(self.session_id)
+
+        # Re-construct message chain: system prompt + persisted user/assistant messages
+        restored_messages = [m for m in session_data.get("messages", []) if m.get("role") != "system"]
+        self.messages = [{"role": "system", "content": self.system_prompt}] + restored_messages
+
         self.tracker = UsageTracker()
         self.get_context_usage()
+
+    def save_session_state(self):
+        # Exclude system prompt from persisted messages payload for clean state
+        non_system_msgs = [m for m in self.messages if m.get("role") != "system"]
+        save_session({
+            "session_id": self.session_id,
+            "title": self.session_title,
+            "model_name": self.model_name,
+            "messages": non_system_msgs
+        })
 
     def get_context_usage(self):
         context_tokens = count_tokens(self.messages, self.model_name)
@@ -86,6 +115,7 @@ class AgentChatSession:
         completion_tokens = completion_tokens or 0
         summary = self.tracker.record_turn(prompt_tokens, completion_tokens, self.model_name)
         self.get_context_usage()
+        self.save_session_state()
         return summary
 
     def send_message_stream(self,query):
@@ -108,11 +138,16 @@ class AgentChatSession:
 
     def commit_user_message(self,content):
         if content is not None:
+            if self.session_title == "New Conversation" and isinstance(content, str) and content.strip():
+                clean_title = content.strip().replace("\n", " ")
+                self.session_title = clean_title[:32] + ("..." if len(clean_title) > 32 else "")
             self.messages.append(self._create_message("user",content=content))
+            self.save_session_state()
 
     def commit_assistant_message(self,content=None,tool_calls=None):
         if content is not None or tool_calls is not None:
             self.messages.append(self._create_message("assistant",content=content,tool_calls=tool_calls))
+            self.save_session_state()
 
     def add_message(self,role,content=None,tool_call_id=None,name=None,tool_calls=None):
         """Helper to append structured assistant or tool returns to history"""
@@ -160,6 +195,6 @@ def get_genai_client():
     return _genai_client
 
 
-def get_chat_session(is_coach=False):
+def get_chat_session(session_id=None, is_coach=False):
     """Initializes and returns an interactive chat object."""
-    return AgentChatSession(settings.RAVEN_MODEL,is_coach)
+    return AgentChatSession(settings.RAVEN_MODEL, session_id=session_id, is_coach=is_coach)
