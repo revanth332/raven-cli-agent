@@ -19,6 +19,7 @@ from agent.terminal_ui.chat_input import ChatInput
 from agent.terminal_ui.permission_box import PermissionBox
 from agent.terminal_ui.thinking_loader import ThinkingMessage
 from agent.terminal_ui.model_select_modal import ModelSelectModal
+from agent.terminal_ui.sidebar import ConsumptionSidebar
 
 from pathlib import Path
 import json
@@ -106,8 +107,14 @@ class RavenTUI(App):
         color: #64748B;      /* Dim keybind labels */
     }
 
+    #workspace_container {
+        height: 1fr;
+        width: 100%;
+    }
+
     #main_container {
         height: 1fr;
+        width: 1fr;
     }
 
     #main_container.centered {
@@ -383,6 +390,11 @@ class RavenTUI(App):
         try:
             self.chat_session = get_chat_session()
             self.is_generating = False
+            try:
+                sidebar = self.query_one(ConsumptionSidebar)
+                self.call_from_thread(sidebar.update_metrics, self.chat_session.get_context_usage())
+            except Exception:
+                pass
             self.call_from_thread(self.notify, "Raven AI Engine initialized!", title="System", severity="information")
         except Exception as e:
             self.call_from_thread(self.notify, f"Error initializing AI: {e}", title="Error", severity="error")
@@ -394,28 +406,30 @@ class RavenTUI(App):
         project_or_folder = current_project if current_project else str(Path.cwd())
         approve_status = "[bold #10B981]Auto (Safeguarded)[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
         
-        with Vertical(id="main_container", classes="centered"):
-            with VerticalScroll(id="history") as history:
-                # Add a welcome card on boot
-                yield Vertical(
-                    Static(
-                        f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
-                        f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
-                        f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}  │  "
-                        f"[bold #06B6D4]{'Project' if current_project else 'Folder'}:[/bold #06B6D4] {project_or_folder}\n"
-                        f"[bold #06B6D4]Agent Version:[/bold #06B6D4] 1.0.0 (Raven Personal AI Developer Agent)",
-                        classes="version-text"
-                    ),
-                    id="welcome-container"
-                )
-            with Vertical(id="bottom_bar"):
-                yield Horizontal(id="thinking_container")
-                yield OptionList(id="autocomplete_list")
-                yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
-                yield Static(
-                    f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
-                    id="input_status"
-                )
+        with Horizontal(id="workspace_container"):
+            with Vertical(id="main_container", classes="centered"):
+                with VerticalScroll(id="history") as history:
+                    # Add a welcome card on boot
+                    yield Vertical(
+                        Static(
+                            f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
+                            f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
+                            f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}  │  "
+                            f"[bold #06B6D4]{'Project' if current_project else 'Folder'}:[/bold #06B6D4] {project_or_folder}\n"
+                            f"[bold #06B6D4]Agent Version:[/bold #06B6D4] 1.0.0 (Raven Personal AI Developer Agent)",
+                            classes="version-text"
+                        ),
+                        id="welcome-container"
+                    )
+                with Vertical(id="bottom_bar"):
+                    yield Horizontal(id="thinking_container")
+                    yield OptionList(id="autocomplete_list")
+                    yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
+                    yield Static(
+                        f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
+                        id="input_status"
+                    )
+            yield ConsumptionSidebar(id="sidebar")
         yield Footer()
 
     # --- EVENT HANDLERS ---
@@ -756,6 +770,14 @@ class RavenTUI(App):
             else:
                 self.call_from_thread(raven_card.update, tool_logs)
             self.call_from_thread(self.scroll_to_bottom)
+
+            if self.chat_session:
+                summary = self.chat_session.record_turn_usage(assistant_response=text_response)
+                try:
+                    sidebar = self.query_one(ConsumptionSidebar)
+                    self.call_from_thread(sidebar.update_metrics, summary)
+                except Exception:
+                    pass
                 
         except Exception as e:
             self.call_from_thread(raven_card.update, Markdown(f"**Error:** {e}"))

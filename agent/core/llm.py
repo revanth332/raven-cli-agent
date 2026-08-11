@@ -14,6 +14,8 @@ from agent.utils import get_active_project_name,get_repo_map,read_prompt_from_fi
 from agent.tools.memory_tools import get_memory_content,get_project_memory
 from agent.tools.tool_registry import raven_tools
 from agent.core.settings import settings
+from agent.core.token_counter import count_tokens
+from agent.core.usage_tracker import UsageTracker
 
 load_dotenv()
 
@@ -68,6 +70,23 @@ class AgentChatSession:
 
         self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT)
         self.messages = [{"role":"system","content":self.system_prompt}]
+        self.tracker = UsageTracker()
+        self.get_context_usage()
+
+    def get_context_usage(self):
+        context_tokens = count_tokens(self.messages, self.model_name)
+        self.tracker.update_context(context_tokens, self.model_name)
+        return self.tracker.get_summary(self.model_name)
+
+    def record_turn_usage(self, prompt_tokens=None, completion_tokens=None, assistant_response=None):
+        if prompt_tokens is None:
+            prompt_tokens = count_tokens(self.messages, self.model_name)
+        if completion_tokens is None and assistant_response is not None:
+            completion_tokens = count_tokens(assistant_response, self.model_name)
+        completion_tokens = completion_tokens or 0
+        summary = self.tracker.record_turn(prompt_tokens, completion_tokens, self.model_name)
+        self.get_context_usage()
+        return summary
 
     def send_message_stream(self,query):
         """
