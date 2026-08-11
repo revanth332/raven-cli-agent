@@ -19,10 +19,17 @@ class ChatInput(TextArea):
             self.value = value
             super().__init__()
 
-    def _on_key(self, event: events.Key) -> None:
-        if event.key in ("shift+enter", "shift+return", "alt+enter", "ctrl+j") or (
-            event.key in ("enter", "return") and ("shift" in event.modifiers or "alt" in event.modifiers)
+    def on_key(self, event: events.Key) -> None:
+        if event.key in ("shift+enter", "shift+return", "alt+enter", "ctrl+j", "ctrl+enter") or (
+            event.key in ("enter", "return") and ("shift" in event.modifiers or "alt" in event.modifiers or "ctrl" in event.modifiers)
         ):
+            self.insert("\n")
+            event.prevent_default()
+            event.stop()
+            return
+
+        if event.key in ("enter", "return") and self.text.endswith("\\"):
+            self.text = self.text[:-1]
             self.insert("\n")
             event.prevent_default()
             event.stop()

@@ -218,7 +218,7 @@ class RavenTUI(App):
         padding: 1 2;
         color: #F8FAFC;         /* Bright text while typing */
         height: auto;
-        min-height: 4;
+        min-height: 2;
         max-height: 10;
         background: #1e1e1e;
     }
