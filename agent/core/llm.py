@@ -95,6 +95,8 @@ class AgentChatSession:
     def save_session_state(self):
         # Exclude system prompt from persisted messages payload for clean state
         non_system_msgs = [m for m in self.messages if m.get("role") != "system"]
+        if not non_system_msgs:
+            return
         save_session({
             "session_id": self.session_id,
             "title": self.session_title,

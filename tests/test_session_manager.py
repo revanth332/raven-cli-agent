@@ -23,6 +23,9 @@ class TestSessionManager(unittest.TestCase):
 
     def test_create_and_load_session(self):
         sess = session_manager.create_session(model_name="gpt-4o", title="Test Conversation")
+        sess["messages"].append({"role": "user", "content": "hello world"})
+        session_manager.save_session(sess)
+
         self.assertIsNotNone(sess["session_id"])
         self.assertEqual(sess["title"], "Test Conversation")
 
@@ -35,16 +38,20 @@ class TestSessionManager(unittest.TestCase):
         s1 = session_manager.create_session(title="Session 1")
         s2 = session_manager.create_session(title="Session 2")
 
-        s1["messages"].append({"role": "user", "content": "hello"})
+        s1["messages"].append({"role": "user", "content": "hello from s1"})
+        s2["messages"].append({"role": "user", "content": "hello from s2"})
         session_manager.save_session(s1)
+        session_manager.save_session(s2)
 
         sessions = session_manager.list_sessions()
         self.assertEqual(len(sessions), 2)
-        # Most recently saved session s1 should be first
-        self.assertEqual(sessions[0]["session_id"], s1["session_id"])
+        # Most recently saved session s2 should be first
+        self.assertEqual(sessions[0]["session_id"], s2["session_id"])
 
     def test_delete_session(self):
         sess = session_manager.create_session(title="Session to Delete")
+        sess["messages"].append({"role": "user", "content": "delete me"})
+        session_manager.save_session(sess)
         sid = sess["session_id"]
         
         self.assertTrue(session_manager.delete_session(sid))

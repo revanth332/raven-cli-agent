@@ -24,7 +24,7 @@ def get_sessions_dir() -> Path:
 
 def create_session(model_name: str = "gpt-4o", session_id: Optional[str] = None, title: str = "New Conversation") -> Dict[str, Any]:
     """
-    Creates a new session dictionary and persists it to disk.
+    Creates a new session dictionary in memory without creating an empty file on disk until messages are added.
     """
     if not session_id:
         session_id = str(uuid.uuid4())[:8]
@@ -38,17 +38,22 @@ def create_session(model_name: str = "gpt-4o", session_id: Optional[str] = None,
         "model_name": model_name,
         "messages": []
     }
-    save_session(session_data)
     set_active_session_id(session_id)
     return session_data
 
 
-def save_session(session_data: Dict[str, Any]) -> None:
+def save_session(session_data: Dict[str, Any], force: bool = False) -> None:
     """
     Saves or updates a session JSON file atomically.
+    By default, only persists to disk if there is at least one non-system message (or if force=True).
     """
     session_id = session_data.get("session_id")
     if not session_id:
+        return
+
+    messages = session_data.get("messages", [])
+    if not messages and not force:
+        # Do not persist empty waste sessions
         return
 
     session_data["updated_at"] = datetime.now(timezone.utc).isoformat()
@@ -88,22 +93,28 @@ def load_session(session_id: str) -> Optional[Dict[str, Any]]:
 
 def list_sessions() -> List[Dict[str, Any]]:
     """
-    Lists metadata summaries of all sessions, sorted by updated_at descending.
+    Lists metadata summaries of all active sessions (filtering out and purging 0-message empty sessions).
     """
     sessions_dir = get_sessions_dir()
     summaries = []
 
-    for file_path in sessions_dir.glob("*.json"):
+    for file_path in list(sessions_dir.glob("*.json")):
         try:
             with open(file_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
+                msgs = [m for m in data.get("messages", []) if m.get("role") != "system"]
+                if not msgs:
+                    # Purge empty waste session file from disk
+                    file_path.unlink(missing_ok=True)
+                    continue
+
                 summaries.append({
                     "session_id": data.get("session_id", file_path.stem),
                     "title": data.get("title", "Untitled Conversation"),
                     "created_at": data.get("created_at", ""),
                     "updated_at": data.get("updated_at", ""),
                     "model_name": data.get("model_name", "gpt-4o"),
-                    "message_count": len(data.get("messages", [])),
+                    "message_count": len(msgs),
                 })
         except Exception:
             continue
