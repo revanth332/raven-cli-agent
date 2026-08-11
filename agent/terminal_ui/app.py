@@ -44,6 +44,11 @@ ASK_PROMPT = read_prompt_from_file("prompts/ask_prompt.md")
 EXPLAIN_PROMPT=read_prompt_from_file("prompts/explain_prompt.md")
 
 SLASH_COMMANDS = {
+    "/exit":{
+        "description":"Exit Raven CLI Agent",
+        "placeholder":"/exit",
+        "system_prompt":""
+    },
     "/new":{
         "description":"Start a new chat session",
         "placeholder":"/new",
@@ -302,7 +307,6 @@ class RavenTUI(App):
     BINDINGS = [
         ("escape", "cancel_generation", "Stop Generation"),
         ("q", "quit", "Quit"),
-        ("ctrl+c", "quit", "Exit"),
     ]
 
     active_suggestions = []
@@ -356,6 +360,11 @@ class RavenTUI(App):
             chat_input = self.query_one("#chat_input", ChatInput)
             autocomplete.styles.display = "none"
             chat_input.styles.margin = (0, 0, 0, 0)
+
+            if cmd == "/exit":
+                chat_input.text = ""
+                self.exit()
+                return
 
             if cmd == "/model":
                 chat_input.text = ""
@@ -572,7 +581,7 @@ class RavenTUI(App):
         if not user_input:
             return
             
-        if user_input.lower() in ["exit", "quit"]:
+        if user_input.lower() in ["exit", "quit", "/exit"] or user_input.lower().startswith("/exit"):
             self.exit()
             return
         
