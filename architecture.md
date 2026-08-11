@@ -1,29 +1,33 @@
 Project architecture:
 
- Updated the architecture map to reflect the new Textual multi-modal TUI interface (`agent/tui.py`), the codebase indexer (`agent/indexer.py`), the autonomous evals suite (`agent/evals.py`), and how they integrate into the system. 
+ Updated project architecture to reflect modular structure of agent tools, safety checking subsystem, global settings, and core agent modules. 
 
  ```mermaid
 graph TD
-    subgraph CLI / Interface Layer
-        M[agent/main.py] -->|CLI Commands & Entrypoint| T[agent/tui.py]
+    subgraph UI_Layer [Terminal UI Layer]
+        Main[agent/main.py] -->|Launches| TUI[agent/terminal_ui/app.py]
+        TUI -->|Renders| Input[agent/terminal_ui/chat_input.py]
+        TUI -->|Renders| ModelSelect[agent/terminal_ui/model_select_modal.py]
+        TUI -->|Renders| PermBox[agent/terminal_ui/permission_box.py]
     end
 
-    subgraph Core Logic Layer
-        T -->|Asynchronous Interaction| L[agent/llm.py]
-        M -->|Standard Console Loop| L
-        L -->|Semantic Vector Search| I[agent/indexer.py]
+    subgraph Core_Layer [Core Agent Layer]
+        TUI -->|Uses session| LLM[agent/core/llm.py]
+        LLM -->|Resolves configuration| Settings[agent/core/settings.py]
+        TUI -->|Checks safety| Safety[agent/core/safety.py]
+        LLM -->|Vector Search| Indexer[agent/core/indexer.py]
     end
 
-    subgraph Prompt Templates
-        L -->|Loads Prompts| P{agent/prompts/}
+    subgraph Tools_Layer [Modular Agent Tools]
+        LLM -->|Calls function| ToolRegistry[agent/tools/tool_registry.py]
+        ToolRegistry -->|Registry| FileTools[agent/tools/file_tools.py]
+        ToolRegistry -->|Registry| GitTools[agent/tools/git_tools.py]
+        ToolRegistry -->|Registry| MemoryTools[agent/tools/memory_tools.py]
+        ToolRegistry -->|Registry| MiscTools[agent/tools/miscellaneous_tools.py]
     end
 
-    subgraph System & Action Layer
-        L -->|Direct File Mod & Command Exec| U[agent/utils.py]
-        M -->|File/Command Utils| U
-    end
-
-    subgraph Testing & Validation
-        E[agent/evals.py] -->|Autonomous Evals Suite| L
+    subgraph Prompt_Layer [Prompts & Evals]
+        LLM -->|Loads| Prompts{agent/prompts/}
+        Evals[agent/evals.py] -->|Evaluates| Main
     end
 ```

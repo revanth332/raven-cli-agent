@@ -10,6 +10,7 @@ class Settings:
         self.RAVEN_API_KEY = None
         self.RAVEN_MODEL = "google/gemini-3-flash-preview"
         self.RAVEN_USE_VERTEX_AI = False
+        self.RAVEN_AUTO_APPROVE = False
         self.config_file = Path.home() / ".raven" / "config.json"
         try:
             self.config = json.loads(self.config_file.read_text(encoding="utf-8"))
@@ -20,6 +21,7 @@ class Settings:
             self.RAVEN_API_KEY = self.config.get("RAVEN_API_KEY")
             self.RAVEN_MODEL = self.config.get("RAVEN_MODEL")
             self.RAVEN_USE_VERTEX_AI = self.config.get("RAVEN_USE_VERTEX_AI")
+            self.RAVEN_AUTO_APPROVE = self.config.get("RAVEN_AUTO_APPROVE", False)
     def set_config(self,config):
         if not self.config:
             self.config = {}

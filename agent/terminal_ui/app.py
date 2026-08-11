@@ -14,6 +14,7 @@ from agent.tools.tool_registry import TOOL_REGISTRY
 from agent.core.llm import get_chat_session
 from agent.utils import read_prompt_from_file,get_active_project_name
 from agent.core.settings import settings
+from agent.core.safety import is_command_dangerous
 from agent.terminal_ui.chat_input import ChatInput
 from agent.terminal_ui.permission_box import PermissionBox
 from agent.terminal_ui.thinking_loader import ThinkingMessage
@@ -43,6 +44,11 @@ SLASH_COMMANDS = {
     "/model":{
         "description":"Switch active AI model",
         "placeholder":"/model",
+        "system_prompt":""
+    },
+    "/auto-approve":{
+        "description":"Toggle Auto-Approval Mode",
+        "placeholder":"/auto-approve",
         "system_prompt":""
     },
     "/coach":{
@@ -386,6 +392,7 @@ class RavenTUI(App):
         active_model = settings.RAVEN_MODEL
         current_project = get_active_project_name()
         project_or_folder = current_project if current_project else str(Path.cwd())
+        approve_status = "[bold #10B981]Auto (Safeguarded)[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
         
         with Vertical(id="main_container", classes="centered"):
             with VerticalScroll(id="history") as history:
@@ -406,7 +413,7 @@ class RavenTUI(App):
                 yield OptionList(id="autocomplete_list")
                 yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
                 yield Static(
-                    f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]",
+                    f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
                     id="input_status"
                 )
         yield Footer()
@@ -417,9 +424,10 @@ class RavenTUI(App):
             active_model = settings.RAVEN_MODEL
             current_project = get_active_project_name()
             project_or_folder = current_project if current_project else str(Path.cwd())
+            approve_status = "[bold #10B981]Auto (Safeguarded)[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
             status_widget = self.query_one("#input_status", Static)
             status_widget.update(
-                f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]"
+                f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]{'Project' if current_project else 'Folder'}:[/dim #64748B] [bold #06B6D4]{project_or_folder}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
             )
         except Exception:
             pass
@@ -454,6 +462,27 @@ class RavenTUI(App):
             input_widget.text = ""
             self.query_one('#autocomplete_list', OptionList).styles.display = "none"
             self.open_model_select_modal()
+            return
+        
+        if user_input.lower() == "/auto-approve" or user_input.lower().startswith("/auto-approve "):
+            new_val = not settings.RAVEN_AUTO_APPROVE
+            settings.set_config({"RAVEN_AUTO_APPROVE": new_val})
+            self.update_status_bar()
+            
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            
+            history_container = self.query_one("#history")
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+                
+            status_str = "[green]Enabled[/green] (Safeguarded)" if new_val else "[red]Disabled[/red] (Manual)"
+            info_card = Static(classes="message raven-msg")
+            info_card.update(Markdown(f"**System:** Auto-Approval is now **{status_str}**."))
+            history_container.mount(info_card)
+            self.scroll_to_bottom()
             return
         
         main_container = self.query_one("#main_container")
@@ -611,27 +640,37 @@ class RavenTUI(App):
                     if tool_name in TOOL_REGISTRY:
                         tool_meta = TOOL_REGISTRY[tool_name]
                         
-                        if tool_name in ["execute_command","commit_staged_git_changes"]:
-                            self.permission_event.clear()
-                            title = f"Action Required: {tool_name}"
-                            msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)}"
-                            self.call_from_thread(self.ask_permission_ui,title,msg)
-                            self.permission_event.wait()
+                        if tool_name in ["execute_command", "commit_staged_git_changes"]:
+                            bypass_prompt = False
+                            if settings.RAVEN_AUTO_APPROVE:
+                                if tool_name == "commit_staged_git_changes":
+                                    bypass_prompt = True
+                                elif tool_name == "execute_command":
+                                    cmd_str = tool_args.get("command", "")
+                                    if not is_command_dangerous(cmd_str):
+                                        bypass_prompt = True
 
-                            if not self.permission_result:
-                                result = "Error: User denied permission."
-                                tool_responses_to_append.append({
-                                                            "role": "tool",
-                                                            "tool_call_id": fc["id"],
-                                                            "name": fc["name"],
-                                                            "content": result
-                                                        })
-                                continue
-                            if text_response:
-                                self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
-                            else:
-                                self.call_from_thread(raven_card.update, tool_logs)
-                            self.call_from_thread(self.scroll_to_bottom)
+                            if not bypass_prompt:
+                                self.permission_event.clear()
+                                title = f"Action Required: {tool_name}"
+                                msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)}"
+                                self.call_from_thread(self.ask_permission_ui,title,msg)
+                                self.permission_event.wait()
+
+                                if not self.permission_result:
+                                    result = "Error: User denied permission."
+                                    tool_responses_to_append.append({
+                                                                "role": "tool",
+                                                                "tool_call_id": fc["id"],
+                                                                "name": fc["name"],
+                                                                "content": result
+                                                            })
+                                    continue
+                                if text_response:
+                                    self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                                else:
+                                    self.call_from_thread(raven_card.update, tool_logs)
+                                self.call_from_thread(self.scroll_to_bottom)
 
                         if tool_name == "patch_file":
                             file_path = tool_args.get("file_path", "Unknown")
