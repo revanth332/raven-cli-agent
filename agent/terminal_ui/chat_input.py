@@ -1,10 +1,16 @@
 from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import TextArea
+from textual import events
+
+
 class ChatInput(TextArea):
     BINDINGS = [
         Binding("enter", "submit", "Submit", priority=True),
         Binding("shift+enter", "newline", "Newline", priority=True),
+        Binding("shift+return", "newline", "Newline", priority=True),
+        Binding("alt+enter", "newline", "Newline", priority=True),
+        Binding("ctrl+j", "newline", "Newline", priority=True),
     ]
 
     class Submitted(Message):
@@ -12,6 +18,16 @@ class ChatInput(TextArea):
             self.text_area = text_area
             self.value = value
             super().__init__()
+
+    def _on_key(self, event: events.Key) -> None:
+        if event.key in ("shift+enter", "shift+return", "alt+enter", "ctrl+j") or (
+            event.key in ("enter", "return") and ("shift" in event.modifiers or "alt" in event.modifiers)
+        ):
+            self.insert("\n")
+            event.prevent_default()
+            event.stop()
+            return
+        super()._on_key(event)
 
     def action_submit(self) -> None:
         try:
