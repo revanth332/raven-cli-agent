@@ -21,8 +21,7 @@ class ConsumptionSidebar(Vertical):
         min-width: 28;
         max-width: 38;
         height: 100%;
-        background: #14171f;
-        border-left: heavy #22D3EE;
+        background: #1e1e1e;
         padding: 1 1;
     }
     """
@@ -85,7 +84,7 @@ class ConsumptionSidebar(Vertical):
         elif context_pct > 50:
             bar_color = "yellow"
         else:
-            bar_color = "cyan"
+            bar_color = "#F59E0B"
 
         bar_str = f"[{bar_color}]" + "█" * filled_length + f"[dim white]" + "░" * empty_length + f"[/dim white][/{bar_color}]"
 
@@ -95,22 +94,15 @@ class ConsumptionSidebar(Vertical):
 
         # Render context bar using markup format in static
         text_markup = (
-            f"[bold #06B6D4]WORKSPACE & SESSION[/bold #06B6D4]\n"
-            f"[dim #475569]────────────────────────────[/dim #475569]\n"
-            f"[bold #F8FAFC]Project:[/bold #F8FAFC] [bold #06B6D4]{clean_project}[/bold #06B6D4]\n"
-            f"[bold #F8FAFC]Session:[/bold #F8FAFC] [bold #06B6D4]{clean_session}[/bold #06B6D4]\n"
-            f"[dim #475569]────────────────────────────[/dim #475569]\n\n"
-            f"[bold cyan]CONSUMPTION METRICS[/bold cyan]\n"
-            f"[dim #475569]────────────────────────────[/dim #475569]\n\n"
+            f"[bold #F8FAFC]Project:[/bold #F8FAFC] [bold #D97706]{clean_project}[/bold #D97706]\n"
+            f"[bold #F8FAFC]Session:[/bold #F8FAFC] [bold #D97706]{clean_session}[/bold #D97706]\n\n"
             f"[bold #F8FAFC]Context Fill:[/bold #F8FAFC] {context_pct:.1f}%\n"
             f"{bar_str}\n"
             f"[dim #94A3B8]{curr_context:,} / {max_context:,} tokens[/dim #94A3B8]\n\n"
-            f"[dim #475569]────────────────────────────[/dim #475569]\n\n"
             f"[bold #F8FAFC]Last Turn:[/bold #F8FAFC]\n"
             f"  [dim #94A3B8]Prompt:[/dim #94A3B8] {last_prompt:,}\n"
             f"  [dim #94A3B8]Completion:[/dim #94A3B8] {last_completion:,}\n"
             f"  [dim #94A3B8]Cost:[/dim #94A3B8] [bold #10B981]${last_cost:.4f}[/bold #10B981]\n\n"
-            f"[dim #475569]────────────────────────────[/dim #475569]\n\n"
             f"[bold #F8FAFC]Session Totals:[/bold #F8FAFC]\n"
             f"  [dim #94A3B8]Requests:[/dim #94A3B8] {total_reqs}\n"
             f"  [dim #94A3B8]Total Tokens:[/dim #94A3B8] {session_tokens:,}\n"

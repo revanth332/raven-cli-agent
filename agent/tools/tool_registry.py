@@ -2,6 +2,7 @@ from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_
 from agent.tools.file_tools import find_file,read_file,create_file,patch_file
 from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff
 from agent.tools.miscellaneous_tools import execute_command,get_current_timestamp
+from agent.tools.web_tools import web_search
 from agent.core.indexer import search_codebase
 
 raven_tools = [
@@ -347,6 +348,29 @@ raven_tools = [
                 "required": []
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "web_search",
+            "description": "Performs a real-time web search using DuckDuckGo to search for documentation, packages, error solutions, or up-to-date information.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query string."
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (1 to 10). Defaults to 5."
+                    }
+                },
+                "required": [
+                    "query"
+                ]
+            }
+        }
     }
 ]
 
@@ -451,6 +475,12 @@ TOOL_REGISTRY = {
         "fn": get_git_diff,
         "display_name": "Git Diff",
         "display_arg": "file_path",
+        "ignore_display": False
+    },
+    "web_search":{
+        "fn": web_search,
+        "display_name": "Web Search",
+        "display_arg": "query",
         "ignore_display": False
     },
 }
