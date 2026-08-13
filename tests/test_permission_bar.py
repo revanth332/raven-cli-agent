@@ -81,6 +81,27 @@ class TestPermissionBar(unittest.TestCase):
 
         asyncio.run(run_test())
 
+    def test_unmount_unblocks_pending_permission(self):
+        app = RavenTUI()
+
+        async def run_test():
+            async with app.run_test() as pilot:
+                app.ask_permission_ui("Action Required", "Execute command test")
+                await pilot.pause()
+
+                self.assertTrue(app.pending_permission)
+                self.assertFalse(app.permission_event.is_set())
+
+                # Simulate app shutdown unmount
+                app.on_unmount()
+                await pilot.pause()
+
+                self.assertTrue(app.permission_event.is_set())
+                self.assertTrue(app.cancel_event.is_set())
+                self.assertFalse(app.pending_permission)
+
+        asyncio.run(run_test())
+
 
 if __name__ == "__main__":
     unittest.main()

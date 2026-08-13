@@ -333,6 +333,18 @@ class RavenTUI(App):
 
         self.initialize_ai()
 
+    def on_unmount(self) -> None:
+        """Ensures background worker threads unblock and exit cleanly on application shutdown."""
+        self.pending_permission = False
+        self.permission_result = False
+        self.cancel_event.set()
+        self.permission_event.set()
+
+    def action_quit(self) -> None:
+        """Cleanly quits the application."""
+        self.on_unmount()
+        self.exit()
+
     def action_cancel_generation(self):
         """Interrupts the active AI generation or denies pending permission."""
         if self.pending_permission:
@@ -477,14 +489,8 @@ class RavenTUI(App):
         try:
             self.chat_session = get_chat_session()
             self.is_generating = False
-            try:
-                sidebar = self.query_one(ConsumptionSidebar)
-                session_title = getattr(self.chat_session, "session_title", "New Conversation")
-                current_project = get_active_project_name()
-                project_name = current_project if current_project else Path.cwd().name
-                self.call_from_thread(sidebar.update_metrics, self.chat_session.get_context_usage(), session_title, project_name)
-            except Exception:
-                pass
+            self.call_from_thread(self.reload_history_ui)
+            self.call_from_thread(self.update_status_bar)
             self.call_from_thread(self.notify, "Raven AI Engine initialized!", title="System", severity="information")
         except Exception as e:
             self.call_from_thread(self.notify, f"Error initializing AI: {e}", title="Error", severity="error")
@@ -859,6 +865,9 @@ class RavenTUI(App):
                                 msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)}"
                                 self.call_from_thread(self.ask_permission_ui, title, msg)
                                 self.permission_event.wait()
+
+                                if self.cancel_event.is_set():
+                                    break
 
                                 if not self.permission_result:
                                     instr = getattr(self, "permission_instruction", "")
