@@ -35,12 +35,15 @@ class TestSessionManager(unittest.TestCase):
         self.assertEqual(loaded["title"], "Test Conversation")
 
     def test_list_sessions_sorting(self):
+        import time
         s1 = session_manager.create_session(title="Session 1")
-        s2 = session_manager.create_session(title="Session 2")
-
         s1["messages"].append({"role": "user", "content": "hello from s1"})
-        s2["messages"].append({"role": "user", "content": "hello from s2"})
         session_manager.save_session(s1)
+
+        time.sleep(0.01)
+
+        s2 = session_manager.create_session(title="Session 2")
+        s2["messages"].append({"role": "user", "content": "hello from s2"})
         session_manager.save_session(s2)
 
         sessions = session_manager.list_sessions()

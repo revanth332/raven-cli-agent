@@ -2,36 +2,35 @@ from textual.app import ComposeResult
 from textual.widgets import Static, Button
 from textual.containers import Horizontal
 
-class PermissionBox(Static):
-    """An inline safety box that renders directly inside the chat history."""
+class PermissionBar(Static):
+    """A safety prompt bar mounted above the chat input during tool execution requests."""
     
-    def __init__(self, title: str, message: str, callback):
-        # We give it the same base classes as a chat message, plus a specific alert class
-        super().__init__(classes="message permission-msg") 
+    def __init__(self, title: str, message: str, on_allow, on_deny):
+        super().__init__(id="permission_bar")
         self.title_text = title
         self.message_text = message
-        self.callback = callback
+        self.on_allow = on_allow
+        self.on_deny = on_deny
 
     def compose(self) -> ComposeResult:
-        # Display the warning text
-        yield Static(f"[bold red]{self.title_text}[/bold red]\n[dim]{self.message_text}[/dim]")
-        
-        # Display the buttons side-by-side
+        yield Static(
+            f"[bold #EF4048]{self.title_text}[/bold #EF4048]\n"
+            f"[dim #E2E8F0]{self.message_text}[/dim #E2E8F0]\n"
+            f"[dim #38BDF8]Press [bold]Enter[/bold] to Allow, or type an optional instruction below and press Enter to deny with feedback.[/dim #38BDF8]"
+        )
         with Horizontal(id="perm-buttons"):
-            yield Button("Yes, Allow", id="yes", variant="success")
-            yield Button("No, Deny", id="no", variant="error")
+            yield Button("Allow (Enter)", id="yes")
+            yield Button("Deny (Esc)", id="no")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Fires when the user clicks Yes or No."""
-        # 1. Remove the buttons so the chat history looks clean!
-        self.query_one("#perm-buttons").remove()
-        
-        # 2. Update the box to show what the user chose
+        """Handles button clicks for Allow and Deny."""
         if event.button.id == "yes":
-            self.mount(Static("[bold green]✔ Permission Granted[/bold green]"))
-            self.callback(True)
+            self.on_allow()
         else:
-            self.mount(Static("[bold red]✖ Permission Denied[/bold red]"))
-            self.callback(False)
-        self.remove()
+            self.on_deny()
+
+
+# Backward compatibility alias
+PermissionBox = PermissionBar
+
 

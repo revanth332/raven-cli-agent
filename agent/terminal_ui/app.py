@@ -16,7 +16,7 @@ from agent.utils import read_prompt_from_file,get_active_project_name
 from agent.core.settings import settings
 from agent.core.safety import is_command_dangerous
 from agent.terminal_ui.chat_input import ChatInput
-from agent.terminal_ui.permission_box import PermissionBox
+from agent.terminal_ui.permission_box import PermissionBox, PermissionBar
 from agent.terminal_ui.thinking_loader import ThinkingMessage
 from agent.terminal_ui.model_select_modal import ModelSelectModal
 from agent.terminal_ui.session_select_modal import SessionSelectModal
@@ -242,9 +242,18 @@ class RavenTUI(App):
         background: #1e1e1e;
     }
     
-    .permission-msg {
-        padding: 1 1;
-        margin: 1 0;
+    #permission_bar {
+        background: #1e1e1e;
+        border: none;
+        border-left: heavy #EF4048;
+        padding: 1 2;
+        margin-bottom: 1;
+        height: auto;
+    }
+    
+    #perm-buttons {
+        height: auto;
+        margin-top: 1;
     }
     
     #perm-buttons {
@@ -253,24 +262,25 @@ class RavenTUI(App):
     }
     
     #perm-buttons Button {
-        margin-right: 2;
-        min-width: 12;
-        height: 3;
+        margin-right: 3;
+        min-width: 14;
+        height: 1;
         background: transparent;
         border: none;
+        text-style: bold;
     }
     #perm-buttons Button:hover {
         background: rgba(255, 255, 255, 0.1);
     }
     #perm-buttons #yes {
-        color: #ffffff;
+        color: #10B981;
         background: transparent;
-        border: round #ffffff;
+        border: none;
     }
     #perm-buttons #no {
-        color: #ffffff;
+        color: #FACC15;
         background: transparent;
-        border: round #ffffff;
+        border: none;
     }
     #thinking_container {
         height: auto;
@@ -317,12 +327,18 @@ class RavenTUI(App):
         self.permission_event = threading.Event()
         self.cancel_event = threading.Event()
         self.permission_result = False
+        self.permission_instruction = ""
+        self.pending_permission = False
         self.is_generating = False
 
         self.initialize_ai()
 
     def action_cancel_generation(self):
-        """Interrupts the active AI generation."""
+        """Interrupts the active AI generation or denies pending permission."""
+        if self.pending_permission:
+            self.resolve_permission(granted=False, instruction="")
+            return
+
         self.cancel_event.set()
         # Close option list if it's open, just in case
         autocomplete = self.query_one("#autocomplete_list", OptionList)
@@ -400,18 +416,53 @@ class RavenTUI(App):
                 event.stop()
             
 
-    def ask_permission_ui(self,title:str,message:str):
-        """Pushes the modal to the screen and handles the result."""
-        def callback(result:bool):
-            self.permission_result = result
-            self.permission_event.set()
+    def ask_permission_ui(self, title: str, message: str):
+        """Pushes the permission bar above the chat input area."""
+        self.pending_permission = True
+        self.permission_result = False
+        self.permission_instruction = ""
 
-        history = self.query_one("#history")
-        box = PermissionBox(title, message, callback)
-        history.mount(box)
-        
-        # Scroll down so the user immediately sees the buttons
-        box.scroll_visible()
+        def on_allow():
+            self.resolve_permission(granted=True, instruction="")
+
+        def on_deny():
+            self.resolve_permission(granted=False, instruction="")
+
+        bottom_bar = self.query_one("#bottom_bar")
+        chat_input = self.query_one("#chat_input", ChatInput)
+
+        try:
+            old_bar = self.query_one("#permission_bar")
+            old_bar.remove()
+        except Exception:
+            pass
+
+        bar = PermissionBar(title, message, on_allow, on_deny)
+        bottom_bar.mount(bar, before=chat_input)
+
+        chat_input.placeholder = "Press Enter to allow, or type instruction & Enter to deny/modify..."
+        chat_input.focus()
+
+    def resolve_permission(self, granted: bool, instruction: str = ""):
+        """Resolves the active permission request and restores standard input state."""
+        if not self.pending_permission:
+            return
+
+        self.pending_permission = False
+        self.permission_result = granted
+        self.permission_instruction = instruction
+
+        try:
+            bar = self.query_one("#permission_bar")
+            bar.remove()
+        except Exception:
+            pass
+
+        chat_input = self.query_one("#chat_input", ChatInput)
+        chat_input.placeholder = "Ask Raven something... (Shift+Enter for newline, 'exit' to quit)"
+        chat_input.focus()
+
+        self.permission_event.set()
 
     def scroll_to_bottom(self):
         """Scrolls the chat history container to the very bottom."""
@@ -572,6 +623,16 @@ class RavenTUI(App):
 
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         """Triggers when the user presses 'Enter' in the input box."""
+        if self.pending_permission:
+            user_text = event.value.strip()
+            input_widget = event.text_area
+            input_widget.text = ""
+            if not user_text:
+                self.resolve_permission(granted=True, instruction="")
+            else:
+                self.resolve_permission(granted=False, instruction=user_text)
+            return
+
         if self.is_generating:
             self.notify("A response is currently generating. Please wait or press Esc to cancel.", title="Busy", severity="warning")
             return
@@ -796,18 +857,31 @@ class RavenTUI(App):
                                 self.permission_event.clear()
                                 title = f"Action Required: {tool_name}"
                                 msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)}"
-                                self.call_from_thread(self.ask_permission_ui,title,msg)
+                                self.call_from_thread(self.ask_permission_ui, title, msg)
                                 self.permission_event.wait()
 
                                 if not self.permission_result:
-                                    result = "Error: User denied permission."
+                                    instr = getattr(self, "permission_instruction", "")
+                                    if instr:
+                                        result = f"User denied permission and provided instructions: '{instr}'"
+                                        tool_logs.append(f"\nPermission Denied (Instruction: \"{instr}\")\n", style="bold red")
+                                    else:
+                                        result = "Error: User denied permission."
+                                        tool_logs.append("\nPermission Denied\n", style="bold red")
+
                                     tool_responses_to_append.append({
-                                                                "role": "tool",
-                                                                "tool_call_id": fc["id"],
-                                                                "name": fc["name"],
-                                                                "content": result
-                                                            })
+                                        "role": "tool",
+                                        "tool_call_id": fc["id"],
+                                        "name": fc["name"],
+                                        "content": result
+                                    })
+                                    if text_response:
+                                        self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                                    else:
+                                        self.call_from_thread(raven_card.update, tool_logs)
+                                    self.call_from_thread(self.scroll_to_bottom)
                                     continue
+
                                 if text_response:
                                     self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
                                 else:
