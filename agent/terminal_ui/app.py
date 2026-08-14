@@ -570,6 +570,19 @@ class RavenTUI(App):
                 except Exception:
                     pass
                 self.notify(f"Switched session to '{self.chat_session.session_title}'", title="Session Changed", severity="information")
+            else:
+                if self.chat_session:
+                    active_id = getattr(self.chat_session, "session_id", None)
+                    if active_id:
+                        sessions = list_sessions()
+                        if not any(s["session_id"] == active_id for s in sessions):
+                            if sessions:
+                                self.chat_session = get_chat_session(session_id=sessions[0]["session_id"])
+                                self.notify(f"Active session was deleted. Switched to '{self.chat_session.session_title}'", title="Session Changed", severity="warning")
+                            else:
+                                self.start_new_session()
+                            self.reload_history_ui()
+                            self.update_status_bar()
 
         self.push_screen(SessionSelectModal(), on_session_dismiss)
 
