@@ -1,11 +1,12 @@
 Project architecture:
 
- Raven CLI Agent architecture diagram detailing the TUI layout, permission bar subsystem, and core agent modules. 
+ Updated architecture map to include agent/terminal_ui/chat_message.py ChatMessageWidget component. 
 
  ```mermaid
 graph TD
     UI[agent/terminal_ui/app.py] -->|renders| Input[agent/terminal_ui/chat_input.py]
     UI -->|renders| Sidebar[agent/terminal_ui/sidebar.py]
+    UI -->|renders| Msg[agent/terminal_ui/chat_message.py]
     UI -->|mounts| PermBar[agent/terminal_ui/permission_box.py]
     UI -->|mounts| Modals[Modal Dialogs]
     Modals --> ModelModal[model_select_modal.py]

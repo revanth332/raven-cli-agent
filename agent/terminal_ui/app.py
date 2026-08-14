@@ -16,6 +16,7 @@ from agent.utils import read_prompt_from_file,get_active_project_name
 from agent.core.settings import settings
 from agent.core.safety import is_command_dangerous
 from agent.terminal_ui.chat_input import ChatInput
+from agent.terminal_ui.chat_message import ChatMessageWidget
 from agent.terminal_ui.permission_box import PermissionBox, PermissionBar
 from agent.terminal_ui.thinking_loader import ThinkingMessage
 from agent.terminal_ui.model_select_modal import ModelSelectModal
@@ -476,6 +477,20 @@ class RavenTUI(App):
 
         self.permission_event.set()
 
+    def safe_update_raven_card(self, raven_card: ChatMessageWidget, content, raw_text: str = None) -> None:
+        """Safely mounts and updates the Raven message card during streaming to avoid displaying empty boxes."""
+        try:
+            if raven_card.parent is None:
+                self.query_one("#history").mount(raven_card)
+        except Exception:
+            pass
+
+        if raw_text is not None:
+            raven_card.update(content, raw_text)
+        else:
+            raven_card.update(content)
+        self.scroll_to_bottom()
+
     def scroll_to_bottom(self):
         """Scrolls the chat history container to the very bottom."""
         try:
@@ -618,12 +633,10 @@ class RavenTUI(App):
                     role = msg.get("role")
                     content = msg.get("content")
                     if role == "user" and content:
-                        card = Static(classes="message user-msg")
-                        card.update(Markdown(content))
+                        card = ChatMessageWidget(role="user", raw_text=content, classes="user-msg")
                         history_container.mount(card)
                     elif role == "assistant" and content:
-                        card = Static(classes="message raven-msg")
-                        card.update(Markdown(content))
+                        card = ChatMessageWidget(role="assistant", raw_text=content, classes="raven-msg")
                         history_container.mount(card)
 
             self.scroll_to_bottom()
@@ -701,8 +714,7 @@ class RavenTUI(App):
                 main_container.remove_class("centered")
                 
             status_str = "[green]Enabled[/green] (Safeguarded)" if new_val else "[red]Disabled[/red] (Manual)"
-            info_card = Static(classes="message raven-msg")
-            info_card.update(Markdown(f"**System:** Auto-Approval is now **{status_str}**."))
+            info_card = ChatMessageWidget(role="assistant", raw_text=f"**System:** Auto-Approval is now **{status_str}**.", classes="raven-msg")
             history_container.mount(info_card)
             self.scroll_to_bottom()
             return
@@ -720,8 +732,7 @@ class RavenTUI(App):
         # 1. Echo the user's message into the scrollable history area
         history_container = self.query_one("#history")
         
-        user_card = Static(classes="message user-msg")
-        user_card.update(Markdown(user_input))
+        user_card = ChatMessageWidget(role="user", raw_text=user_input, classes="user-msg")
         history_container.mount(user_card)
 
         if user_input.startswith("/"):
@@ -734,20 +745,19 @@ class RavenTUI(App):
             else:
                 user_input = f"{SLASH_COMMANDS[cmd]['system_prompt']}\n {query}"
 
-        # 2. Echo a mock response from Raven for now
-        raven_card = Static()
-        history_container.mount(raven_card)
+        # 2. Instantiate Raven response card but do not mount it yet
+        raven_card = ChatMessageWidget(role="assistant", raw_text="", classes="raven-msg")
         self.scroll_to_bottom()
 
         self.is_generating = True
-        self.stream_response(user_input,raven_card)
+        self.stream_response(user_input, raven_card)
         
     
     @work(thread=True)
-    def stream_response(self,query:str,raven_card:Static):
+    def stream_response(self,query:str,raven_card:ChatMessageWidget):
         """Background thread that streams the AI response without freezing the UI."""
         if not self.chat_session:
-            self.call_from_thread(raven_card.update, "[red]AI is still initializing. Please try again.[/red]")
+            self.call_from_thread(self.safe_update_raven_card, raven_card, "[red]AI is still initializing. Please try again.[/red]")
             return
         start_time = time.time()
         self.cancel_event.clear()
@@ -794,10 +804,9 @@ class RavenTUI(App):
                             if hasattr(delta,"content") and delta.content:
                                 text_response += delta.content
                                 if tool_logs:
-                                    self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
                                 else:
-                                    self.call_from_thread(raven_card.update, Markdown(text_response))
-                                self.call_from_thread(self.scroll_to_bottom)
+                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(text_response), text_response)
                         break
                     except Exception as api_error:
                         if thinking_message:                                                                                                                                
@@ -808,7 +817,7 @@ class RavenTUI(App):
                                 # Exponential backoff: 2, 4, 8, 16 seconds...
                                 sleep_time = 2 ** (attempt + 1) 
                                 msg = f"*API Rate Limit hit. (Retrying in {sleep_time}s)*"
-                                self.call_from_thread(raven_card.update, Markdown(msg))
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(msg), msg)
                                 time.sleep(sleep_time)
                                 continue
                         raise api_error
@@ -898,17 +907,15 @@ class RavenTUI(App):
                                         "content": result
                                     })
                                     if text_response:
-                                        self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                                        self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
                                     else:
-                                        self.call_from_thread(raven_card.update, tool_logs)
-                                    self.call_from_thread(self.scroll_to_bottom)
+                                        self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
                                     continue
 
                                 if text_response:
-                                    self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
                                 else:
-                                    self.call_from_thread(raven_card.update, tool_logs)
-                                self.call_from_thread(self.scroll_to_bottom)
+                                    self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
 
                         if tool_name == "patch_file":
                             file_path = tool_args.get("file_path", "Unknown")
@@ -941,10 +948,9 @@ class RavenTUI(App):
                             
                             tool_logs.append("\n")
                             if text_response:
-                                self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
                             else:
-                                self.call_from_thread(raven_card.update, tool_logs)
-                            self.call_from_thread(self.scroll_to_bottom)
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
                         elif not tool_meta.get("ignore_display"):
                             display_name = tool_meta["display_name"]
                             tool_logs.append(f"\n• {display_name}")
@@ -960,10 +966,9 @@ class RavenTUI(App):
                             else:
                                 tool_logs.append("\n")
                             if text_response:
-                                self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
                             else:
-                                self.call_from_thread(raven_card.update, tool_logs)
-                            self.call_from_thread(self.scroll_to_bottom)
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
                         try:
                             result = tool_meta["fn"](**tool_args)
                         except Exception as e:
@@ -990,10 +995,9 @@ class RavenTUI(App):
             
             tool_logs.append(f"\n\nGeneration took {time_str}",style="dim white")
             if text_response:
-                self.call_from_thread(raven_card.update, Group(tool_logs, Markdown(text_response)))
+                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
             else:
-                self.call_from_thread(raven_card.update, tool_logs)
-            self.call_from_thread(self.scroll_to_bottom)
+                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
 
             if self.chat_session:
                 summary = self.chat_session.record_turn_usage(assistant_response=text_response)
@@ -1007,7 +1011,7 @@ class RavenTUI(App):
                     pass
                 
         except Exception as e:
-            self.call_from_thread(raven_card.update, Markdown(f"**Error:** {e}"))
+            self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(f"**Error:** {e}"), f"Error: {e}")
         finally:
             self.is_generating = False
 
