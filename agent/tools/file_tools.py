@@ -2,6 +2,12 @@ from pathlib import Path
 import os
 from agent.utils import backup_file
 
+def is_sensitive_file(file_path:str):
+    sensitive_file_exts = {".env"}
+    if any(file_path.lower().endswith(ext) for ext in sensitive_file_exts):
+        return True
+    return False
+
 def patch_file(file_path:str,search_block:str,replace_block:str):
     """
     Use this tool to safely edit a file by replacing an exact, unique block of existing text with new text.
@@ -10,6 +16,8 @@ def patch_file(file_path:str,search_block:str,replace_block:str):
         search_block: The exact existing block of text in the file that needs to be replaced.
         replace_block: The new text block that will replace the search_block.
     """
+    if is_sensitive_file(file_path):
+        return f"ACCESS DENIED for {file_path}. Reason: SENSITIVE FILE."
     try:
         path = Path(file_path)
         if not path.exists():
@@ -46,7 +54,12 @@ def find_file(file_name:str):
     Returns:
         A list of matching filepaths, or a message saying no matches were found.
     """
-    IGNORE_DIRS = {'node_modules', '.git', 'venv', 'env', '.venv', '__pycache__', 'dist', 'build'}
+    IGNORE_DIRS = {'node_modules', '.git', 'venv', '.env', '.venv', '__pycache__', 'dist', 'build'}
+    IGNORE_EXTS = {
+            '.env'
+        }
+    if is_sensitive_file(file_name):
+        return f"ACCESS DENIED for {file_name}. Reason: SENSITIVE FILE."
     matches = []
     normalized_file_path = Path(file_name).as_posix()
     for root,dirs,files in os.walk("."):
@@ -56,9 +69,11 @@ def find_file(file_name:str):
             if d not in IGNORE_DIRS and not (Path(root) / d / "pyvenv.cfg").exists()
         ]
         for file in files:
+            if any(file.lower().endswith(ext) for ext in IGNORE_EXTS):
+                continue
             rel_path = Path(root) / file
             rel_path = rel_path.as_posix()
-            if file == normalized_file_path or rel_path.endswith(normalized_file_path):
+            if not rel_path.endswith(".env") and file == normalized_file_path or rel_path.endswith(normalized_file_path):
                 matches.append(rel_path)
 
     if not matches:
@@ -73,6 +88,8 @@ def read_file(file_path:str):
     Returns:
         The content of the file, or an error message.
     """
+    if is_sensitive_file(file_path):
+        return f"ACCESS DENIED for {file_path}. Reason: SENSITIVE FILE."
     try:
         return Path(file_path).read_text(encoding="utf-8")
     except FileNotFoundError as e:
@@ -115,6 +132,8 @@ def delete_file(file_path: str) -> str:
     Returns:
         A success or error message.
     """
+    if is_sensitive_file:
+        return f"ACCESS DENIED for {file_path}. Reason: SENSITIVE FILE."
     try:
         path = Path(file_path)
         if not path.exists():

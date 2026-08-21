@@ -19,6 +19,7 @@ MODEL_PRICING_REGISTRY: Dict[str, Dict[str, Any]] = {
     "anthropic/claude-3.5-sonnet": {"input_cost_per_1m": 3.00, "output_cost_per_1m": 15.00, "context_limit": 200000},
     
     # Google Gemini models
+    "gemini-3.7-flash": {"input_cost_per_1m": 0.75, "output_cost_per_1m": 3.75, "context_limit": 1048576},
     "gemini-3.6-flash": {"input_cost_per_1m": 1.50, "output_cost_per_1m": 7.50, "context_limit": 1048576},
     "gemini-3.5-flash": {"input_cost_per_1m": 1.50, "output_cost_per_1m": 9.00, "context_limit": 1048576},
     "gemini-3.1-pro-preview": {"input_cost_per_1m": 2.00, "output_cost_per_1m": 12.00, "context_limit": 1048576},

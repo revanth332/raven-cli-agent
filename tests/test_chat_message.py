@@ -31,7 +31,7 @@ class TestChatMessageWidget(unittest.TestCase):
                 self.assertEqual(widget.raw_text, "How do I use Raven CLI?")
 
                 btn = widget.query_one("#copy_btn", Static)
-                self.assertEqual(str(btn.render()), "📋 Copy")
+                self.assertEqual(str(btn.render()), "Copy")
 
                 await pilot.click("#copy_btn")
                 await pilot.pause()

@@ -12,6 +12,7 @@ logging.getLogger("google_genai").setLevel(logging.ERROR)
 
 from agent.utils import get_active_project_name,get_repo_map,read_prompt_from_file
 from agent.tools.memory_tools import get_memory_content,get_project_memory
+from agent.core.skills_manager import build_skills_prompt_section
 from agent.tools.tool_registry import raven_tools
 from agent.core.settings import settings
 from agent.core.token_counter import count_tokens
@@ -71,7 +72,9 @@ class AgentChatSession:
         repo_map = get_repo_map()
         COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.md") if is_coach else ""
 
-        self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT)
+        skills_section = build_skills_prompt_section()
+
+        self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT).replace("{skills}", skills_section)
         
         session_data = load_session(session_id) if session_id else None
         if not session_data:

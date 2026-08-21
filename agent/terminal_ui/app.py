@@ -21,6 +21,7 @@ from agent.terminal_ui.permission_box import PermissionBox, PermissionBar
 from agent.terminal_ui.thinking_loader import ThinkingMessage
 from agent.terminal_ui.model_select_modal import ModelSelectModal
 from agent.terminal_ui.session_select_modal import SessionSelectModal
+from agent.terminal_ui.skills_modal import SkillsManagerModal, CreateSkillModal
 from agent.terminal_ui.sidebar import ConsumptionSidebar
 from agent.core.session_manager import create_session, list_sessions
 
@@ -68,6 +69,16 @@ SLASH_COMMANDS = {
     "/model":{
         "description":"Switch active AI model",
         "placeholder":"/model",
+        "system_prompt":""
+    },
+    "/skills":{
+        "description":"View and manage installed agent skills",
+        "placeholder":"/skills",
+        "system_prompt":""
+    },
+    "/add-skill":{
+        "description":"Create and install a new agent skill",
+        "placeholder":"/add-skill",
         "system_prompt":""
     },
     "/auto-approve":{
@@ -405,6 +416,16 @@ class RavenTUI(App):
                 self.open_session_select_modal()
                 return
 
+            if cmd == "/skills":
+                chat_input.text = ""
+                self.open_skills_modal()
+                return
+
+            if cmd == "/add-skill":
+                chat_input.text = ""
+                self.open_create_skill_modal()
+                return
+
             if cmd == "/new":
                 chat_input.text = ""
                 self.start_new_session()
@@ -653,6 +674,20 @@ class RavenTUI(App):
 
         self.push_screen(ModelSelectModal(current_model=settings.RAVEN_MODEL), on_model_dismiss)
 
+    def open_skills_modal(self) -> None:
+        def on_skills_dismiss(selected: str | None) -> None:
+            pass
+
+        self.push_screen(SkillsManagerModal(), on_skills_dismiss)
+
+    def open_create_skill_modal(self) -> None:
+        def on_create_dismiss(result: dict | None) -> None:
+            if result:
+                self.notify(f"Skill '{result.get('name')}' installed successfully!", title="Skill Installed", severity="information")
+                self.initialize_ai()
+
+        self.push_screen(CreateSkillModal(), on_create_dismiss)
+
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         """Triggers when the user presses 'Enter' in the input box."""
         if self.pending_permission:
@@ -699,6 +734,20 @@ class RavenTUI(App):
             self.open_model_select_modal()
             return
         
+        if user_input.lower() in ["/skills", "/skills "] or user_input.lower().startswith("/skills "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.open_skills_modal()
+            return
+
+        if user_input.lower() in ["/add-skill", "/add-skill "] or user_input.lower().startswith("/add-skill "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.open_create_skill_modal()
+            return
+        
         if user_input.lower() == "/auto-approve" or user_input.lower().startswith("/auto-approve "):
             new_val = not settings.RAVEN_AUTO_APPROVE
             settings.set_config({"RAVEN_AUTO_APPROVE": new_val})
@@ -741,7 +790,7 @@ class RavenTUI(App):
             query = parts[1].lower().strip() if len(parts) > 1 else ""
 
             if cmd == "/report":
-                user_input = SLASH_COMMANDS[cmd]['system_prompt'].replace("{timeperiod}",query)
+                user_input = SLASH_COMMANDS[cmd]['system_prompt'].replace("<time_period>",query)
             else:
                 user_input = f"{SLASH_COMMANDS[cmd]['system_prompt']}\n {query}"
 

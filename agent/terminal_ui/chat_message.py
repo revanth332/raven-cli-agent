@@ -70,7 +70,7 @@ class ChatMessageWidget(Vertical):
                 yield Static("[bold #06B6D4]YOU[/bold #06B6D4]", classes="msg-role")
             else:
                 yield Static("[bold #10B981]RAVEN[/bold #10B981]", classes="msg-role")
-            yield Static("📋 Copy", id="copy_btn", classes="copy-btn")
+            yield Static("Copy", id="copy_btn", classes="copy-btn")
         yield Static(id="msg_content", classes="msg-content")
 
     def on_mount(self) -> None:
@@ -128,7 +128,7 @@ class ChatMessageWidget(Vertical):
 
             def reset_btn() -> None:
                 try:
-                    btn.update("📋 Copy")
+                    btn.update("Copy")
                 except Exception:
                     pass
 

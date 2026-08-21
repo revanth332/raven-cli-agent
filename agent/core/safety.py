@@ -41,7 +41,8 @@ def is_command_dangerous(command_str: str) -> bool:
         # Dangerous base commands
         dangerous_commands = {
             "rm", "del", "rd", "rmdir", "shred", "wipe", 
-            "format", "fdisk", "dd", "mkfs", "chown", "chmod"
+            "format", "fdisk", "dd", "mkfs", "chown", "chmod", 'delete',
+            "Get-ChildItem","Test-Path","where","attrib",
         }
         
         if base_cmd_clean in dangerous_commands or base_name in dangerous_commands:
@@ -52,7 +53,7 @@ def is_command_dangerous(command_str: str) -> bool:
             return True
             
         # Check for dangerous flags in remaining tokens
-        dangerous_flags = {"-rf", "/s", "/q", "--no-preserve-root"}
+        dangerous_flags = {"-rf", "/s", "/q", "--no-preserve-root","-c"}
         for t in tokens[1:]:
             t_low = t.lower()
             # Direct match or containing dangerous flag patterns
