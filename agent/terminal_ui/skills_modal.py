@@ -31,7 +31,7 @@ class CreateSkillModal(ModalScreen[dict | None]):
         max-width: 90;
         height: 85%;
         background: #1e1e1e;
-        border: heavy #06B6D4;
+        border: none;
         padding: 1 2;
     }
 
@@ -46,28 +46,28 @@ class CreateSkillModal(ModalScreen[dict | None]):
         color: #38BDF8;
         text-style: bold;
         margin-top: 1;
-        margin-bottom: 0;
+        margin-bottom: 1;
     }
 
     #input_skill_name {
         background: #252526;
-        border: solid #06B6D4;
+        border: none;
         color: #F8FAFC;
-        margin-bottom: 0;
+        margin-bottom: 1;
         height: 3;
     }
 
     #input_skill_desc {
         background: #252526;
-        border: solid #06B6D4;
+        border: none;
         color: #F8FAFC;
         height: 5;
-        margin-bottom: 0;
+        margin-bottom: 1;
     }
 
     #input_skill_content {
         background: #252526;
-        border: solid #06B6D4;
+        border: none;
         color: #F8FAFC;
         height: 1fr;
         min-height: 8;
@@ -93,14 +93,14 @@ class CreateSkillModal(ModalScreen[dict | None]):
     }
 
     #btn_submit_create {
-        background: #06B6D4;
-        color: #05070B;
-        text-style: bold;
-        border: none;
+        background: transparent;
+        color: #E2E8F0;
+        border: round #64748B;
     }
 
     #btn_submit_create:hover {
-        background: #22D3EE;
+        background: #2d3748;
+        color: #38BDF8;
     }
     """
 
@@ -174,7 +174,7 @@ class SkillsManagerModal(ModalScreen[str | None]):
         max-width: 85;
         height: 70%;
         background: #1e1e1e;
-        border: heavy #06B6D4;
+        border: none;
         padding: 1 2;
     }
 
@@ -225,14 +225,14 @@ class SkillsManagerModal(ModalScreen[str | None]):
     }
 
     #btn_create_skill {
-        background: #06B6D4;
-        color: #05070B;
-        text-style: bold;
-        border: none;
+        background: transparent;
+        color: #E2E8F0;
+        border: round #64748B;
     }
 
     #btn_create_skill:hover {
-        background: #22D3EE;
+        background: #2d3748;
+        color: #38BDF8;
     }
     """
 
