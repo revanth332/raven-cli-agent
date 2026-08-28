@@ -6,7 +6,7 @@ def get_memory_content():
     """
     Load Global memory content from the memory file if exists or creates a memory file.
     """
-    memory_file = Path.home() / ".raven" / "memory.md"
+    memory_file = Path.home() / ".raven" / "memory" / "global_memory.md"
 
     if not memory_file.exists():
         memory_file.parent.mkdir(parents=True,exist_ok=True)
@@ -14,18 +14,36 @@ def get_memory_content():
         memory_file.write_text(default_memory,encoding='utf-8')
     return memory_file.read_text(encoding='utf-8')
 
-def get_project_memory():
+def get_project_memory_info():
     """Loads or initializes memory specific to the active project folder."""
     project_name = get_active_project_name()
     if not project_name:
-        return ""
-    project_name += ".md"
-    project_memory_file = Path.home() / ".raven" / "projects" / project_name
+        return "","No memory available yet."
+    project_memory_file = Path.home() / ".raven" / "memory" / "projects" / (project_name + ".md")
     if not project_memory_file.exists():
         project_memory_file.parent.mkdir(parents=True,exist_ok=True)
-        default_project_memory = f"# Project Context: {project_name}\n\n- This project is located at {os.getcwd()}\n"
+        default_project_memory = f"# {project_name} - Architecture & Operational Context\n\n## Tech Stack & Runtime\n\n## Active Architecture & Key Modules\n\n## Critical Constraints\n\n## Preferences\n\n## Current/Ongoing Tasks\n"
         project_memory_file.write_text(default_project_memory, encoding="utf-8")
-    return project_memory_file.read_text(encoding='utf-8')
+    return str(project_memory_file),project_memory_file.read_text(encoding='utf-8')
+
+def get_active_projects():
+    """
+    Use this tool to get the paths of active projects.
+
+    Returns:
+    Full paths of the active projects memory files
+    """
+    projects = []
+    projects_memory_folder = Path.home() / ".raven" / "memory" / "projects"
+    if not projects_memory_folder.exists():
+        return "No Projects available."
+    for file in projects_memory_folder.iterdir():
+        if file.is_file() and file.name.endswith(".md"):
+            projects.append(str(file))
+    if len(projects) <= 0:
+        return "No Projects available."
+    return projects
+
 
 def save_to_memory(information:str,category:str):
     """
@@ -35,30 +53,12 @@ def save_to_memory(information:str,category:str):
         information: The exact text or factual insight to be memorized.
         category: The classification for this memory (e.g., 'preference', 'fact').
     """
-    memory_file = Path.home() / ".raven" / "memory.md"
+    memory_file = Path.home() / ".raven" / "memory" / "global_memory.md"
     with open(memory_file,'a',encoding='utf-8') as f:
         f.write(f"\n-{category}: {information}")
     return "New data added to memory successfully"
 
-def save_to_project_memory(fact: str) -> str:
-    """
-    Use this tool to save important facts, context, setup details, or architectural patterns specific to the CURRENT project.
-    Args:
-        fact: A short, concise fact about the current project to remember.
-    """
-    project_name = get_active_project_name()
-    if not project_name:
-        return "No active project found. Should save to global memory."
-    project_file = Path.home() / ".raven" / "projects" / f"{project_name}.md"
-    try:
-        with open(project_file, "a", encoding="utf-8") as f:
-            f.write(f"\n- {fact}")
-        return f"Fact successfully saved to the '{project_name}' project memory."
-    except FileNotFoundError:
-        return f"Error: File not found at {project_file}."
-    except Exception as e:
-        return f"An unexpected error occurred while reading '{project_file}': {e}"
-        
+      
 def log_successful_debug(error_description: str, solution: str) -> str:
     """
     Logs a successfully resolved error and its detailed solution to global debug history for future reference.

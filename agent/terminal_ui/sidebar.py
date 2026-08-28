@@ -40,7 +40,7 @@ class ConsumptionSidebar(Vertical):
         self,
         metrics: Dict[str, Any] | None = None,
         session_name: str = "New Conversation",
-        project_name: str = "raven-cli-agent"
+        project_name: str = "New Project"
     ):
         """
         Updates the sidebar with session/project context as well as usage, context, and cost metrics.
