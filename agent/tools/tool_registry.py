@@ -1,4 +1,4 @@
-from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,save_to_project_memory,update_architecture_map
+from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,update_architecture_map,get_active_projects
 from agent.tools.file_tools import find_file,read_file,create_file,patch_file
 from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff
 from agent.tools.miscellaneous_tools import execute_command,get_current_timestamp
@@ -26,25 +26,6 @@ raven_tools = [
                 "required": [
                     "information",
                     "category"
-                ]
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "save_to_project_memory",
-            "description": "Save important facts, context, setup details, or architectural patterns specific to the CURRENT project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "fact": {
-                        "type": "string",
-                        "description": "A short, concise fact about the current project to remember."
-                    }
-                },
-                "required": [
-                    "fact"
                 ]
             }
         }
@@ -94,6 +75,17 @@ raven_tools = [
                     "concept_name",
                     "explanation"
                 ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_active_projects",
+            "description": "Provides the paths for all the active projects markdown memory files.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
             }
         }
     },
@@ -423,12 +415,6 @@ TOOL_REGISTRY = {
         "display_arg": "error_description", 
         "ignore_display": False
     },
-    "save_to_project_memory": {
-        "fn": save_to_project_memory, 
-        "display_name": "Project Memory", 
-        "display_arg": "fact", 
-        "ignore_display": False
-    },
     "patch_file": {
         "fn": patch_file, 
         "display_name": "Patch", 
@@ -483,4 +469,10 @@ TOOL_REGISTRY = {
         "display_arg": "query",
         "ignore_display": False
     },
+     "get_active_projects": {
+        "fn": get_active_projects,
+        "display_name": "Active Projects",
+        "display_arg": None,
+        "ignore_display": True
+      }
 }
