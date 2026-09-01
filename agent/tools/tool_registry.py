@@ -1,4 +1,4 @@
-from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,update_architecture_map,get_active_projects
+from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,update_architecture_map,get_active_projects,recall_memory
 from agent.tools.file_tools import find_file,read_file,create_file,patch_file
 from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff
 from agent.tools.miscellaneous_tools import execute_command,get_current_timestamp
@@ -86,6 +86,25 @@ raven_tools = [
             "parameters": {
                 "type": "object",
                 "properties": {},
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "recall_memory",
+            "description": "Searches your global memory, debug history, and documented concepts for relevant past experiences, debug solutions, and technical insights.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The search query matching past errors, debug fixes, or technical concepts."
+                    }
+                },
+                "required": [
+                    "query"
+                ]
             }
         }
     },
@@ -474,5 +493,11 @@ TOOL_REGISTRY = {
         "display_name": "Active Projects",
         "display_arg": None,
         "ignore_display": True
+      },
+      "recall_memory": {
+        "fn": recall_memory,
+        "display_name": "Recall Memory",
+        "display_arg": "query",
+        "ignore_display": False
       }
 }

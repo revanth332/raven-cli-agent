@@ -20,6 +20,7 @@ from agent.core.usage_tracker import UsageTracker
 from agent.core.session_manager import (
     create_session, save_session, load_session, get_active_session_id, set_active_session_id
 )
+from agent.core.compaction import should_compact_content,compact_content,save_compacted_memory
 
 load_dotenv()
 
@@ -67,7 +68,14 @@ class AgentChatSession:
         self.model_name = model_name
 
         global_memory = get_memory_content()
+
         project_memory_path,project_memory = get_project_memory_info()
+        if should_compact_content(project_memory):
+            compaction_response = compact_content(project_memory)
+            if compaction_response["success"]:
+                project_memory = compaction_response["content"]
+                save_compacted_memory(project_memory_path,project_memory)
+
         project_name = get_active_project_name()
         repo_map = get_repo_map()
         COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.md") if is_coach else ""
