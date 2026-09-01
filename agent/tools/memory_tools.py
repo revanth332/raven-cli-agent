@@ -1,6 +1,177 @@
 from pathlib import Path
 import os
+import tempfile
 from agent.utils import get_project_root,get_active_project_name
+
+def chunk_debug_history(text: str) -> list[dict]:
+    """
+    Splits debug history into distinct logical chunks per error.
+    """
+    chunks = []
+    sections = text.split("## Error:")
+    for idx, sec in enumerate(sections):
+        sec_content = sec.strip()
+        if not sec_content:
+            continue
+        if sec_content.startswith("#"):
+            continue
+        chunks.append({
+            "type": "debug_log",
+            "content": f"## Error: {sec_content}"
+        })
+    return chunks
+
+def chunk_markdown_file(file_path: Path, text: str) -> list[dict]:
+    """
+    Chunks standard markdown text by paragraph groupings under 1000 characters.
+    """
+    paragraphs = text.split("\n\n")
+    chunks = []
+    current_chunk = ""
+    chunk_idx = 0
+    for p in paragraphs:
+        p_strip = p.strip()
+        if not p_strip:
+            continue
+        if len(current_chunk) + len(p_strip) < 1000:
+            current_chunk += p_strip + "\n\n"
+        else:
+            if current_chunk.strip():
+                chunks.append({
+                    "type": "concept_block" if "concepts" in str(file_path) else "global_memory_block",
+                    "content": current_chunk.strip()
+                })
+                chunk_idx += 1
+            current_chunk = p_strip + "\n\n"
+    if current_chunk.strip():
+        chunks.append({
+            "type": "concept_block" if "concepts" in str(file_path) else "global_memory_block",
+            "content": current_chunk.strip()
+        })
+    return chunks
+
+def get_episodic_vector_db():
+    """
+    Initializes and returns the global episodic memory ChromaDB collection.
+    """
+    import chromadb
+    from agent.core.indexer import GeminiEmbeddingFunction
+    db_path = Path.home() / ".raven" / "vector_db" / "global_episodic"
+    client = chromadb.PersistentClient(path=str(db_path))
+    collection = client.get_or_create_collection(
+        name="raven_episodic_memory",
+        embedding_function=GeminiEmbeddingFunction()
+    )
+    return collection
+
+def index_episodic_memory():
+    """
+    Indexes global memory, debug logs, and technical concepts to ChromaDB if modified.
+    """
+    collection = get_episodic_vector_db()
+    if not collection:
+        return
+
+    global_memory_file = Path.home() / ".raven" / "memory" / "global_memory.md"
+    debug_history_file = Path.home() / ".raven" / "debug_history.md"
+    concepts_dir = Path.home() / ".raven" / "concepts"
+
+    existing_docs = collection.get(include=["metadatas"])
+    existing_files_mtime = {}
+    if existing_docs and existing_docs["metadatas"]:
+        for meta in existing_docs["metadatas"]:
+            if "file_path" in meta and "mtime" in meta:
+                existing_files_mtime[meta["file_path"]] = meta["mtime"]
+
+    documents = []
+    metadatas = []
+    ids = []
+    current_files = set()
+
+    files_to_index = []
+    if global_memory_file.exists():
+        files_to_index.append((global_memory_file, "global_memory"))
+    if debug_history_file.exists():
+        files_to_index.append((debug_history_file, "debug_history"))
+
+    if concepts_dir.exists():
+        for f in concepts_dir.iterdir():
+            if f.is_file() and f.name.endswith(".md"):
+                files_to_index.append((f, "concept"))
+
+    for f_path, f_type in files_to_index:
+        f_str = str(f_path).replace("\\", "/")
+        current_files.add(f_str)
+        try:
+            mtime = os.path.getmtime(f_path)
+            if f_str in existing_files_mtime and existing_files_mtime[f_str] == mtime:
+                continue
+
+            content = f_path.read_text(encoding="utf-8")
+            if f_type == "debug_history":
+                chunks = chunk_debug_history(content)
+            else:
+                chunks = chunk_markdown_file(f_path, content)
+
+            for idx, chunk in enumerate(chunks):
+                chunk_id = f"{f_str}::{chunk['type']}::{idx}"
+                documents.append(chunk["content"])
+                metadatas.append({
+                    "file_path": f_str,
+                    "type": chunk["type"],
+                    "mtime": mtime
+                })
+                ids.append(chunk_id)
+        except Exception:
+            pass
+
+    deleted_files = set(existing_files_mtime.keys()) - current_files
+    for deleted_f in deleted_files:
+        try:
+            collection.delete(where={"file_path": deleted_f})
+        except Exception:
+            pass
+    batch_size = 100
+    if documents:
+        for i in range(0,len(documents),batch_size):
+            collection.upsert(
+                documents=documents[i:i+batch_size],
+                metadatas=metadatas[i:i+batch_size],
+                ids=ids[i:i+batch_size]
+            )
+
+def recall_memory(query: str) -> str:
+    """
+    Searches your global memory, debug history, and documented concepts for relevant past experiences, debug solutions, and technical insights.
+    Args:
+        query: Semantic query matching past experiences, errors, or concepts.
+    """
+    index_episodic_memory()
+    collection = get_episodic_vector_db()
+    if not collection:
+        return "No episodic memory collection found."
+
+    try:
+        result = collection.query(
+            query_texts=[query],
+            n_results=3
+        )
+    except Exception as e:
+        return f"Error querying episodic memory: {e}"
+
+    if not result or not result["documents"] or not result["documents"][0]:
+        return "No relevant past memories, debug solutions, or concepts found."
+
+    formatted_results = []
+    for index in range(len(result["documents"][0])):
+        doc = result["documents"][0][index]
+        meta = result["metadatas"][0][index]
+        source_name = Path(meta["file_path"]).name
+        formatted_results.append(
+            f"### Source: {source_name} (Type: {meta['type']})\n\n{doc}"
+        )
+
+    return "\n\n---\n\n".join(formatted_results)
 
 def get_memory_content():
     """

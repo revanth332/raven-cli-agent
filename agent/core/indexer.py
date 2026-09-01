@@ -6,6 +6,12 @@ import os
 import chromadb
 from chromadb.api.types import EmbeddingFunction, Documents
 from pathlib import Path
+from agent.core.settings import settings
+from agent.core.token_counter import count_tokens
+from google import genai
+from google.genai import types
+import re
+import time
 
 def get_parser_and_query(ext:str):
     """Factory function that returns the correct Tree-sitter parser and AST query for a given language."""
@@ -48,6 +54,7 @@ def chunk_code_file(file_path:str,code:str,ext:str):
     Returns a list of dictionaries containing the chunk's text and metadata.
     """
     LANGUAGE,query_string,parser = get_parser_and_query(ext)
+    MAX_CHUNK_CHARS = 6000
     code_bytes = code.encode("utf-8")
     tree = parser.parse(code_bytes)
 
@@ -72,7 +79,7 @@ def chunk_code_file(file_path:str,code:str,ext:str):
                 "file_path":file_path,
                 "type":capture_name,
                 "name":chunk_name,
-                "content":chunk_text,
+                "content":chunk_text[:MAX_CHUNK_CHARS],
             })
     return chunks
 
@@ -111,16 +118,66 @@ def chunk_text_file(file_path: str, text: str, max_chunk_size: int = 1000) -> li
     return chunks
 
 class GeminiEmbeddingFunction(EmbeddingFunction):
-    """Custom ChromaDB embedding function that uses Google's text-embedding-004."""
-    def __init__(self):
-        pass
-    def __call__(self,input:Documents):
-        from agent.core.llm import get_genai_client
-        client = get_genai_client()
-        
-        response = client.models.embed_content(model="text-embedding-004",contents=input)
+    """Custom ChromaDB embedding function that uses Google's text-embedding-005."""
+    def __init__(self,task_type:str="SEMANTIC_SIMILARITY"):
+        self.task_type = task_type
+        self.project_id, self.location = None, None
+        self.MAX_BATCH_TOKENS = 12000
 
-        return [e.values for e in response.embeddings]
+        pattern = r'/projects/([^/]+)/locations/([^/]+)'
+        match = re.search(pattern, settings.RAVEN_BASE_URL)
+        if match:
+            self.project_id, self.location = match.groups()
+    def __call__(self,input:Documents):
+        client = genai.Client(
+            vertexai=True,
+            project=self.project_id,
+            location=self.location
+        )
+
+        all_embeddings = []
+        current_batch = []
+        current_tokens = 0
+        for doc in input:
+            tokens = count_tokens(doc)
+            if (tokens + current_tokens > self.MAX_BATCH_TOKENS or len(current_batch) > 200) and current_batch:
+                response = self.embed_content(client,current_batch,self.task_type)
+                all_embeddings.extend([e.values for e in response.embeddings])
+                current_batch = [doc]
+                current_tokens = tokens
+            else:
+                current_batch.append(doc)
+                current_tokens += tokens
+        if current_batch:
+            response = self.embed_content(client,current_batch,self.task_type)
+            all_embeddings.extend([e.values for e in response.embeddings])
+
+        return all_embeddings
+
+    def embed_content(self,client,batch,task_type):
+        max_tries = 3
+        for attempt in range(max_tries):
+            try:
+                response = client.models.embed_content(
+                                model="text-embedding-005",          # Standard English embedding model
+                                contents= batch,
+                                config=types.EmbedContentConfig(
+                                    # RETRIEVAL_DOCUMENT treats the vectors as data points to be stored/searched
+                                    task_type=task_type,
+                                    output_dimensionality=256        
+                                )
+                            )
+                return response
+            except Exception as error:
+                error_str = str(error).lower()
+                if "429" in error_str or "exhausted" in error_str:
+                    if attempt < max_tries - 1:
+                        sleep_time = 2 ** (attempt+1)
+                        print(f"API Rate Limit hit. (Retrying in {sleep_time}s)")
+                        time.sleep(sleep_time)
+                        continue
+                raise error
+
 
 def get_vector_db():
     """Initializes and returns the ChromaDB client and codebase collection."""
@@ -132,7 +189,7 @@ def get_vector_db():
 
         collection = client.get_or_create_collection(
             name="codebase",
-            embedding_function=GeminiEmbeddingFunction()
+            embedding_function=GeminiEmbeddingFunction(task_type="CODE_RETRIEVAL_QUERY")
         )
         return collection
     return None
@@ -206,7 +263,7 @@ def index_project():
     # cleaning up the deleted files
     deleted_files = set(existing_files_mtime.keys()) - current_disk_files
     for file in deleted_files:
-        collection.delete(where={file_path:file})
+        collection.delete(where={"file_path":file})
         print(f"Removed deleted file from index: {file}")
     
     if not current_disk_files:
@@ -214,12 +271,14 @@ def index_project():
 
     if documents:
         print(f"Embedding and Indexing {len(documents)} semantic chunks...")
-            # Upsert adds new chunks and overwrites old ones if the ID matches
-        collection.upsert(
-            documents=documents,
-            metadatas=metadatas,
-            ids=ids
-        )
+        # Upsert adds new chunks and overwrites old ones if the ID matches
+        batch_size = 100
+        for i in range(0,len(documents),batch_size):
+            collection.upsert(
+                documents=documents[i:i+batch_size],
+                metadatas=metadatas[i:i+batch_size],
+                ids=ids[i:i+batch_size]
+            )
         print("Indexing complete!")
     else:
         print("Index is already up to date. No changes detected.")
@@ -231,6 +290,8 @@ def search_codebase(query:str,top_results:int = 3):
     Args:
         query: The natural language question or code keywords to search for.
     """
+    if not settings.RAVEN_USE_VERTEX_AI:
+        return "Tool is not supported."
     index_project()
     collection = get_vector_db()
 

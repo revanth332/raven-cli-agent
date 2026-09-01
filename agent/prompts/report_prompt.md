@@ -1,6 +1,11 @@
 - Get the current timestamp using `get_current_timestamp` tool.
-- Based on the ACTIVE PROJECT MEMORY you already know, extract the work that is done within the <time_period> span by comparing timestamps.
-- Create a brief report.
+- Use the git commnds :
+  - To get the all local banch commit messages:
+    git log --branches --author=<author_name> --since=<time_span> --pretty=format:"%h - %an, %ad : %s" --date=short -n <number_of_commits>
+  - To get the all local banch commit messages with all the file changes:
+    git log -p --branches --author=<author_name> --since=<time_span> --pretty=format:"%h - %an, %ad : %s" --date=short -n <number_of_commits> (Use this command only when commit messages are not sufficient to create the report accurately.)
+
+- Based on the data you get extract the work that is done within the time period : <time_period> by comparing timestamps.
 - AVOID using backticks.
 - Use italic or bold styles to highlight.
 - Refer the following example.
@@ -10,4 +15,8 @@
   Accomplishments/Highlights: Enhanced the GCP project intake form to support region-specific deployment configuration.
   Business Impact: Improved deployment readiness and enabled more flexible regional configuration for GCP environments.
 
-Note: If is not mentioned asl the user to provide the time period.
+Note:
+
+1. If time period is not mentioned asl the user to provide the time period.
+2. If you are not sure about the exact author name, ask the user.
+3. Use 'n' value as increments of 5. Meaning fetch last 5, if you go out of the time span then stop and create report. other wise extract next 5 commits and so on.
