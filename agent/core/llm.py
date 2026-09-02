@@ -196,9 +196,9 @@ def get_genai_client():
         )
 
     if not _genai_client:
-        api_key = settings.RAVEN_API_KEY
+        api_key = settings.RAVEN_API_KEY or "ollama"
 
-        if not api_key or not base_url:
+        if not base_url:
             raise ValueError("Credentials are missing!!! Please use 'config' command to configure the credentials.")
         _genai_client = OpenAI(
             base_url=base_url,

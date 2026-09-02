@@ -24,5 +24,8 @@ dependencies = [
     "ddgs"
 ]
 
+[tool.setuptools]
+packages = ["agent"]
+
 [project.scripts]
 raven = "agent.main:app"
