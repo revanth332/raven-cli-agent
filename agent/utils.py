@@ -3,6 +3,7 @@ import os
 import shutil
 import time
 import json
+from agent.core.settings import settings
 
 _files_backed_up_this_turn = set()
 
@@ -122,3 +123,6 @@ def get_repo_map(max_files: int = 250):
         return "No files found in the current directory"
 
     return "\n".join(file_paths)
+
+def use_vertex_ai():
+    return str(settings.RAVEN_USE_VERTEX_AI).strip().lower() == "true"

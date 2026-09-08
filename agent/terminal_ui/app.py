@@ -814,13 +814,29 @@ class RavenTUI(App):
             thinking_container = self.query_one("#thinking_container")
             text_response = ""
             tool_logs = Text()
+
+            
+            def append_tool_header(display_name: str, display_value: str = "") -> None:
+                """Append a consistently styled tool header without Rich markup parsing values."""
+                tool_logs.append("\n• ", style="bold cyan")
+                tool_logs.append(display_name, style="bold cyan")
+                if display_value:
+                    tool_logs.append("(", style="dim white")
+                    tool_logs.append(str(display_value), style="dim white")
+                    tool_logs.append(")", style="dim white")
+                tool_logs.append("\n")
+
+            def tool_log_snapshot() -> Text:
+                """Return an immutable render snapshot for the UI thread."""
+                return tool_logs.copy()
+
             while True:
                 if self.cancel_event.is_set():
                     break
                     
                 function_calls = {}
                 max_retries = 5
-                thinking_message = ThinkingMessage("")
+                thinking_message = ThinkingMessage()
                 user_message_committed = query is None
                 for attempt in range(max_retries):
                     try:
@@ -853,7 +869,7 @@ class RavenTUI(App):
                             if hasattr(delta,"content") and delta.content:
                                 text_response += delta.content
                                 if tool_logs:
-                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
+                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
                                 else:
                                     self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(text_response), text_response)
                         break
@@ -956,23 +972,22 @@ class RavenTUI(App):
                                         "content": result
                                     })
                                     if text_response:
-                                        self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
+                                        self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
                                     else:
-                                        self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
+                                        self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
                                     continue
 
                                 if text_response:
-                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
+                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
                                 else:
-                                    self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
+                                    self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
 
                         if tool_name == "patch_file":
                             file_path = tool_args.get("file_path", "Unknown")
                             search_block = tool_args.get("search_block", "")
                             replace_block = tool_args.get("replace_block", "")
                             
-                            tool_logs.append(f"\n• Update")
-                            tool_logs.append(f"({file_path})\n",style="dim white")
+                            append_tool_header("Update", file_path)
                             if search_block or replace_block:
                                 search_block_lines = search_block.rstrip().split("\n")
                                 replace_block_lines = replace_block.rstrip().split("\n")
@@ -997,31 +1012,34 @@ class RavenTUI(App):
                             
                             tool_logs.append("\n")
                             if text_response:
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
                             else:
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
-                        elif not tool_meta.get("ignore_display"):
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
+                        elif not tool_meta.get("ignore_display"):  
                             display_name = tool_meta["display_name"]
-                            tool_logs.append(f"\n• {display_name}")
 
                             arg_keys = tool_meta["display_arg"]
-                            if arg_keys:
-                                if(isinstance(arg_keys,str)):
-                                    display_val = tool_args.get(arg_keys, "") if arg_keys else ""
-                                if(isinstance(arg_keys,list)):
-                                    display_val = ",".join([tool_args.get(key, "") for key in arg_keys])
-                                if display_val:
-                                    tool_logs.append(f"({display_val})\n",style="dim white")
-                            else:
-                                tool_logs.append("\n")
+                            display_val = ""
+                            if isinstance(arg_keys, str):
+                                display_val = tool_args.get(arg_keys, "")
+                            elif isinstance(arg_keys, list):
+                                display_val = ",".join(
+                                    str(tool_args.get(key, "")) for key in arg_keys
+                                )
+                            append_tool_header(display_name, display_val)
                             if text_response:
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
                             else:
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
+                        tool_status = ThinkingMessage("Working...")
                         try:
+                            self.call_from_thread(thinking_container.mount,tool_status)
                             result = tool_meta["fn"](**tool_args)
                         except Exception as e:
                             result = f"Error: {e}"
+                        finally:
+                            if tool_status:
+                                self.call_from_thread(tool_status.remove)
                     else:
                         result = "Error: Tool not found."
                     tool_responses_to_append.append({
@@ -1044,9 +1062,9 @@ class RavenTUI(App):
             
             tool_logs.append(f"\n\nGeneration took {time_str}",style="dim white")
             if text_response:
-                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_logs, Markdown(text_response)), text_response)
+                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
             else:
-                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_logs)
+                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
 
             if self.chat_session:
                 summary = self.chat_session.record_turn_usage(assistant_response=text_response)

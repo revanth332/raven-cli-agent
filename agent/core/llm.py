@@ -21,18 +21,13 @@ from agent.core.session_manager import (
     create_session, save_session, load_session, get_active_session_id, set_active_session_id
 )
 from agent.core.compaction import should_compact_content,compact_content,save_compacted_memory
-
+from agent.utils import use_vertex_ai
 load_dotenv()
 
 _genai_client = None
 _vertex_credentials = None
 _vertex_credentials_lock = Lock()
 _vertex_request = google.auth.transport.requests.Request()
-
-
-def _use_vertex_ai():
-    return str(settings.RAVEN_USE_VERTEX_AI).strip().lower() == "true"
-
 
 def _vertex_token_needs_refresh(credentials):
     if not credentials.token:
@@ -184,7 +179,7 @@ def get_genai_client():
     global _genai_client
 
     base_url = settings.RAVEN_BASE_URL
-    if _use_vertex_ai():
+    if use_vertex_ai():
         api_key = _get_vertex_access_token()
 
         if not api_key or not base_url:

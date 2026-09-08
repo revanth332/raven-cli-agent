@@ -3,6 +3,7 @@ Web search tools for Raven CLI Agent using DuckDuckGo search.
 """
 
 from typing import List, Dict, Any
+import requests
 
 try:
     from ddgs import DDGS
@@ -53,3 +54,17 @@ def web_search(query: str, max_results: int = 5) -> List[Dict[str, Any]]:
         return results
     except Exception as e:
         return [{"error": f"Failed to execute web search: {str(e)}"}]
+
+def extract_content_from_web_links(web_link:str):
+    """
+    Use this tool to get the content from a web link in a clean markdown format.
+
+    Args:
+        web_link: The url from which the content needs to be extarcted.
+    Returns:
+        Extracted conent from the provied web link
+    """
+    if not web_link:
+        return "No web link provided"
+    response = requests.get(f"https://r.jina.ai/{web_link}",verify=False)
+    return response.text

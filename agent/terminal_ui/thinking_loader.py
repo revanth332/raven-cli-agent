@@ -4,8 +4,9 @@ class ThinkingMessage(Static):
     """A message bubble that shows a typewriter animation until updated."""
     FULL_TEXT = "Thinking..."
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, text:str="Thinking..." , *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self.FULL_TEXT = text
         self.char_index = 0
         self.direction = 1
         self._timer = None
@@ -34,6 +35,12 @@ class ThinkingMessage(Static):
             if self._timer:
                 self._timer.pause()
         super().update(renderable)
+
+    def set_text(self,text:str):
+        """Dynamically updates the full animation text."""
+        self.FULL_TEXT = text
+        self.char_index = 0
+        self.direction = 1
 
     def reset_thinking(self) -> None:
         """Resets the state back to thinking and restarts the typewriter animation."""

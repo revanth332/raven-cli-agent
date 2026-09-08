@@ -1,7 +1,6 @@
 from pathlib import Path
 import os
-import tempfile
-from agent.utils import get_project_root,get_active_project_name
+from agent.utils import get_project_root,get_active_project_name,use_vertex_ai
 
 def chunk_debug_history(text: str) -> list[dict]:
     """
@@ -146,6 +145,8 @@ def recall_memory(query: str) -> str:
     Args:
         query: Semantic query matching past experiences, errors, or concepts.
     """
+    if not use_vertex_ai():
+        return "Tool is not supported."
     index_episodic_memory()
     collection = get_episodic_vector_db()
     if not collection:

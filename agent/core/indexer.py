@@ -12,6 +12,7 @@ from google import genai
 from google.genai import types
 import re
 import time
+from agent.utils import use_vertex_ai
 
 def get_parser_and_query(ext:str):
     """Factory function that returns the correct Tree-sitter parser and AST query for a given language."""
@@ -290,7 +291,7 @@ def search_codebase(query:str,top_results:int = 3):
     Args:
         query: The natural language question or code keywords to search for.
     """
-    if not settings.RAVEN_USE_VERTEX_AI:
+    if not use_vertex_ai():
         return "Tool is not supported."
     index_project()
     collection = get_vector_db()

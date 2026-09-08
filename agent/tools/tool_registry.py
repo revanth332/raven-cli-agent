@@ -2,7 +2,7 @@ from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_
 from agent.tools.file_tools import find_file,read_file,create_file,patch_file
 from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff
 from agent.tools.miscellaneous_tools import execute_command,get_current_timestamp
-from agent.tools.web_tools import web_search
+from agent.tools.web_tools import web_search,extract_content_from_web_links
 from agent.core.indexer import search_codebase
 
 raven_tools = [
@@ -382,6 +382,24 @@ raven_tools = [
                 ]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "extract_content_from_web_links",
+            "description": "Extracts and provides content from the provided web link in a markdown format.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "web_link": {
+                        "type": "string",
+                    }
+                },
+                "required": [
+                    "web_link"
+                ]
+            }
+        }
     }
 ]
 
@@ -488,6 +506,12 @@ TOOL_REGISTRY = {
         "display_arg": "query",
         "ignore_display": False
     },
+    "extract_content_from_web_links":{
+        "fn": extract_content_from_web_links,
+        "display_name": "Extract Link",
+        "display_arg": "web_link",
+        "ignore_display": False
+      },
      "get_active_projects": {
         "fn": get_active_projects,
         "display_name": "Active Projects",
