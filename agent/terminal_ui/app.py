@@ -245,6 +245,11 @@ class RavenTUI(App):
         background: #1e1e1e;
     }
 
+    ChatInput:disabled {
+        opacity: 0.6;
+        border-left: heavy #64748B;
+    }
+
     #input_status {
         border: none;
         border-left: heavy #06B6D4;
@@ -342,7 +347,9 @@ class RavenTUI(App):
         self.permission_instruction = ""
         self.pending_permission = False
         self.is_generating = False
+        self.init_loader = None
 
+        self.set_input_ready(False, "Initializing AI session, please wait...")
         self.initialize_ai()
 
     def on_unmount(self) -> None:
@@ -474,6 +481,7 @@ class RavenTUI(App):
         bar = PermissionBar(title, message, on_allow, on_deny)
         bottom_bar.mount(bar, before=chat_input)
 
+        chat_input.disabled = False
         chat_input.placeholder = "Press Enter to allow, or type instruction & Enter to deny/modify..."
         chat_input.focus()
 
@@ -519,6 +527,35 @@ class RavenTUI(App):
         except Exception:
             pass
     
+    def set_input_ready(self, ready: bool, status_msg: str = "") -> None:
+        """Enables or disables chat input and displays or removes the initialization indicator."""
+        try:
+            chat_input = self.query_one("#chat_input", ChatInput)
+            thinking_container = self.query_one("#thinking_container")
+            if ready:
+                chat_input.disabled = False
+                chat_input.placeholder = "Ask Raven something... (Shift+Enter for newline, 'exit' to quit)"
+                chat_input.focus()
+                if getattr(self, "init_loader", None):
+                    try:
+                        self.init_loader.remove()
+                    except Exception:
+                        pass
+                    self.init_loader = None
+            else:
+                chat_input.disabled = True
+                chat_input.placeholder = status_msg or "Initializing AI session, please wait..."
+                if not getattr(self, "init_loader", None) or self.init_loader.parent is None:
+                    self.init_loader = ThinkingMessage(status_msg or "Initializing AI engine & loading session...")
+                    try:
+                        thinking_container.mount(self.init_loader)
+                    except Exception:
+                        pass
+                elif self.init_loader:
+                    self.init_loader.set_text(status_msg or "Initializing AI engine...")
+        except Exception:
+            pass
+
     @work(thread=True)
     def initialize_ai(self):
         """Background task to load credentials and initialize Gemini."""
@@ -527,8 +564,10 @@ class RavenTUI(App):
             self.is_generating = False
             self.call_from_thread(self.reload_history_ui)
             self.call_from_thread(self.update_status_bar)
+            self.call_from_thread(self.set_input_ready, True)
             self.call_from_thread(self.notify, "Raven AI Engine initialized!", title="System", severity="information")
         except Exception as e:
+            self.call_from_thread(self.set_input_ready, False, f"Failed to initialize: {e}")
             self.call_from_thread(self.notify, f"Error initializing AI: {e}", title="Error", severity="error")
 
     def compose(self) -> ComposeResult:
@@ -668,6 +707,7 @@ class RavenTUI(App):
         def on_model_dismiss(selected_model: str | None) -> None:
             if selected_model and selected_model != settings.RAVEN_MODEL:
                 settings.set_config({"RAVEN_MODEL": selected_model})
+                self.set_input_ready(False, f"Switching to {selected_model}...")
                 self.initialize_ai()
                 self.update_status_bar()
                 self.notify(f"Switched model to {selected_model}", title="Model Changed", severity="information")
@@ -702,6 +742,10 @@ class RavenTUI(App):
 
         if self.is_generating:
             self.notify("A response is currently generating. Please wait or press Esc to cancel.", title="Busy", severity="warning")
+            return
+
+        if not self.chat_session:
+            self.notify("AI is still initializing. Please wait...", title="Initializing", severity="warning")
             return
 
         user_input = event.value.strip()
@@ -815,14 +859,19 @@ class RavenTUI(App):
             text_response = ""
             tool_logs = Text()
 
-            
+            MAX_DIFF_LINES = 8
+            MAX_ARG_LENGTH = 80
+
             def append_tool_header(display_name: str, display_value: str = "") -> None:
                 """Append a consistently styled tool header without Rich markup parsing values."""
                 tool_logs.append("\n• ", style="bold cyan")
                 tool_logs.append(display_name, style="bold cyan")
                 if display_value:
+                    clean_val = " ".join(str(display_value).split())
+                    if len(clean_val) > MAX_ARG_LENGTH:
+                        clean_val = clean_val[:MAX_ARG_LENGTH - 3] + "..."
                     tool_logs.append("(", style="dim white")
-                    tool_logs.append(str(display_value), style="dim white")
+                    tool_logs.append(clean_val, style="dim white")
                     tool_logs.append(")", style="dim white")
                 tool_logs.append("\n")
 
@@ -989,26 +1038,37 @@ class RavenTUI(App):
                             
                             append_tool_header("Update", file_path)
                             if search_block or replace_block:
-                                search_block_lines = search_block.rstrip().split("\n")
-                                replace_block_lines = replace_block.rstrip().split("\n")
-                                tool_logs.append("   |_ Updated ",style="dim white")
+                                search_block_lines = search_block.rstrip().split("\n") if search_block else []
+                                replace_block_lines = replace_block.rstrip().split("\n") if replace_block else []
+                                search_count = len(search_block_lines)
+                                replace_count = len(replace_block_lines)
+
+                                tool_logs.append("   |_ Updated ", style="dim white")
                                 tool_logs.append(f"{file_path} ")
-                                tool_logs.append("with ",style="dim white")
-                                tool_logs.append(f"{len(replace_block_lines)} ")
-                                tool_logs.append("addition and ",style="dim white")
-                                tool_logs.append(f"{len(search_block_lines)} ")
-                                tool_logs.append("removal\n",style="dim white")
-                                if search_block:
-                                    for line in search_block_lines:
+                                tool_logs.append("with ", style="dim white")
+                                tool_logs.append(f"{replace_count} ", style="bold green" if replace_count else "dim white")
+                                tool_logs.append("addition" if replace_count == 1 else "additions", style="dim white")
+                                tool_logs.append(" and ", style="dim white")
+                                tool_logs.append(f"{search_count} ", style="bold red" if search_count else "dim white")
+                                tool_logs.append("removal\n" if search_count == 1 else "removals\n", style="dim white")
+
+                                if search_block_lines:
+                                    visible_search = search_block_lines[:MAX_DIFF_LINES]
+                                    for line in visible_search:
                                         tool_logs.append("       ")
-                                        tool_logs.append(f"- {line}\n",style="white on #961b1b")
-                                if replace_block:
-                                    if not search_block:
-                                        # If there's no search block, we still need standard styling
-                                        pass
-                                    for line in replace_block_lines:
+                                        tool_logs.append(f"- {line}\n", style="white on #961b1b")
+                                    collapsed_search = search_count - len(visible_search)
+                                    if collapsed_search > 0:
+                                        tool_logs.append(f"       ... [{collapsed_search} search lines collapsed]\n", style="dim italic white")
+
+                                if replace_block_lines:
+                                    visible_replace = replace_block_lines[:MAX_DIFF_LINES]
+                                    for line in visible_replace:
                                         tool_logs.append("       ")
-                                        tool_logs.append(f"+ {line}\n",style="white on #26753a")
+                                        tool_logs.append(f"+ {line}\n", style="white on #26753a")
+                                    collapsed_replace = replace_count - len(visible_replace)
+                                    if collapsed_replace > 0:
+                                        tool_logs.append(f"       ... [{collapsed_replace} replace lines collapsed]\n", style="dim italic white")
                             
                             tool_logs.append("\n")
                             if text_response:

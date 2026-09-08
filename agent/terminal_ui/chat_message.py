@@ -2,6 +2,7 @@ from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Static, Button
 from rich.markdown import Markdown
+from rich.console import Group
 
 
 class ChatMessageWidget(Vertical):
@@ -63,6 +64,7 @@ class ChatMessageWidget(Vertical):
         super().__init__(**kwargs)
         self.role = role
         self.raw_text = raw_text
+        self._pending_renderable = None
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="msg-header"):
@@ -74,16 +76,35 @@ class ChatMessageWidget(Vertical):
         yield Static(id="msg_content", classes="msg-content")
 
     def on_mount(self) -> None:
-        if self.raw_text:
+        if self._pending_renderable is not None:
+            pending = self._pending_renderable
+            self._pending_renderable = None
+            self.update(pending, self.raw_text)
+        elif self.raw_text:
             self.update(self.raw_text)
 
     def update(self, renderable, raw_text: str = None) -> None:
-        if raw_text:
+        if isinstance(renderable, Group):
+            group_texts = []
+            for item in renderable.renderables:
+                if hasattr(item, "plain") and item.plain:
+                    clean = item.plain.strip()
+                    if clean:
+                        group_texts.append(clean)
+            if raw_text:
+                clean_raw = raw_text.strip()
+                if clean_raw:
+                    group_texts.append(clean_raw)
+            if group_texts:
+                self.raw_text = "\n\n".join(group_texts)
+            elif raw_text is not None:
+                self.raw_text = raw_text
+        elif raw_text is not None:
             self.raw_text = raw_text
         elif isinstance(renderable, str):
             self.raw_text = renderable
-        elif hasattr(renderable, "markup") and renderable.markup:
-            self.raw_text = renderable.markup
+        elif hasattr(renderable, "plain") and renderable.plain:
+            self.raw_text = renderable.plain
 
         try:
             content_static = self.query_one("#msg_content", Static)
@@ -91,8 +112,9 @@ class ChatMessageWidget(Vertical):
                 content_static.update(Markdown(renderable))
             else:
                 content_static.update(renderable)
+            self._pending_renderable = None
         except Exception:
-            pass
+            self._pending_renderable = renderable
 
     def on_click(self, event) -> None:
         if event.control and event.control.id == "copy_btn":
@@ -104,7 +126,13 @@ class ChatMessageWidget(Vertical):
         if not text_to_copy:
             try:
                 content_static = self.query_one("#msg_content", Static)
-                text_to_copy = str(content_static.renderable) if hasattr(content_static, "renderable") else ""
+                renderable = getattr(content_static, "renderable", None)
+                if hasattr(renderable, "plain") and renderable.plain:
+                    text_to_copy = renderable.plain
+                elif hasattr(renderable, "markup") and renderable.markup:
+                    text_to_copy = renderable.markup
+                else:
+                    text_to_copy = str(renderable) if renderable is not None else ""
             except Exception:
                 text_to_copy = ""
 
