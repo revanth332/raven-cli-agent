@@ -86,6 +86,11 @@ SLASH_COMMANDS = {
         "placeholder":"/auto-approve",
         "system_prompt":""
     },
+    "/compact":{
+        "description":"Summarize and compact conversation history",
+        "placeholder":"/compact [optional instructions]",
+        "system_prompt":""
+    },
     "/coach":{
         "description":"Activate coach mode",
         "placeholder":"/coach",
@@ -728,6 +733,55 @@ class RavenTUI(App):
 
         self.push_screen(CreateSkillModal(), on_create_dismiss)
 
+    @work(thread=True)
+    def execute_compact_history(self, custom_instructions: str = "") -> None:
+        """Background worker to distill conversation history and reload the UI."""
+        if not self.chat_session:
+            self.call_from_thread(self.notify, "AI is still initializing.", title="Error", severity="error")
+            return
+
+        self.call_from_thread(self.set_input_ready, False, "Compacting conversation history...")
+        try:
+            res = self.chat_session.compact_history(custom_instructions=custom_instructions)
+            if res.get("success"):
+                before = res.get("tokens_before", 0)
+                after = res.get("tokens_after", 0)
+                savings = res.get("savings", 0)
+                pct = res.get("percent", 0.0)
+
+                self.call_from_thread(self.reload_history_ui)
+                self.call_from_thread(self.update_status_bar)
+
+                msg = (
+                    f"**Conversation history compacted successfully.**\n\n"
+                    f"- Context Tokens: **{before:,}** → **{after:,}**\n"
+                    f"- Reclaimed: **{savings:,} tokens** ({pct}% reduction)"
+                )
+                if custom_instructions:
+                    msg += f"\n- Focus: *{custom_instructions}*"
+
+                history_container = self.query_one("#history")
+                card = ChatMessageWidget(role="assistant", raw_text=msg, classes="raven-msg")
+                self.call_from_thread(history_container.mount, card)
+                self.call_from_thread(self.scroll_to_bottom)
+                self.call_from_thread(
+                    self.notify,
+                    f"Compacted: {before:,} → {after:,} tokens ({pct}% saved)",
+                    title="Compacted",
+                    severity="information",
+                )
+            else:
+                err = res.get("error", "Unknown error during compaction.")
+                history_container = self.query_one("#history")
+                card = ChatMessageWidget(role="assistant", raw_text=f"**Compaction Skipped:** {err}", classes="raven-msg")
+                self.call_from_thread(history_container.mount, card)
+                self.call_from_thread(self.scroll_to_bottom)
+                self.call_from_thread(self.notify, err, title="Compaction", severity="warning")
+        except Exception as e:
+            self.call_from_thread(self.notify, f"Error: {e}", title="Compaction Failed", severity="error")
+        finally:
+            self.call_from_thread(self.set_input_ready, True)
+
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         """Triggers when the user presses 'Enter' in the input box."""
         if self.pending_permission:
@@ -810,6 +864,21 @@ class RavenTUI(App):
             info_card = ChatMessageWidget(role="assistant", raw_text=f"**System:** Auto-Approval is now **{status_str}**.", classes="raven-msg")
             history_container.mount(info_card)
             self.scroll_to_bottom()
+            return
+
+        if user_input.lower() == "/compact" or user_input.lower().startswith("/compact"):
+            parts = user_input.split(" ", 1)
+            custom_instructions = parts[1].strip() if len(parts) > 1 else ""
+
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            self.execute_compact_history(custom_instructions)
             return
         
         main_container = self.query_one("#main_container")

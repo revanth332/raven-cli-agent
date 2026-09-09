@@ -115,6 +115,38 @@ class AgentChatSession:
         self.tracker.update_context(context_tokens, self.model_name)
         return self.tracker.get_summary(self.model_name)
 
+    def compact_history(self, custom_instructions: str = "") -> dict:
+        """
+        Compacts past conversation history using LLM distillation (Option B sliding window).
+        Saves updated state and returns compaction statistics.
+        """
+        from agent.core.compaction import compact_conversation_history
+
+        tokens_before = count_tokens(self.messages, self.model_name)
+        result = compact_conversation_history(
+            self.messages,
+            custom_instructions=custom_instructions,
+            model_name=self.model_name
+        )
+
+        if not result["success"]:
+            return result
+
+        self.messages = result["compacted_messages"]
+        self.save_session_state()
+        tokens_after = count_tokens(self.messages, self.model_name)
+
+        savings = max(0, tokens_before - tokens_after)
+        percent = round((savings / tokens_before) * 100, 1) if tokens_before > 0 else 0.0
+
+        result["tokens_before"] = tokens_before
+        result["tokens_after"] = tokens_after
+        result["savings"] = savings
+        result["percent"] = percent
+
+        self.get_context_usage()
+        return result
+
     def record_turn_usage(self, prompt_tokens=None, completion_tokens=None, assistant_response=None):
         if prompt_tokens is None:
             prompt_tokens = count_tokens(self.messages, self.model_name)

@@ -258,6 +258,23 @@ def start_chat_session(chat_session):
             else:
                 console.print("[yellow]No recent edits to undo.[/yellow]\n")
             continue
+
+        if query.strip().startswith('/compact'):
+            parts = query.strip().split(" ", 1)
+            custom_instructions = parts[1].strip() if len(parts) > 1 else ""
+            with console.status("[cyan]Compacting conversation history...[/cyan]"):
+                res = chat_session.compact_history(custom_instructions=custom_instructions)
+            if res.get("success"):
+                before = res.get("tokens_before", 0)
+                after = res.get("tokens_after", 0)
+                savings = res.get("savings", 0)
+                pct = res.get("percent", 0.0)
+                console.print(f"[bold green]✔ Conversation compacted successfully![/bold green]")
+                console.print(f"[dim]Context tokens: {before:,} → {after:,} ({savings:,} saved, {pct}% reduction)[/dim]\n")
+            else:
+                err = res.get("error", "Compaction skipped.")
+                console.print(f"[yellow]⚠ {err}[/yellow]\n")
+            continue
         start_new_backup_turn()
         console.print()
         run_agent_loop(chat_session,query)
