@@ -1,6 +1,6 @@
 from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,update_architecture_map,get_active_projects,recall_memory
 from agent.tools.file_tools import find_file,read_file,create_file,patch_file
-from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff
+from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff,get_git_log
 from agent.tools.miscellaneous_tools import execute_command,get_current_timestamp
 from agent.tools.web_tools import web_search,extract_content_from_web_links
 from agent.core.indexer import search_codebase
@@ -363,6 +363,43 @@ raven_tools = [
     {
         "type": "function",
         "function": {
+            "name": "get_git_log",
+            "description": "Retrieve structured, compact git commit history and file change statistics within a time period without dumping raw patch diffs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "author": {
+                        "type": "string",
+                        "description": "Optional author name or email substring to filter commits."
+                    },
+                    "since": {
+                        "type": "string",
+                        "description": "Relative or absolute start time (e.g. '7 days ago', '1 week ago', '2 weeks ago', '1 month ago'). Defaults to '7 days ago'."
+                    },
+                    "until": {
+                        "type": "string",
+                        "description": "Optional relative or absolute end time (e.g. 'today', '2025-01-01')."
+                    },
+                    "max_commits": {
+                        "type": "integer",
+                        "description": "Maximum number of commits to retrieve (defaults to 20, max 50)."
+                    },
+                    "include_stat": {
+                        "type": "boolean",
+                        "description": "Whether to include compact file change stats (+/- line counts). Defaults to true."
+                    },
+                    "path_filter": {
+                        "type": "string",
+                        "description": "Optional file path or directory to filter commits for."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "web_search",
             "description": "Performs a real-time web search using DuckDuckGo to search for documentation, packages, error solutions, or up-to-date information.",
             "parameters": {
@@ -498,6 +535,12 @@ TOOL_REGISTRY = {
         "fn": get_git_diff,
         "display_name": "Git Diff",
         "display_arg": "file_path",
+        "ignore_display": False
+    },
+    "get_git_log":{
+        "fn": get_git_log,
+        "display_name": "Git Log",
+        "display_arg": "since",
         "ignore_display": False
     },
     "web_search":{

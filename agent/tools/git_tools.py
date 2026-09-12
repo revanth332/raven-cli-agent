@@ -100,3 +100,80 @@ def commit_staged_git_changes(message:str):
         return "Successfully committed the changes"
     except subprocess.CalledProcessError as e:
         return f"Failed to commit: {e}"
+
+def get_git_log(
+    author: str = None,
+    since: str = "7 days ago",
+    until: str = None,
+    max_commits: int = 20,
+    include_stat: bool = True,
+    path_filter: str = None
+) -> str:
+    """
+    Retrieve structured, compact git commit history within a date range without blowing up context.
+
+    Args:
+        author: Optional author name or email substring to filter commits.
+        since: Relative or absolute start time (e.g. '7 days ago', '2 weeks ago', '2025-01-01'). Defaults to '7 days ago'.
+        until: Optional relative or absolute end time (e.g. 'today', '2025-01-01').
+        max_commits: Maximum number of commits to retrieve (defaults to 20, capped at 50).
+        include_stat: If True, includes concise file change metrics (--stat) while excluding noisy lockfiles. Defaults to True.
+        path_filter: Optional specific file path or directory to filter commits for.
+    Returns:
+        Formatted commit history string or error message.
+    """
+    try:
+        safe_max = min(max(1, max_commits), 50)
+        command = [
+            "git", "log",
+            "--branches",
+            "--pretty=format:%h - %an, %ad : %s",
+            "--date=short",
+            "-n", str(safe_max)
+        ]
+
+        if since:
+            command.append(f"--since={since}")
+        if until:
+            command.append(f"--until={until}")
+        if author:
+            command.append(f"--author={author}")
+
+        if include_stat:
+            command.append("--stat")
+        else:
+            command.append("--name-status")
+
+        # Exclude noisy lockfiles and build outputs
+        command.append("--")
+        if path_filter:
+            command.append(path_filter)
+        else:
+            command.append(".")
+
+        command.extend([
+            ":(exclude)*lock*",
+            ":(exclude)*.min.*",
+            ":(exclude)node_modules/*",
+            ":(exclude)dist/*",
+            ":(exclude)build/*"
+        ])
+
+        result = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace"
+        )
+
+        if result.returncode != 0:
+            return f"Failed to get git log: {result.stderr.strip()}"
+
+        output = (result.stdout or "").strip()
+        if not output:
+            return f"No commits found for the specified criteria (since: {since}, author: {author or 'any'})."
+
+        return output
+    except Exception as e:
+        return f"Failed to get git log: {e}"
