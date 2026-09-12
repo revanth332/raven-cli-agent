@@ -12,7 +12,11 @@ from rich.text import Text
 
 from agent.tools.tool_registry import TOOL_REGISTRY
 from agent.core.llm import get_chat_session
-from agent.utils import read_prompt_from_file,get_active_project_name
+from agent.utils import (
+    read_prompt_from_file, get_active_project_name,
+    encode_image_file, grab_clipboard_image, create_multimodal_content
+)
+from agent.core.vision import is_model_vision_capable, transcribe_image_with_vision_model
 from agent.core.settings import settings
 from agent.core.safety import is_command_dangerous
 from agent.terminal_ui.chat_input import ChatInput
@@ -84,6 +88,16 @@ SLASH_COMMANDS = {
     "/auto-approve":{
         "description":"Toggle Auto-Approval Mode",
         "placeholder":"/auto-approve",
+        "system_prompt":""
+    },
+    "/image":{
+        "description":"Ask about a local image file",
+        "placeholder":"/image <file_path> <query>",
+        "system_prompt":""
+    },
+    "/paste-image":{
+        "description":"Ask about screenshot in clipboard",
+        "placeholder":"/paste-image [query]",
         "system_prompt":""
     },
     "/compact":{
@@ -698,7 +712,18 @@ class RavenTUI(App):
                     role = msg.get("role")
                     content = msg.get("content")
                     if role == "user" and content:
-                        card = ChatMessageWidget(role="user", raw_text=content, classes="user-msg")
+                        if isinstance(content, list):
+                            text_str = ""
+                            img_badge = "Attached Image"
+                            for item in content:
+                                if isinstance(item, dict):
+                                    if item.get("type") == "text":
+                                        text_str = item.get("text", "")
+                                    elif item.get("type") == "image_url":
+                                        img_badge = "Attached Image"
+                            card = ChatMessageWidget(role="user", raw_text=text_str, image_badge=img_badge, classes="user-msg")
+                        else:
+                            card = ChatMessageWidget(role="user", raw_text=content, classes="user-msg")
                         history_container.mount(card)
                     elif role == "assistant" and content:
                         card = ChatMessageWidget(role="assistant", raw_text=content, classes="raven-msg")
@@ -866,6 +891,85 @@ class RavenTUI(App):
             self.scroll_to_bottom()
             return
 
+        if user_input.lower().startswith("/image") and (len(user_input) == 6 or user_input[6] in (" ", "\t")):
+            parts = user_input.split(" ", 2)
+            if len(parts) < 2 or not parts[1].strip():
+                self.notify("Usage: /image <file_path> [query]", title="Missing Argument", severity="warning")
+                input_widget = event.text_area
+                input_widget.text = ""
+                return
+
+            raw_file_path = parts[1].strip()
+            image_query = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "Analyze this image and describe its key contents."
+
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+
+            encoded = encode_image_file(raw_file_path)
+            history_container = self.query_one("#history")
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            if not encoded["success"]:
+                err_card = ChatMessageWidget(role="assistant", raw_text=f"**Error Loading Image:** {encoded['error']}", classes="raven-msg")
+                history_container.mount(err_card)
+                self.scroll_to_bottom()
+                return
+
+            badge_label = f"{encoded['file_name']}"
+            user_card = ChatMessageWidget(role="user", raw_text=image_query, image_badge=badge_label, classes="user-msg")
+            history_container.mount(user_card)
+
+            raven_card = ChatMessageWidget(role="assistant", raw_text="", classes="raven-msg")
+            self.scroll_to_bottom()
+            self.is_generating = True
+
+            active_model = settings.RAVEN_MODEL
+            if is_model_vision_capable(active_model):
+                multimodal_content = create_multimodal_content(image_query, encoded["data_uri"])
+                self.stream_response(multimodal_content, raven_card)
+            else:
+                self.stream_image_with_vision_bridge(encoded["data_uri"], image_query, raven_card)
+            return
+
+        if user_input.lower().startswith("/paste-image") and (len(user_input) == 12 or user_input[12] in (" ", "\t")):
+            parts = user_input.split(" ", 1)
+            image_query = parts[1].strip() if len(parts) > 1 and parts[1].strip() else "Analyze this screenshot and describe its key contents."
+
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+
+            encoded = grab_clipboard_image()
+            history_container = self.query_one("#history")
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            if not encoded["success"]:
+                err_card = ChatMessageWidget(role="assistant", raw_text=f"**Clipboard Error:** {encoded['error']}", classes="raven-msg")
+                history_container.mount(err_card)
+                self.scroll_to_bottom()
+                return
+
+            badge_label = f"Clipboard Screenshot ({encoded.get('width', '?')}x{encoded.get('height', '?')})"
+            user_card = ChatMessageWidget(role="user", raw_text=image_query, image_badge=badge_label, classes="user-msg")
+            history_container.mount(user_card)
+
+            raven_card = ChatMessageWidget(role="assistant", raw_text="", classes="raven-msg")
+            self.scroll_to_bottom()
+            self.is_generating = True
+
+            active_model = settings.RAVEN_MODEL
+            if is_model_vision_capable(active_model):
+                multimodal_content = create_multimodal_content(image_query, encoded["data_uri"])
+                self.stream_response(multimodal_content, raven_card)
+            else:
+                self.stream_image_with_vision_bridge(encoded["data_uri"], image_query, raven_card)
+            return
+
         if user_input.lower() == "/compact" or user_input.lower().startswith("/compact"):
             parts = user_input.split(" ", 1)
             custom_instructions = parts[1].strip() if len(parts) > 1 else ""
@@ -903,7 +1007,8 @@ class RavenTUI(App):
             query = parts[1].lower().strip() if len(parts) > 1 else ""
 
             if cmd == "/report":
-                user_input = SLASH_COMMANDS[cmd]['system_prompt'].replace("<time_period>",query)
+                time_period = query if query else "past 7 days"
+                user_input = SLASH_COMMANDS[cmd]['system_prompt'].replace("<time_period>", time_period)
             else:
                 user_input = f"{SLASH_COMMANDS[cmd]['system_prompt']}\n {query}"
 
@@ -916,7 +1021,38 @@ class RavenTUI(App):
         
     
     @work(thread=True)
-    def stream_response(self,query:str,raven_card:ChatMessageWidget):
+    def stream_image_with_vision_bridge(self, data_uri: str, image_query: str, raven_card: ChatMessageWidget):
+        """Processes an image through the Vision Bridge and pipes transcribed text to the active model."""
+        thinking_container = self.query_one("#thinking_container")
+        bridge_loader = ThinkingMessage("Transcribing image via Vision Bridge...")
+        try:
+            self.call_from_thread(thinking_container.mount, bridge_loader)
+            bridge_result = transcribe_image_with_vision_model(data_uri, query=image_query)
+        finally:
+            self.call_from_thread(bridge_loader.remove)
+
+        if not bridge_result.get("success"):
+            err = bridge_result.get("error", "Failed to transcribe image.")
+            self.call_from_thread(
+                self.safe_update_raven_card,
+                raven_card,
+                Markdown(f"**Vision Bridge Error:** {err}\n\nPlease switch to a vision-capable model using `/model`."),
+                f"Vision Bridge Error: {err}"
+            )
+            self.is_generating = False
+            return
+
+        transcription = bridge_result.get("transcription", "")
+        model_used = bridge_result.get("model_used", "vision model")
+        enriched_prompt = (
+            f"[Visual Content transcribed via Vision Bridge ({model_used})]:\n"
+            f"{transcription}\n\n"
+            f"User Question:\n{image_query}"
+        )
+        self.stream_response(enriched_prompt, raven_card)
+
+    @work(thread=True)
+    def stream_response(self, query: str | list = None, raven_card: ChatMessageWidget = None):
         """Background thread that streams the AI response without freezing the UI."""
         if not self.chat_session:
             self.call_from_thread(self.safe_update_raven_card, raven_card, "[red]AI is still initializing. Please try again.[/red]")
@@ -995,6 +1131,10 @@ class RavenTUI(App):
                         if thinking_message:                                                                                                                                
                             self.call_from_thread(thinking_message.remove)
                         error_str = str(api_error).lower()
+                        if "image_url" in error_str or "multimodal" in error_str:
+                            msg = f"**Model Incompatibility:** Model `{settings.RAVEN_MODEL}` does not support image input. Please switch to a vision model with `/model`."
+                            self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(msg), msg)
+                            return
                         if "429" in error_str or "exhausted" in error_str or "quota" in error_str:
                             if attempt < max_retries - 1:
                                 # Exponential backoff: 2, 4, 8, 16 seconds...

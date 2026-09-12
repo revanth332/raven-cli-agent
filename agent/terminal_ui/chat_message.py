@@ -1,3 +1,5 @@
+import re
+from typing import Any
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Static, Button
@@ -54,17 +56,54 @@ class ChatMessageWidget(Vertical):
         background: #27272a;
     }
 
+    .img-badge {
+        color: #06B6D4;
+        text-style: bold;
+        height: auto;
+        margin-bottom: 1;
+    }
+
     .msg-content {
         height: auto;
         width: 100%;
     }
     """
 
-    def __init__(self, role: str = "user", raw_text: str = "", **kwargs):
+    def __init__(self, role: str = "user", raw_text: Any = "", image_badge: str = "", **kwargs):
         super().__init__(**kwargs)
         self.role = role
-        self.raw_text = raw_text
+        self.image_badge = image_badge
+        self.raw_text = self._format_multimodal_text(raw_text)
         self._pending_renderable = None
+
+    def _format_multimodal_text(self, content: Any) -> str:
+        if isinstance(content, str):
+            # Intercept any legacy or direct rich markup badge like [bold #06B6D4][...][/bold #06B6D4]
+            markup_pattern = r"^\[bold\s+#[0-9a-fA-F]{6}\]\[?(.*?)\]?\[/bold\s+#[0-9a-fA-F]{6}\]\s*\n*"
+            match = re.match(markup_pattern, content)
+            if match:
+                badge_text = match.group(1).strip()
+                clean_badge = badge_text.replace("🖼️", "").replace("🖼", "").strip("[] ")
+                if clean_badge and not self.image_badge:
+                    self.image_badge = clean_badge
+                return content[match.end():].strip()
+            return content
+
+        if isinstance(content, list):
+            text_parts = []
+            has_image = False
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+                    elif item.get("type") == "image_url":
+                        has_image = True
+
+            if has_image and not self.image_badge:
+                self.image_badge = "Attached Image"
+            body = "\n\n".join(t for t in text_parts if t.strip())
+            return body or str(content)
+        return str(content) if content is not None else ""
 
     def compose(self) -> ComposeResult:
         with Horizontal(classes="msg-header"):
@@ -73,6 +112,8 @@ class ChatMessageWidget(Vertical):
             else:
                 yield Static("[bold #10B981]RAVEN[/bold #10B981]", classes="msg-role")
             yield Static("Copy", id="copy_btn", classes="copy-btn")
+        if self.image_badge:
+            yield Static(f"[bold #06B6D4]◆ Image: {self.image_badge}[/bold #06B6D4]", id="img_badge", classes="img-badge")
         yield Static(id="msg_content", classes="msg-content")
 
     def on_mount(self) -> None:
@@ -83,7 +124,7 @@ class ChatMessageWidget(Vertical):
         elif self.raw_text:
             self.update(self.raw_text)
 
-    def update(self, renderable, raw_text: str = None) -> None:
+    def update(self, renderable, raw_text: Any = None) -> None:
         if isinstance(renderable, Group):
             group_texts = []
             for item in renderable.renderables:
@@ -91,25 +132,25 @@ class ChatMessageWidget(Vertical):
                     clean = item.plain.strip()
                     if clean:
                         group_texts.append(clean)
-            if raw_text:
-                clean_raw = raw_text.strip()
+            if raw_text is not None:
+                clean_raw = self._format_multimodal_text(raw_text).strip()
                 if clean_raw:
                     group_texts.append(clean_raw)
             if group_texts:
                 self.raw_text = "\n\n".join(group_texts)
             elif raw_text is not None:
-                self.raw_text = raw_text
+                self.raw_text = self._format_multimodal_text(raw_text)
         elif raw_text is not None:
-            self.raw_text = raw_text
-        elif isinstance(renderable, str):
-            self.raw_text = renderable
+            self.raw_text = self._format_multimodal_text(raw_text)
+        elif isinstance(renderable, (str, list)):
+            self.raw_text = self._format_multimodal_text(renderable)
         elif hasattr(renderable, "plain") and renderable.plain:
             self.raw_text = renderable.plain
 
         try:
             content_static = self.query_one("#msg_content", Static)
-            if isinstance(renderable, str):
-                content_static.update(Markdown(renderable))
+            if isinstance(renderable, (str, list)):
+                content_static.update(Markdown(self.raw_text))
             else:
                 content_static.update(renderable)
             self._pending_renderable = None

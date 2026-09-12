@@ -4,6 +4,7 @@ from textual.widgets import OptionList, Button, Static, Input
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal
 from agent.core.settings import settings
+from agent.core.vision import is_model_vision_capable
 
 DEFAULT_MODELS = [
     "google/gemini-3.8-flash",
@@ -105,9 +106,10 @@ class ModelSelectModal(ModalScreen[str]):
             
             ol = OptionList(id="model_list")
             for m in self.models:
-                prompt_text = f"• {m}"
+                badge = "[dim green][Vision][/dim green]" if is_model_vision_capable(m) else "[dim #64748B][Text][/dim #64748B]"
+                prompt_text = f"• {m}  {badge}"
                 if m == self.current_model:
-                    prompt_text += "  [active]"
+                    prompt_text += "  [bold #06B6D4][active][/bold #06B6D4]"
                 ol.add_option(Option(prompt_text, id=m))
             yield ol
 

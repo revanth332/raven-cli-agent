@@ -28,6 +28,24 @@ def count_tokens(text_or_messages: Union[str, List[Dict[str, Any]], Dict[str, An
         content = text_or_messages.get("content") or ""
         role = text_or_messages.get("role") or ""
         tool_calls = text_or_messages.get("tool_calls") or ""
+
+        if isinstance(content, list):
+            # Multimodal content blocks: separate text and estimate images
+            text_parts = []
+            image_tokens = 0
+            for item in content:
+                if isinstance(item, dict):
+                    if item.get("type") == "text":
+                        text_parts.append(item.get("text", ""))
+                    elif item.get("type") == "image_url":
+                        # Standard fixed estimate per image (~1,000 tokens for Gemini/GPT-4o)
+                        image_tokens += 1000
+            
+            combined_text = " ".join(text_parts)
+            serialized = f"{role}: {combined_text}"
+            if tool_calls:
+                serialized += f" tool_calls: {json.dumps(tool_calls)}"
+            return count_tokens(serialized, model_name) + image_tokens + 4
         
         serialized = f"{role}: {content}"
         if tool_calls:
@@ -39,6 +57,9 @@ def count_tokens(text_or_messages: Union[str, List[Dict[str, Any]], Dict[str, An
     text = str(text_or_messages)
     if not text:
         return 0
+
+    if text.startswith("data:image/"):
+        return 1000
 
     if HAS_TIKTOKEN:
         try:

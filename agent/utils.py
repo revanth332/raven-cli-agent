@@ -3,7 +3,134 @@ import os
 import shutil
 import time
 import json
+import base64
+import mimetypes
+import io
 from agent.core.settings import settings
+
+SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
+MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
+
+def encode_image_file(file_path: str | Path) -> dict:
+    """
+    Validates and encodes a local image file into a base64 Data URI.
+    """
+    try:
+        clean_path = str(file_path).strip().strip('"').strip("'")
+        path = Path(clean_path)
+        if not path.exists():
+            return {
+                "success": False,
+                "error": f"Image file '{clean_path}' does not exist."
+            }
+
+        ext = path.suffix.lower()
+        if ext not in SUPPORTED_IMAGE_EXTENSIONS:
+            supported = ", ".join(sorted(SUPPORTED_IMAGE_EXTENSIONS))
+            return {
+                "success": False,
+                "error": f"Unsupported image format '{ext}'. Supported formats: {supported}"
+            }
+
+        size = path.stat().st_size
+        if size > MAX_IMAGE_SIZE_BYTES:
+            mb = size / (1024 * 1024)
+            return {
+                "success": False,
+                "error": f"Image file is too large ({mb:.1f}MB). Maximum allowed size is 10MB."
+            }
+
+        mime_type, _ = mimetypes.guess_type(clean_path)
+        if not mime_type:
+            mime_type = "image/png" if ext == ".png" else "image/jpeg"
+
+        data_b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
+        return {
+            "success": True,
+            "data_uri": f"data:{mime_type};base64,{data_b64}",
+            "mime_type": mime_type,
+            "file_name": path.name,
+            "size_bytes": size
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to encode image '{file_path}': {e}"
+        }
+
+def grab_clipboard_image() -> dict:
+    """
+    Extracts an image directly from the system clipboard (e.g. from Win+Shift+S)
+    and encodes it as a base64 Data URI.
+    """
+    try:
+        from PIL import ImageGrab, Image
+        img = ImageGrab.grabclipboard()
+
+        if img is None:
+            return {
+                "success": False,
+                "error": "No image found in clipboard. Take a screenshot (Win+Shift+S) or copy an image first."
+            }
+
+        # Case 1: Copied file path(s) in Windows Explorer
+        if isinstance(img, list):
+            valid_paths = [p for p in img if Path(p).suffix.lower() in SUPPORTED_IMAGE_EXTENSIONS]
+            if valid_paths:
+                return encode_image_file(valid_paths[0])
+            return {
+                "success": False,
+                "error": f"Clipboard contains file paths but none are supported images: {img}"
+            }
+
+        # Case 2: Bitmap image in memory (screenshot)
+        if isinstance(img, Image.Image):
+            buffered = io.BytesIO()
+            img.save(buffered, format="PNG")
+            img_bytes = buffered.getvalue()
+            size = len(img_bytes)
+
+            if size > MAX_IMAGE_SIZE_BYTES:
+                mb = size / (1024 * 1024)
+                return {
+                    "success": False,
+                    "error": f"Clipboard image is too large ({mb:.1f}MB). Maximum allowed is 10MB."
+                }
+
+            b64_data = base64.b64encode(img_bytes).decode("utf-8")
+            return {
+                "success": True,
+                "data_uri": f"data:image/png;base64,{b64_data}",
+                "mime_type": "image/png",
+                "file_name": "clipboard_screenshot.png",
+                "size_bytes": size,
+                "width": img.width,
+                "height": img.height
+            }
+
+        return {
+            "success": False,
+            "error": f"Unsupported clipboard content type: {type(img).__name__}"
+        }
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to access clipboard: {e}"
+        }
+
+def create_multimodal_content(text_prompt: str, image_data_uri: str) -> list[dict]:
+    """
+    Packages a text prompt and an image data URI into the OpenAI-compatible multimodal content format.
+    """
+    return [
+        {"type": "text", "text": text_prompt or "Analyze this image."},
+        {
+            "type": "image_url",
+            "image_url": {
+                "url": image_data_uri
+            }
+        }
+    ]
 
 _files_backed_up_this_turn = set()
 

@@ -176,12 +176,26 @@ class AgentChatSession:
 
         return response
 
-    def commit_user_message(self,content):
+    def commit_user_message(self, content):
         if content is not None:
-            if self.session_title == "New Conversation" and isinstance(content, str) and content.strip():
-                clean_title = content.strip().replace("\n", " ")
-                self.session_title = clean_title[:32] + ("..." if len(clean_title) > 32 else "")
-            self.messages.append(self._create_message("user",content=content))
+            if self.session_title == "New Conversation":
+                title_source = ""
+                if isinstance(content, str) and content.strip():
+                    title_source = content.strip()
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            title_source = item.get("text", "").strip()
+                            if title_source:
+                                break
+                    if not title_source:
+                        title_source = "Image Query"
+
+                if title_source:
+                    clean_title = title_source.replace("\n", " ")
+                    self.session_title = clean_title[:32] + ("..." if len(clean_title) > 32 else "")
+
+            self.messages.append(self._create_message("user", content=content))
             self.save_session_state()
 
     def commit_assistant_message(self,content=None,tool_calls=None):
