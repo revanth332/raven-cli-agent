@@ -11,10 +11,11 @@ from rich.console import Group
 from rich.text import Text
 
 from agent.tools.tool_registry import TOOL_REGISTRY
-from agent.core.llm import get_chat_session
+from agent.core.llm import get_chat_session, generate_ai_session_title
 from agent.utils import (
     read_prompt_from_file, get_active_project_name,
-    encode_image_file, grab_clipboard_image, create_multimodal_content
+    encode_image_file, grab_clipboard_image, create_multimodal_content,
+    set_terminal_title
 )
 from agent.core.vision import is_model_vision_capable, transcribe_image_with_vision_model
 from agent.core.settings import settings
@@ -368,6 +369,7 @@ class RavenTUI(App):
         self.is_generating = False
         self.init_loader = None
 
+        set_terminal_title("Raven - New Conversation")
         self.set_input_ready(False, "Initializing AI session, please wait...")
         self.initialize_ai()
 
@@ -630,6 +632,10 @@ class RavenTUI(App):
             session_title = getattr(self.chat_session, "session_title", "New Conversation") if self.chat_session else "New Conversation"
             current_project = get_active_project_name()
             project_name = current_project if current_project else Path.cwd().name
+
+            # Synchronize terminal tab/window title for CMD, PowerShell, and Windows Terminal
+            self.title = f"Raven - {session_title}"
+            set_terminal_title(f"Raven - {session_title}")
 
             status_widget = self.query_one("#input_status", Static)
             status_widget.update(
@@ -1021,6 +1027,24 @@ class RavenTUI(App):
         
     
     @work(thread=True)
+    def generate_session_title_worker(self, user_query: str, assistant_snippet: str = ""):
+        """Background worker to generate a descriptive AI session title via gemini-2.5-flash-lite."""
+        if not self.chat_session:
+            return
+        try:
+            ai_title = generate_ai_session_title(
+                user_query=user_query,
+                assistant_response=assistant_snippet,
+                fallback_model=settings.RAVEN_MODEL
+            )
+            if ai_title and self.chat_session:
+                self.chat_session.update_session_title(ai_title)
+                set_terminal_title(f"Raven - {ai_title}")
+                self.call_from_thread(self.update_status_bar)
+        except Exception:
+            pass
+
+    @work(thread=True)
     def stream_image_with_vision_bridge(self, data_uri: str, image_query: str, raven_card: ChatMessageWidget):
         """Processes an image through the Vision Bridge and pipes transcribed text to the active model."""
         thinking_container = self.query_one("#thinking_container")
@@ -1336,6 +1360,16 @@ class RavenTUI(App):
                 self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
 
             if self.chat_session:
+                needs_ai_title = getattr(self.chat_session, "_needs_ai_title", False)
+                if needs_ai_title:
+                    self.chat_session._needs_ai_title = False
+                    first_user_msg = ""
+                    for msg in self.chat_session.messages:
+                        if msg.get("role") == "user":
+                            first_user_msg = msg.get("content", "")
+                            break
+                    self.generate_session_title_worker(first_user_msg, text_response[:300])
+
                 summary = self.chat_session.record_turn_usage(assistant_response=text_response)
                 try:
                     sidebar = self.query_one(ConsumptionSidebar)

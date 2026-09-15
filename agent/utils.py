@@ -132,6 +132,33 @@ def create_multimodal_content(text_prompt: str, image_data_uri: str) -> list[dic
         }
     ]
 
+def set_terminal_title(title: str) -> None:
+    """
+    Sets the terminal window and tab title across Windows CMD, PowerShell, Windows Terminal,
+    and ANSI-compatible terminals using native Win32 API and OSC escape sequences.
+    """
+    title_str = str(title)
+
+    # 1. Native Windows Win32 API (directly updates CMD, PowerShell, ConHost, and Windows Terminal)
+    try:
+        import ctypes
+        ctypes.windll.kernel32.SetConsoleTitleW(title_str)
+    except Exception:
+        pass
+
+    # 2. Low-level OS write to file descriptor 1 (bypasses Textual/Python stdout interception)
+    try:
+        import os
+        os.write(1, f"\033]0;{title_str}\007".encode("utf-8", errors="ignore"))
+    except Exception:
+        try:
+            import sys
+            if hasattr(sys, "__stdout__") and sys.__stdout__:
+                sys.__stdout__.write(f"\033]0;{title_str}\007")
+                sys.__stdout__.flush()
+        except Exception:
+            pass
+
 _files_backed_up_this_turn = set()
 
 def read_prompt_from_file(path:str):

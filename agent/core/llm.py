@@ -80,15 +80,16 @@ class AgentChatSession:
         self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory_path}",project_memory_path).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT).replace("{skills}", skills_section)
         
         session_data = load_session(session_id) if session_id else None
-        if not session_data:
-            target_id = session_id or get_active_session_id()
-            session_data = load_session(target_id) if target_id else None
+        target_id = session_id or get_active_session_id()
+        if not session_data and target_id:
+            session_data = load_session(target_id)
 
         if not session_data:
-            session_data = create_session(model_name=self.model_name)
+            session_data = create_session(model_name=self.model_name, session_id=target_id)
 
         self.session_id = session_data["session_id"]
         self.session_title = session_data.get("title", "New Conversation")
+        self._needs_ai_title = (self.session_title == "New Conversation")
         set_active_session_id(self.session_id)
 
         # Re-construct message chain: system prompt + persisted user/assistant messages
@@ -194,9 +195,27 @@ class AgentChatSession:
                 if title_source:
                     clean_title = title_source.replace("\n", " ")
                     self.session_title = clean_title[:32] + ("..." if len(clean_title) > 32 else "")
+                    try:
+                        from agent.utils import set_terminal_title
+                        set_terminal_title(f"Raven - {self.session_title}")
+                    except Exception:
+                        pass
+                self._needs_ai_title = True
 
             self.messages.append(self._create_message("user", content=content))
             self.save_session_state()
+
+    def update_session_title(self, new_title: str) -> None:
+        """Updates the session title in memory and persists to disk."""
+        if new_title and new_title.strip():
+            self.session_title = new_title.strip()
+            self._needs_ai_title = False
+            self.save_session_state()
+            try:
+                from agent.utils import set_terminal_title
+                set_terminal_title(f"Raven - {self.session_title}")
+            except Exception:
+                pass
 
     def commit_assistant_message(self,content=None,tool_calls=None):
         if content is not None or tool_calls is not None:
@@ -252,3 +271,57 @@ def get_genai_client():
 def get_chat_session(session_id=None, is_coach=False):
     """Initializes and returns an interactive chat object."""
     return AgentChatSession(settings.RAVEN_MODEL, session_id=session_id, is_coach=is_coach)
+
+
+def generate_ai_session_title(user_query, assistant_response=None, fallback_model=None) -> str:
+    """
+    Generates a concise 3-5 word title summarizing the user query using 'gemini-2.5-flash-lite'
+    with fallback to the active selected model.
+    """
+    primary_model = "gemini-2.5-flash-lite" if use_vertex_ai() else "google/gemini-2.5-flash-lite"
+    active_fallback = fallback_model or settings.RAVEN_MODEL
+
+    models_to_try = [primary_model]
+    if active_fallback and active_fallback not in models_to_try:
+        models_to_try.append(active_fallback)
+
+    query_text = user_query
+    if isinstance(user_query, list):
+        for item in user_query:
+            if isinstance(item, dict) and item.get("type") == "text":
+                query_text = item.get("text", "")
+                break
+        if not isinstance(query_text, str):
+            query_text = "Image analysis"
+
+    prompt = (
+        "Generate a concise, descriptive title of 3 to 5 words summarizing the user's intent or topic.\n"
+        "Strict rules:\n"
+        "- Do NOT use quotes, quotation marks, punctuation, or backticks.\n"
+        "- Output ONLY the title text, nothing else.\n"
+        "- Title Case (e.g., 'Docker Container Setup', 'React State Optimization').\n\n"
+        f"User Prompt:\n{str(query_text)[:500]}"
+    )
+    if assistant_response:
+        prompt += f"\n\nAssistant Snippet:\n{str(assistant_response)[:300]}"
+
+    client = get_genai_client()
+    for model_name in models_to_try:
+        try:
+            resp = client.chat.completions.create(
+                model=model_name,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.2,
+                stream=False
+            )
+            raw_title = resp.choices[0].message.content or ""
+            clean_title = raw_title.strip().strip('"').strip("'").strip("`").replace("\n", " ").strip()
+            clean_title = clean_title.rstrip(".")
+            if clean_title:
+                return clean_title[:40].strip()
+        except Exception:
+            continue
+
+    fallback_title = str(query_text).strip().replace("\n", " ")
+    return fallback_title[:32] + ("..." if len(fallback_title) > 32 else "")
+
