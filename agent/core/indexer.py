@@ -157,10 +157,11 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
 
     def embed_content(self,client,batch,task_type):
         max_tries = 3
+        model_name = getattr(settings, "RAVEN_EMBEDDING_MODEL", None) or getattr(settings, "EMBEDDING_MODEL", None) or "text-embedding-005"
         for attempt in range(max_tries):
             try:
                 response = client.models.embed_content(
-                                model="text-embedding-005",          # Standard English embedding model
+                                model=model_name,
                                 contents= batch,
                                 config=types.EmbedContentConfig(
                                     # RETRIEVAL_DOCUMENT treats the vectors as data points to be stored/searched
@@ -182,6 +183,9 @@ class GeminiEmbeddingFunction(EmbeddingFunction):
 
 def get_vector_db():
     """Initializes and returns the ChromaDB client and codebase collection."""
+    embedding_model = getattr(settings, "RAVEN_EMBEDDING_MODEL", None) or getattr(settings, "EMBEDDING_MODEL", None)
+    if not embedding_model or not use_vertex_ai():
+        return None
     from agent.utils import get_active_project_name
     active_project = get_active_project_name()
     if active_project:
@@ -197,6 +201,9 @@ def get_vector_db():
 
 def index_project():
     """Scans the project, chunks Python files, and adds them to ChromaDB."""
+    embedding_model = getattr(settings, "RAVEN_EMBEDDING_MODEL", None) or getattr(settings, "EMBEDDING_MODEL", None)
+    if not embedding_model or not use_vertex_ai():
+        return "No embedding model configured. Codebase searching is not possible"
     collection = get_vector_db()
 
     if not collection:
@@ -291,10 +298,13 @@ def search_codebase(query:str,top_results:int = 3):
     Args:
         query: The natural language question or code keywords to search for.
     """
-    if not use_vertex_ai():
+    embedding_model = getattr(settings, "RAVEN_EMBEDDING_MODEL", None) or getattr(settings, "EMBEDDING_MODEL", None)
+    if not embedding_model or not use_vertex_ai():
         return "Tool is not supported."
     index_project()
     collection = get_vector_db()
+    if not collection:
+        return "Tool is not supported."
 
     result = collection.query(
         query_texts=[query],

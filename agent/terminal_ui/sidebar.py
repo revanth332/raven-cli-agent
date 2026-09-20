@@ -17,9 +17,9 @@ class ConsumptionSidebar(Vertical):
 
     DEFAULT_CSS = """
     ConsumptionSidebar {
-        width: 32;
-        min-width: 28;
-        max-width: 38;
+        width: 38;
+        min-width: 32;
+        max-width: 44;
         height: 100%;
         background: #1e1e1e;
         padding: 1 1;
@@ -74,7 +74,7 @@ class ConsumptionSidebar(Vertical):
         context_pct = metrics.get("context_percent", 0.0)
 
         # Build Context Progress Bar
-        bar_length = 16
+        bar_length = 20
         filled_length = int(round((bar_length * context_pct) / 100.0))
         filled_length = min(bar_length, max(0, filled_length))
         empty_length = bar_length - filled_length
@@ -89,8 +89,8 @@ class ConsumptionSidebar(Vertical):
         bar_str = f"[{bar_color}]" + "█" * filled_length + f"[dim white]" + "░" * empty_length + f"[/dim white][/{bar_color}]"
 
         # Truncate long session / project names for side panel display
-        clean_session = session_name if len(session_name) <= 22 else session_name[:20] + ".."
-        clean_project = project_name if len(project_name) <= 22 else project_name[:20] + ".."
+        clean_session = session_name if len(session_name) <= 26 else session_name[:24] + ".."
+        clean_project = project_name if len(project_name) <= 26 else project_name[:24] + ".."
 
         # Render context bar using markup format in static
         text_markup = (

@@ -275,13 +275,15 @@ def get_chat_session(session_id=None, is_coach=False):
 
 def generate_ai_session_title(user_query, assistant_response=None, fallback_model=None) -> str:
     """
-    Generates a concise 3-5 word title summarizing the user query using 'gemini-2.5-flash-lite'
-    with fallback to the active selected model.
+    Generates a concise 3-5 word title summarizing the user query using the configured
+    SMALL_MODEL (settings.RAVEN_SMALL_MODEL) with fallback to the active selected model.
     """
-    primary_model = "gemini-2.5-flash-lite" if use_vertex_ai() else "google/gemini-2.5-flash-lite"
-    active_fallback = fallback_model or settings.RAVEN_MODEL
+    primary_model = getattr(settings, "RAVEN_SMALL_MODEL", None) or getattr(settings, "SMALL_MODEL", None)
+    active_fallback = fallback_model or getattr(settings, "RAVEN_MODEL", None) or getattr(settings, "MODEL", None)
 
-    models_to_try = [primary_model]
+    models_to_try = []
+    if primary_model:
+        models_to_try.append(primary_model)
     if active_fallback and active_fallback not in models_to_try:
         models_to_try.append(active_fallback)
 

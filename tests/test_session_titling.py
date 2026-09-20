@@ -15,7 +15,7 @@ class TestSessionTitling(unittest.TestCase):
 
     @patch("agent.core.llm.get_genai_client")
     def test_generate_ai_session_title_primary_model(self, mock_get_client):
-        """Primary model (gemini-2.5-flash-lite) should be called first."""
+        """Primary model (configured SMALL_MODEL) should be called first."""
         mock_client = MagicMock()
         mock_choice = MagicMock()
         mock_choice.message.content = '"Docker Container Setup."'
@@ -24,12 +24,13 @@ class TestSessionTitling(unittest.TestCase):
         mock_client.chat.completions.create.return_value = mock_resp
         mock_get_client.return_value = mock_client
 
-        title = generate_ai_session_title("How do I setup multi-stage docker build for python?")
-        self.assertEqual(title, "Docker Container Setup")
+        with patch("agent.core.llm.settings.RAVEN_SMALL_MODEL", "gemini-2.5-flash-lite"):
+            title = generate_ai_session_title("How do I setup multi-stage docker build for python?")
+            self.assertEqual(title, "Docker Container Setup")
 
-        # Verify model used had gemini-2.5-flash-lite
-        call_model = mock_client.chat.completions.create.call_args[1]["model"]
-        self.assertIn("gemini-2.5-flash-lite", call_model)
+            # Verify model used had gemini-2.5-flash-lite
+            call_model = mock_client.chat.completions.create.call_args[1]["model"]
+            self.assertIn("gemini-2.5-flash-lite", call_model)
 
     @patch("agent.core.llm.get_genai_client")
     def test_generate_ai_session_title_fallback_model(self, mock_get_client):
@@ -47,16 +48,37 @@ class TestSessionTitling(unittest.TestCase):
         ]
         mock_get_client.return_value = mock_client
 
-        title = generate_ai_session_title(
-            "Implement JWT auth with FastAPI",
-            fallback_model="openai/gpt-4o"
-        )
-        self.assertEqual(title, "FastAPI Authentication")
-        self.assertEqual(mock_client.chat.completions.create.call_count, 2)
+        with patch("agent.core.llm.settings.RAVEN_SMALL_MODEL", "gemini-2.5-flash-lite"):
+            title = generate_ai_session_title(
+                "Implement JWT auth with FastAPI",
+                fallback_model="openai/gpt-4o"
+            )
+            self.assertEqual(title, "FastAPI Authentication")
+            self.assertEqual(mock_client.chat.completions.create.call_count, 2)
 
-        # Verify fallback call used active model
-        second_call_model = mock_client.chat.completions.create.call_args_list[1][1]["model"]
-        self.assertEqual(second_call_model, "openai/gpt-4o")
+            # Verify fallback call used active model
+            second_call_model = mock_client.chat.completions.create.call_args_list[1][1]["model"]
+            self.assertEqual(second_call_model, "openai/gpt-4o")
+
+    @patch("agent.core.llm.get_genai_client")
+    def test_generate_ai_session_title_no_small_model(self, mock_get_client):
+        """When no SMALL_MODEL is configured, active model is used directly."""
+        mock_client = MagicMock()
+        mock_choice = MagicMock()
+        mock_choice.message.content = "Direct Raven Title"
+        mock_resp = MagicMock()
+        mock_resp.choices = [mock_choice]
+        mock_client.chat.completions.create.return_value = mock_resp
+        mock_get_client.return_value = mock_client
+
+        with patch("agent.core.llm.settings.RAVEN_SMALL_MODEL", None):
+            with patch("agent.core.llm.settings.SMALL_MODEL", None):
+                with patch("agent.core.llm.settings.RAVEN_MODEL", "openai/gpt-4o"):
+                    title = generate_ai_session_title("Explain async await in Python")
+                    self.assertEqual(title, "Direct Raven Title")
+                    self.assertEqual(mock_client.chat.completions.create.call_count, 1)
+                    call_model = mock_client.chat.completions.create.call_args[1]["model"]
+                    self.assertEqual(call_model, "openai/gpt-4o")
 
     @patch("agent.core.llm.get_genai_client")
     def test_generate_ai_session_title_all_fail_fallback_query(self, mock_get_client):

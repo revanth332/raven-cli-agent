@@ -280,6 +280,15 @@ def start_chat_session(chat_session):
         run_agent_loop(chat_session,query)
         console.print()
 
+@app.callback(invoke_without_command=True)
+def main(ctx: typer.Context):
+    """
+    Raven - Autonomous Personal AI Developer Agent.
+    Launches the multi-modal Textual UI by default when invoked without subcommands.
+    """
+    if ctx.invoked_subcommand is None:
+        tui()
+
 @app.command()
 def test():
     print("testng..")

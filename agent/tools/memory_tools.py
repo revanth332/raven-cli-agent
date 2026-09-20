@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 from agent.utils import get_project_root,get_active_project_name,use_vertex_ai
+from agent.core.settings import settings
 
 def chunk_debug_history(text: str) -> list[dict]:
     """
@@ -53,6 +54,9 @@ def get_episodic_vector_db():
     """
     Initializes and returns the global episodic memory ChromaDB collection.
     """
+    embedding_model = getattr(settings, "RAVEN_EMBEDDING_MODEL", None) or getattr(settings, "EMBEDDING_MODEL", None)
+    if not embedding_model or not use_vertex_ai():
+        return None
     import chromadb
     from agent.core.indexer import GeminiEmbeddingFunction
     db_path = Path.home() / ".raven" / "vector_db" / "global_episodic"
@@ -67,6 +71,10 @@ def index_episodic_memory():
     """
     Indexes global memory, debug logs, and technical concepts to ChromaDB if modified.
     """
+    embedding_model = getattr(settings, "RAVEN_EMBEDDING_MODEL", None) or getattr(settings, "EMBEDDING_MODEL", None)
+    if not embedding_model or not use_vertex_ai():
+        return
+
     collection = get_episodic_vector_db()
     if not collection:
         return
@@ -145,7 +153,8 @@ def recall_memory(query: str) -> str:
     Args:
         query: Semantic query matching past experiences, errors, or concepts.
     """
-    if not use_vertex_ai():
+    embedding_model = getattr(settings, "RAVEN_EMBEDDING_MODEL", None) or getattr(settings, "EMBEDDING_MODEL", None)
+    if not embedding_model or not use_vertex_ai():
         return "Tool is not supported."
     index_episodic_memory()
     collection = get_episodic_vector_db()
