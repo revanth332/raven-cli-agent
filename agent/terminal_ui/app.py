@@ -29,6 +29,7 @@ from agent.terminal_ui.session_select_modal import SessionSelectModal
 from agent.terminal_ui.skills_modal import SkillsManagerModal, CreateSkillModal
 from agent.terminal_ui.sidebar import ConsumptionSidebar
 from agent.core.session_manager import create_session, list_sessions
+from agent.core.loop_guard import LoopGuard
 
 from pathlib import Path
 import json
@@ -483,6 +484,10 @@ class RavenTUI(App):
         self.pending_permission = True
         self.permission_result = False
         self.permission_instruction = ""
+
+        # Trigger desktop toast notification & chime in background
+        from agent.utils import notify_user_action_required
+        notify_user_action_required(title=title, message=message)
 
         def on_allow():
             self.resolve_permission(granted=True, instruction="")
@@ -1083,6 +1088,7 @@ class RavenTUI(App):
             return
         start_time = time.time()
         self.cancel_event.clear()
+        loop_guard = LoopGuard(max_turns=10)
         try:
             thinking_container = self.query_one("#thinking_container")
             text_response = ""
@@ -1091,14 +1097,15 @@ class RavenTUI(App):
             MAX_DIFF_LINES = 8
             MAX_ARG_LENGTH = 80
 
-            def append_tool_header(display_name: str, display_value: str = "") -> None:
+            def append_tool_header(display_name: str, display_value: str = "", tool_name: str = "") -> None:
                 """Append a consistently styled tool header without Rich markup parsing values."""
                 tool_logs.append("\n• ", style="bold cyan")
                 tool_logs.append(display_name, style="bold cyan")
                 if display_value:
                     clean_val = " ".join(str(display_value).split())
-                    if len(clean_val) > MAX_ARG_LENGTH:
-                        clean_val = clean_val[:MAX_ARG_LENGTH - 3] + "..."
+                    max_len = 120 if tool_name == "search_codebase" else MAX_ARG_LENGTH
+                    if len(clean_val) > max_len:
+                        clean_val = clean_val[:max_len - 3] + "..."
                     tool_logs.append("(", style="dim white")
                     tool_logs.append(clean_val, style="dim white")
                     tool_logs.append(")", style="dim white")
@@ -1110,6 +1117,14 @@ class RavenTUI(App):
 
             while True:
                 if self.cancel_event.is_set():
+                    break
+
+                if loop_guard.is_turn_limit_reached():
+                    tool_logs.append(f"\n\n[Warning] {loop_guard.get_limit_warning()}\n", style="bold yellow")
+                    if text_response:
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
+                    else:
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
                     break
                     
                 function_calls = {}
@@ -1194,6 +1209,7 @@ class RavenTUI(App):
                 if not function_calls:
                     break
 
+                loop_guard.increment_turn()
                 tool_calls_to_append = []
                 tool_responses_to_append = []
                 for _,fc in function_calls.items():
@@ -1214,6 +1230,24 @@ class RavenTUI(App):
                         },
                         "extra_content":fc.get("extra_content","")
                     })
+
+                    is_dup, dup_msg = loop_guard.check_duplicate(tool_name, tool_args)
+                    if is_dup:
+                        tool_logs.append(f"\n• Intercepted Duplicate Call: {tool_name}\n", style="yellow")
+                        if text_response:
+                            self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
+                        else:
+                            self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
+
+                        tool_responses_to_append.append({
+                            "role": "tool",
+                            "tool_call_id": fc["id"],
+                            "name": fc["name"],
+                            "content": json.dumps(dup_msg)
+                        })
+                        continue
+
+                    loop_guard.record_call(tool_name, tool_args)
 
                     if tool_name in TOOL_REGISTRY:
                         tool_meta = TOOL_REGISTRY[tool_name]

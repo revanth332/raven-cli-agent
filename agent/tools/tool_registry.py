@@ -504,7 +504,7 @@ TOOL_REGISTRY = {
     "search_codebase":{
         "fn": search_codebase,
         "display_name": "Searching Codebase",
-        "display_arg": "",
+        "display_arg": "query",
         "ignore_display": False
     },
     "get_staged_git_changes":{

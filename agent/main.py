@@ -12,6 +12,7 @@ from agent.core.llm import get_chat_session
 from agent.utils import read_prompt_from_file,start_new_backup_turn
 from agent.core.settings import settings
 from agent.tools.tool_registry import TOOL_REGISTRY
+from agent.core.loop_guard import LoopGuard
 
 import sys
 from pathlib import Path
@@ -68,8 +69,12 @@ def run_agent_loop(chat_session,intial_input):
     """The core multi-turn engine of Raven"""
     current_input = intial_input
     max_retries = 5
+    loop_guard = LoopGuard(max_turns=10)
     try:
         while True:
+            if loop_guard.is_turn_limit_reached():
+                console.print(f"[yellow]{loop_guard.get_limit_warning()}[/yellow]")
+                break
             final_response = ""
             function_calls = {}
             user_message_committed = current_input is None
@@ -133,6 +138,7 @@ def run_agent_loop(chat_session,intial_input):
                 chat_session.commit_assistant_message(content=final_response or None,tool_calls=assistant_tool_calls)
             if not function_calls:
                 break
+            loop_guard.increment_turn()
             tool_calls_to_append = []
             tool_responses_to_append = []
             for _,fc in function_calls.items():
@@ -150,6 +156,19 @@ def run_agent_loop(chat_session,intial_input):
                     },
                     "extra_content":fc.get("extra_content","")
                 })
+
+                is_dup, dup_msg = loop_guard.check_duplicate(tool_name, tool_args)
+                if is_dup:
+                    console.print(f"[yellow]• Intercepted Duplicate Call: {tool_name}[/yellow]")
+                    tool_responses_to_append.append({
+                        "role": "tool",
+                        "tool_call_id": fc["id"],
+                        "name": fc["name"],
+                        "content": json.dumps(dup_msg)
+                    })
+                    continue
+
+                loop_guard.record_call(tool_name, tool_args)
 
                 if tool_name == "patch_file":
                     file_path = tool_args.get('file_path', 'Unknown')
@@ -176,6 +195,11 @@ def run_agent_loop(chat_session,intial_input):
                 elif tool_name == "execute_command":
                     console.print(f"[bold red]• Execute[/bold red]([dim]{tool_args['command']}[/dim])")
                     
+                    from agent.utils import notify_user_action_required
+                    notify_user_action_required(
+                        title="Raven - Permission Required",
+                        message=f"Execute command: {tool_args['command']}"
+                    )
                     confirmed = typer.confirm("Allow Raven to execute this command?")
                     if not confirmed:
                         result = "Error: User denied permission to execute this terminal command."
@@ -189,6 +213,11 @@ def run_agent_loop(chat_session,intial_input):
                 
                 elif tool_name == "commit_staged_git_changes":
                     console.print(f"[bold cyan]• Commit[/bold cyan]([dim]{tool_args['message']}[/dim]{',[red]unverified[/red]' if not tool_args['is_verified'] else ''})")
+                    from agent.utils import notify_user_action_required
+                    notify_user_action_required(
+                        title="Raven - Permission Required",
+                        message=f"Commit changes: {tool_args['message']}"
+                    )
                     confirmed = typer.confirm("Raven wants to commit the changes. Allow?")
                     if not confirmed:
                         result = "Error: User denied permission to commit the changes."

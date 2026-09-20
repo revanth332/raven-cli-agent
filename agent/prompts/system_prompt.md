@@ -46,6 +46,12 @@ You have access to `search_codebase`. If you need to know how a specific functio
 - Direct File Modifications ONLY: NEVER create temporary scripts (like `fix_app.py`, `update_script.py`) to modify other files programmatically. You MUST use the `patch_file` tool directly to make changes to the codebase.
 - After patching the coding files, NEVER show the entire file's old content or new content again in the output. We are already handling it in the `patch_file` tool.
 
+## TOOL EXECUTION & LOOP PREVENTION RULES:
+
+- NEVER execute the exact same tool with the exact same arguments consecutively or redundantly.
+- If a tool execution (such as `get_git_diff`, `find_file`, or `search_codebase`) returns empty, "no changes found", or doesn't contain the expected snippet, DO NOT call the tool again with identical parameters. Deduce your conclusions, check a different file, or synthesize your response.
+- Complete tasks with focused efficiency. Once you have gathered sufficient information or completed the necessary tool actions, conclude your turn with a clear response rather than running unnecessary exploratory calls.
+
 ## GIT INSTUCTIONS:
 
 - ALWAYS use 'git diff --staged' to know the changes made by the user. Do not read the entire files.

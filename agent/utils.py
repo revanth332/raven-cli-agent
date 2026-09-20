@@ -280,3 +280,61 @@ def get_repo_map(max_files: int = 250):
 
 def use_vertex_ai():
     return str(settings.RAVEN_USE_VERTEX_AI).strip().lower() == "true"
+
+def notify_user_action_required(title: str = "Raven - Action Required", message: str = "Raven needs your permission to proceed.") -> None:
+    """
+    Plays an audible chime and displays a Windows desktop toast notification
+    in a non-blocking background thread when user interaction or approval is required.
+    """
+    import threading
+
+    def _notify():
+        # 1. Play alert chime (Windows native winsound)
+        try:
+            import winsound
+            winsound.MessageBeep(winsound.MB_ICONEXCLAMATION)
+        except Exception:
+            pass
+
+        # 2. Windows Desktop Toast Notification
+        # Uses Windows PowerShell with a valid registered AppID (PowerShell AppID)
+        # and fallback to tray balloon tip so notifications always show even if WinRT toast is restricted.
+        try:
+            import subprocess
+            clean_title = title.replace('"', '`"').replace("'", "''")
+            clean_msg = message.replace('"', '`"').replace("'", "''")
+
+            ps_script = (
+                "$appId = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\\WindowsPowerShell\\v1.0\\powershell.exe'; "
+                "try { "
+                "  [Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] > $null; "
+                "  $template = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02); "
+                "  $textNodes = $template.GetElementsByTagName('text'); "
+                f"  $textNodes.Item(0).AppendChild($template.CreateTextNode('{clean_title}')) > $null; "
+                f"  $textNodes.Item(1).AppendChild($template.CreateTextNode('{clean_msg}')) > $null; "
+                "  $notifier = [Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($appId); "
+                "  $notification = [Windows.UI.Notifications.ToastNotification]::new($template); "
+                "  $notifier.Show($notification); "
+                "} catch { "
+                "  Add-Type -AssemblyName System.Windows.Forms; "
+                "  $bal = New-Object System.Windows.Forms.NotifyIcon; "
+                "  $bal.Icon = [System.Drawing.SystemIcons]::Information; "
+                "  $bal.BalloonTipTitle = '" + clean_title + "'; "
+                "  $bal.BalloonTipText = '" + clean_msg + "'; "
+                "  $bal.Visible = $true; "
+                "  $bal.ShowBalloonTip(4000); "
+                "  Start-Sleep -Milliseconds 4500; "
+                "  $bal.Dispose(); "
+                "}"
+            )
+            subprocess.run(
+                ["powershell", "-NoProfile", "-NonInteractive", "-WindowStyle", "Hidden", "-Command", ps_script],
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000),
+                timeout=8,
+                capture_output=True
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=_notify, daemon=True).start()
+

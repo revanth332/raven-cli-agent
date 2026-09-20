@@ -4,6 +4,7 @@ Unit and pilot tests for PermissionBar widget and input permission logic.
 
 import unittest
 import asyncio
+from unittest.mock import patch
 from agent.terminal_ui.permission_box import PermissionBar, PermissionBox
 from agent.terminal_ui.app import RavenTUI
 
@@ -35,7 +36,8 @@ class TestPermissionBar(unittest.TestCase):
         # Check backward compatibility alias
         self.assertEqual(PermissionBox, PermissionBar)
 
-    def test_tui_permission_empty_enter_allows(self):
+    @patch("agent.utils.notify_user_action_required")
+    def test_tui_permission_empty_enter_allows(self, mock_notify):
         app = RavenTUI()
 
         async def run_test():
@@ -44,6 +46,7 @@ class TestPermissionBar(unittest.TestCase):
                 await pilot.pause()
 
                 self.assertTrue(app.pending_permission)
+                mock_notify.assert_called_with(title="Action Required", message="Execute command test")
                 bar = app.query_one("#permission_bar", PermissionBar)
                 self.assertIsNotNone(bar)
 
