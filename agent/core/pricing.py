@@ -7,6 +7,9 @@ from typing import Dict, Any, Tuple
 # Default pricing matrix: model_name -> (prompt_cost_per_1M, completion_cost_per_1M, context_window_limit)
 MODEL_PRICING_REGISTRY: Dict[str, Dict[str, Any]] = {
     # OpenAI models
+    "gpt-5.6-sol": {"input_cost_per_1m": 5.00, "output_cost_per_1m": 30.00, "context_limit": 128000},
+    "gpt-5.6-terra": {"input_cost_per_1m": 2.00, "output_cost_per_1m": 12.00, "context_limit": 128000},
+    "gpt-5.6-luna": {"input_cost_per_1m": 0.20, "output_cost_per_1m": 1.20, "context_limit": 128000},
     "gpt-4o": {"input_cost_per_1m": 2.50, "output_cost_per_1m": 10.00, "context_limit": 128000},
     "gpt-4o-mini": {"input_cost_per_1m": 0.15, "output_cost_per_1m": 0.60, "context_limit": 128000},
     "o1": {"input_cost_per_1m": 15.00, "output_cost_per_1m": 60.00, "context_limit": 200000},
