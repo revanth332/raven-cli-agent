@@ -29,7 +29,7 @@ from agent.terminal_ui.session_select_modal import SessionSelectModal
 from agent.terminal_ui.skills_modal import SkillsManagerModal, CreateSkillModal
 from agent.terminal_ui.sidebar import ConsumptionSidebar
 from agent.core.session_manager import create_session, list_sessions
-from agent.core.loop_guard import LoopGuard
+from agent.core.loop_guard import LoopGuard, LoopGuardState
 
 from pathlib import Path
 import json
@@ -1088,7 +1088,13 @@ class RavenTUI(App):
             return
         start_time = time.time()
         self.cancel_event.clear()
-        loop_guard = LoopGuard(max_turns=10)
+        loop_guard = LoopGuard(
+            max_turns=settings.RAVEN_AGENT_SOFT_TURNS,
+            hard_max_turns=settings.RAVEN_AGENT_HARD_TURNS,
+            max_tool_calls=settings.RAVEN_AGENT_MAX_TOOL_CALLS,
+            max_no_progress_rounds=settings.RAVEN_AGENT_MAX_NO_PROGRESS,
+            grace_turns=settings.RAVEN_AGENT_GRACE_TURNS,
+        )
         try:
             thinking_container = self.query_one("#thinking_container")
             text_response = ""
@@ -1119,14 +1125,16 @@ class RavenTUI(App):
                 if self.cancel_event.is_set():
                     break
 
-                if loop_guard.is_turn_limit_reached():
+                guard_state = loop_guard.get_state()
+                execution_instruction = None
+                allow_tools = True
+                if guard_state == LoopGuardState.WRAP_UP:
+                    execution_instruction = loop_guard.get_wrap_up_instruction()
+                elif guard_state == LoopGuardState.FINALIZE:
                     tool_logs.append(f"\n\n[Warning] {loop_guard.get_limit_warning()}\n", style="bold yellow")
-                    if text_response:
-                        self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
-                    else:
-                        self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
-                    break
-                    
+                    execution_instruction = loop_guard.get_finalization_instruction()
+                    allow_tools = False
+
                 function_calls = {}
                 max_retries = 5
                 thinking_message = ThinkingMessage()
@@ -1134,7 +1142,11 @@ class RavenTUI(App):
                 for attempt in range(max_retries):
                     try:
                         self.call_from_thread(thinking_container.mount,thinking_message)
-                        generator = self.chat_session.send_message_stream(query)
+                        generator = self.chat_session.send_message_stream(
+                            query,
+                            execution_instruction=execution_instruction,
+                            allow_tools=allow_tools,
+                        )
                         if query is not None and not user_message_committed:
                             self.chat_session.commit_user_message(query)
                             user_message_committed = True
@@ -1208,11 +1220,16 @@ class RavenTUI(App):
 
                 if not function_calls:
                     break
+                if not allow_tools:
+                    tool_logs.append("\nFinal response completed without additional tool execution.\n", style="dim yellow")
+                    break
 
                 loop_guard.increment_turn()
+                round_made_progress = False
                 tool_calls_to_append = []
                 tool_responses_to_append = []
                 for _,fc in function_calls.items():
+                    loop_guard.record_tool_call()
                     if self.cancel_event.is_set():
                         break
                         
@@ -1369,6 +1386,8 @@ class RavenTUI(App):
                                 self.call_from_thread(tool_status.remove)
                     else:
                         result = "Error: Tool not found."
+                    if loop_guard.result_made_progress(result):
+                        round_made_progress = True
                     tool_responses_to_append.append({
                                                 "role": "tool",
                                                 "tool_call_id": fc["id"],
@@ -1377,6 +1396,7 @@ class RavenTUI(App):
                                             })
                 for tool_response in tool_responses_to_append:
                     self.chat_session.add_message(role="tool",tool_call_id=tool_response["tool_call_id"],name=tool_response["name"],content=tool_response["content"])
+                loop_guard.record_round_outcome(round_made_progress)
                 query = None
 
             elapsed = time.time() - start_time

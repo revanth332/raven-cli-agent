@@ -159,21 +159,23 @@ class AgentChatSession:
         self.save_session_state()
         return summary
 
-    def send_message_stream(self,query):
-        """
-        Sends the current chat history stream. 
-        If a query is passed, it appends it as a new user message first.
-        If query is None, it continues the loop (e.g., passing back tool outputs).
-        """
-        request_messages = self.messages
+    def send_message_stream(self, query, execution_instruction=None, allow_tools=True):
+        """Send chat history with optional transient loop-control instructions."""
+        request_messages = list(self.messages)
         if query is not None:
-            request_messages = self.messages + [self._create_message("user",content=query)]
-        response = get_genai_client().chat.completions.create(
-            model=self.model_name,
-            messages=request_messages,
-            tools=raven_tools,
-            stream=True,
-        )
+            request_messages.append(self._create_message("user", content=query))
+        if execution_instruction:
+            request_messages.append(self._create_message("system", content=execution_instruction))
+
+        request_args = {
+            "model": self.model_name,
+            "messages": request_messages,
+            "stream": True,
+        }
+        if allow_tools:
+            request_args["tools"] = raven_tools
+
+        response = get_genai_client().chat.completions.create(**request_args)
 
         return response
 

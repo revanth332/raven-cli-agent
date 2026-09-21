@@ -104,6 +104,35 @@ class TestSettingsPrecedence(unittest.TestCase):
                 self.assertEqual(s.RAVEN_MODEL, "google/gemini-3-flash-preview")
                 self.assertEqual(s.MODEL, "google/gemini-3-flash-preview")
 
+    def test_agent_budget_defaults_and_integer_coercion(self):
+        clean_env = {
+            "RAVEN_AGENT_SOFT_TURNS": "",
+            "AGENT_SOFT_TURNS": "",
+            "RAVEN_AGENT_HARD_TURNS": "",
+            "AGENT_HARD_TURNS": "",
+            "RAVEN_AGENT_MAX_TOOL_CALLS": "",
+            "AGENT_MAX_TOOL_CALLS": "",
+            "RAVEN_AGENT_MAX_NO_PROGRESS": "",
+            "AGENT_MAX_NO_PROGRESS": "",
+            "RAVEN_AGENT_GRACE_TURNS": "",
+            "AGENT_GRACE_TURNS": "",
+        }
+        with patch.dict(os.environ, clean_env, clear=False):
+            with patch("pathlib.Path.home", return_value=Path(self.temp_dir.name)):
+                s = Settings()
+                s.config_file = self.config_path
+                s.reload()
+                self.assertEqual(s.RAVEN_AGENT_SOFT_TURNS, 10)
+                self.assertEqual(s.RAVEN_AGENT_HARD_TURNS, 20)
+                self.assertEqual(s.RAVEN_AGENT_MAX_TOOL_CALLS, 40)
+                self.assertEqual(s.RAVEN_AGENT_MAX_NO_PROGRESS, 3)
+                self.assertEqual(s.RAVEN_AGENT_GRACE_TURNS, 2)
+
+        with patch.dict(os.environ, {"RAVEN_AGENT_SOFT_TURNS": "12"}, clear=False):
+            with patch("pathlib.Path.home", return_value=Path(self.temp_dir.name)):
+                s = Settings()
+                self.assertEqual(s.RAVEN_AGENT_SOFT_TURNS, 12)
+
     def test_type_coercion_boolean(self):
         """Boolean settings from strings in env or config should be properly coerced."""
         with patch.dict(os.environ, {"RAVEN_AUTO_APPROVE": "true", "RAVEN_USE_VERTEX_AI": "false"}):

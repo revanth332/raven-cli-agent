@@ -1,5 +1,5 @@
 import unittest
-from agent.core.loop_guard import LoopGuard
+from agent.core.loop_guard import LoopGuard, LoopGuardState
 
 
 class TestLoopGuard(unittest.TestCase):
@@ -34,13 +34,47 @@ class TestLoopGuard(unittest.TestCase):
         is_dup, _ = self.guard.check_duplicate("patch_file", {"replace_block": "bar", "search_block": "foo", "file_path": "test.txt"})
         self.assertTrue(is_dup)
 
-    def test_turn_ceiling_enforcement(self):
+    def test_soft_limit_enters_wrap_up_before_finalization(self):
         for _ in range(5):
-            self.assertFalse(self.guard.is_turn_limit_reached())
             self.guard.increment_turn()
 
+        self.assertEqual(self.guard.get_state(), LoopGuardState.WRAP_UP)
+        self.assertFalse(self.guard.is_turn_limit_reached())
+        self.assertIn("wrap up", self.guard.get_wrap_up_instruction())
+
+        self.guard.increment_turn()
+        self.assertEqual(self.guard.get_state(), LoopGuardState.WRAP_UP)
+        self.guard.increment_turn()
+        self.assertEqual(self.guard.get_state(), LoopGuardState.FINALIZE)
         self.assertTrue(self.guard.is_turn_limit_reached())
-        self.assertIn("reached maximum of 5", self.guard.get_limit_warning())
+
+    def test_hard_turn_limit_forces_finalization(self):
+        guard = LoopGuard(max_turns=5, hard_max_turns=6, grace_turns=10)
+        for _ in range(6):
+            guard.increment_turn()
+        self.assertEqual(guard.get_state(), LoopGuardState.FINALIZE)
+
+    def test_tool_call_limit_forces_finalization(self):
+        guard = LoopGuard(max_turns=10, max_tool_calls=3)
+        guard.record_tool_call(3)
+        self.assertEqual(guard.get_state(), LoopGuardState.FINALIZE)
+
+    def test_no_progress_limit_forces_finalization_and_progress_resets_it(self):
+        guard = LoopGuard(max_no_progress_rounds=3)
+        guard.record_round_outcome(False)
+        guard.record_round_outcome(False)
+        guard.record_round_outcome(True)
+        self.assertEqual(guard.no_progress_rounds, 0)
+
+        for _ in range(3):
+            guard.record_round_outcome(False)
+        self.assertEqual(guard.get_state(), LoopGuardState.FINALIZE)
+
+    def test_result_progress_detection(self):
+        self.assertFalse(self.guard.result_made_progress("Error: command failed"))
+        self.assertFalse(self.guard.result_made_progress({"success": False, "error": "missing"}))
+        self.assertTrue(self.guard.result_made_progress({"success": True}))
+        self.assertTrue(self.guard.result_made_progress("file updated"))
 
     def test_sliding_window_expiration(self):
         guard = LoopGuard(max_turns=10, history_window=2)
@@ -58,6 +92,9 @@ class TestLoopGuard(unittest.TestCase):
         self.guard.reset()
 
         self.assertEqual(self.guard.turn_count, 0)
+        self.assertEqual(self.guard.tool_call_count, 0)
+        self.assertEqual(self.guard.no_progress_rounds, 0)
+        self.assertIsNone(self.guard.wrap_up_started_at)
         is_dup, _ = self.guard.check_duplicate("execute_command", {"command": "dir"})
         self.assertFalse(is_dup)
 

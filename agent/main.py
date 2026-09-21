@@ -12,7 +12,7 @@ from agent.core.llm import get_chat_session
 from agent.utils import read_prompt_from_file,start_new_backup_turn
 from agent.core.settings import settings
 from agent.tools.tool_registry import TOOL_REGISTRY
-from agent.core.loop_guard import LoopGuard
+from agent.core.loop_guard import LoopGuard, LoopGuardState
 
 import sys
 from pathlib import Path
@@ -69,19 +69,35 @@ def run_agent_loop(chat_session,intial_input):
     """The core multi-turn engine of Raven"""
     current_input = intial_input
     max_retries = 5
-    loop_guard = LoopGuard(max_turns=10)
+    loop_guard = LoopGuard(
+        max_turns=settings.RAVEN_AGENT_SOFT_TURNS,
+        hard_max_turns=settings.RAVEN_AGENT_HARD_TURNS,
+        max_tool_calls=settings.RAVEN_AGENT_MAX_TOOL_CALLS,
+        max_no_progress_rounds=settings.RAVEN_AGENT_MAX_NO_PROGRESS,
+        grace_turns=settings.RAVEN_AGENT_GRACE_TURNS,
+    )
     try:
         while True:
-            if loop_guard.is_turn_limit_reached():
+            guard_state = loop_guard.get_state()
+            execution_instruction = None
+            allow_tools = True
+            if guard_state == LoopGuardState.WRAP_UP:
+                execution_instruction = loop_guard.get_wrap_up_instruction()
+            elif guard_state == LoopGuardState.FINALIZE:
                 console.print(f"[yellow]{loop_guard.get_limit_warning()}[/yellow]")
-                break
+                execution_instruction = loop_guard.get_finalization_instruction()
+                allow_tools = False
             final_response = ""
             function_calls = {}
             user_message_committed = current_input is None
             with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console) as live:
                 for attempt in range(max_retries):
                     try:
-                        generator = chat_session.send_message_stream(current_input)
+                        generator = chat_session.send_message_stream(
+                            current_input,
+                            execution_instruction=execution_instruction,
+                            allow_tools=allow_tools,
+                        )
                         if current_input is not None and not user_message_committed:
                             chat_session.commit_user_message(current_input)
                             user_message_committed = True
@@ -138,10 +154,15 @@ def run_agent_loop(chat_session,intial_input):
                 chat_session.commit_assistant_message(content=final_response or None,tool_calls=assistant_tool_calls)
             if not function_calls:
                 break
+            if not allow_tools:
+                console.print("[yellow]Final response completed without additional tool execution.[/yellow]")
+                break
             loop_guard.increment_turn()
+            round_made_progress = False
             tool_calls_to_append = []
             tool_responses_to_append = []
             for _,fc in function_calls.items():
+                loop_guard.record_tool_call()
                 tool_name = fc["name"]
                 try:
                     tool_args = json.loads(fc["arguments"])
@@ -244,6 +265,8 @@ def run_agent_loop(chat_session,intial_input):
                 else:
                     result = f"Error: Tool {tool_name} not found in registry."
             
+                if loop_guard.result_made_progress(result):
+                    round_made_progress = True
                 tool_responses_to_append.append({
                                             "role": "tool",
                                             "tool_call_id": fc["id"],
@@ -253,6 +276,7 @@ def run_agent_loop(chat_session,intial_input):
             
             for tool_response in tool_responses_to_append:
                 chat_session.add_message(role="tool",tool_call_id=tool_response["tool_call_id"],name=tool_response["name"],content=tool_response["content"])
+            loop_guard.record_round_outcome(round_made_progress)
             current_input = None
     except Exception as e:
         console.print(e)
