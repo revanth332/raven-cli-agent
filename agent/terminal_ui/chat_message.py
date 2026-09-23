@@ -250,6 +250,49 @@ def format_generic_tool_result(tool_name: str, result: Any, expanded: bool = Fal
     return result_text
 
 
+def format_search_content_result(query: str, result_str: str, expanded: bool = False) -> Text:
+    """Formats grep search results showing match count and expandable snippet."""
+    result_text = Text()
+    clean = str(result_str).strip()
+    if clean.startswith("No matches found") or "not found" in clean.lower():
+        result_text.append(f"   |_ {clean}\n", style="dim yellow")
+    elif clean.startswith("ACCESS DENIED") or clean.startswith("Error:"):
+        result_text.append(f"   |_ {clean}\n", style="bold red")
+    else:
+        lines = [l for l in clean.splitlines() if l.strip()]
+        file_headers = [l for l in lines if l.startswith("--- ") and l.endswith(" ---")]
+        match_count = sum(1 for l in lines if l.startswith(">"))
+        file_count = len(file_headers)
+
+        summary = f"Found {match_count} match" if match_count == 1 else f"Found {match_count} matches"
+        if file_count > 0:
+            summary += f" across {file_count} file" if file_count == 1 else f" across {file_count} files"
+
+        result_text.append(f"   |_ {summary}\n", style="dim white")
+
+        if expanded and lines:
+            limit = 60
+            visible_lines = lines[:limit]
+            for l in visible_lines:
+                if l.startswith("--- ") and l.endswith(" ---"):
+                    result_text.append(f"       {l}\n", style="bold cyan")
+                elif l.startswith(">"):
+                    result_text.append(f"     {l}\n", style="white on #1e3a5f")
+                else:
+                    clean_l = l if len(l) <= 120 else l[:117] + "..."
+                    result_text.append(f"     {clean_l}\n", style="dim white")
+            collapsed = len(lines) - len(visible_lines)
+            if collapsed > 0:
+                result_text.append(f"       ... [{collapsed} more lines]\n", style="dim italic white")
+            result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+        elif not expanded and lines:
+            preview_line = file_headers[0] if file_headers else lines[0]
+            result_text.append(f"       {preview_line}\n", style="dim white")
+            result_text.append("       ▶ ... [Click to view matches & context]\n", style="dim cyan italic")
+
+    return result_text
+
+
 def format_tool_result_preview(
     tool_name: str,
     tool_args: dict,
@@ -274,6 +317,9 @@ def format_tool_result_preview(
     elif tool_name == "find_file":
         file_name = args.get("file_name", "")
         return format_find_result(file_name, str(result), expanded=expanded)
+    elif tool_name == "search_file_content":
+        query = args.get("query", "")
+        return format_search_content_result(query, str(result), expanded=expanded)
     else:
         return format_generic_tool_result(tool_name, result, expanded=expanded)
 

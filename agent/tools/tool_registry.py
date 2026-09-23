@@ -1,5 +1,5 @@
 from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,update_architecture_map,get_active_projects,recall_memory
-from agent.tools.file_tools import find_file,read_file,create_file,patch_file
+from agent.tools.file_tools import find_file,read_file,create_file,patch_file,search_file_content
 from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff,get_git_log
 from agent.tools.miscellaneous_tools import execute_command,get_current_timestamp
 from agent.tools.web_tools import web_search,extract_content_from_web_links
@@ -160,17 +160,60 @@ raven_tools = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the contents of a file.",
+            "description": "Read the contents of a file with pagination and optional line numbers.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_path": {
                         "type": "string",
-                        "description": "Full path of the file that needs to be read"
+                        "description": "Full or relative path of the file to read."
+                    },
+                    "start_line": {
+                        "type": "integer",
+                        "description": "Line number to begin reading from (1-indexed). Defaults to 1.",
+                        "default": 1
+                    },
+                    "line_count": {
+                        "type": "integer",
+                        "description": "Number of lines to return. Defaults to 250.",
+                        "default": 250
+                    },
+                    "include_line_numbers": {
+                        "type": "boolean",
+                        "description": "Whether to prefix each line with its line number. Defaults to true.",
+                        "default": True
                     }
                 },
                 "required": [
                     "file_path"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_file_content",
+            "description": "Searches for regex patterns or literal text across workspace files or inside a specific file/directory (grep). Returns matching lines with +/- 2 context lines.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The regex pattern or literal string to search for."
+                    },
+                    "file_path": {
+                        "type": "string",
+                        "description": "Optional specific file or directory path to search within. If omitted, searches across the project workspace."
+                    },
+                    "max_matches": {
+                        "type": "integer",
+                        "description": "Maximum number of matching lines to return. Defaults to 20.",
+                        "default": 20
+                    }
+                },
+                "required": [
+                    "query"
                 ]
             }
         }
@@ -457,6 +500,12 @@ TOOL_REGISTRY = {
         "fn": read_file, 
         "display_name": "Read", 
         "display_arg": "file_path", 
+        "ignore_display": False
+    },
+    "search_file_content": {
+        "fn": search_file_content,
+        "display_name": "Grep Search",
+        "display_arg": "query",
         "ignore_display": False
     },
     "create_file": {

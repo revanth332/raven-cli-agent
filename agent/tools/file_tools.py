@@ -1,7 +1,11 @@
 from pathlib import Path
 import os
+import re
 import fnmatch
+from typing import Optional
 from agent.utils import backup_file
+
+MAX_UNPAGINATED_FILE_SIZE = 1 * 1024 * 1024  # 1 MB
 
 def is_sensitive_file(file_path: str) -> bool:
     """
@@ -167,22 +171,233 @@ def find_file(file_name: str, max_results: int = 50) -> str:
     sorted_matches = sorted(matches.keys(), key=lambda p: (matches[p], len(p), p))
     return str(sorted_matches[:max_results])
 
-def read_file(file_path:str):
+def read_file(
+    file_path: str,
+    start_line: int = 1,
+    line_count: int = 250,
+    include_line_numbers: bool = True,
+) -> str:
     """
-    Use this tool to read the contents of a file.
+    Use this tool to read the contents of a file with pagination and optional line numbers.
     Args:
-        file_path: Full path of the file that needs to be read
+        file_path: Full path or relative path of the file that needs to be read.
+        start_line: Line number to begin reading from (1-indexed, defaults to 1).
+        line_count: Number of lines to return (defaults to 250).
+        include_line_numbers: Annotate each returned line with line numbers (defaults to True).
     Returns:
-        The content of the file, or an error message.
+        The content of the file (or chunk), or an error/guardrail message.
     """
     if is_sensitive_file(file_path):
         return f"ACCESS DENIED for {file_path}. Reason: SENSITIVE FILE."
     try:
-        return Path(file_path).read_text(encoding="utf-8")
+        path = Path(file_path)
+        if not path.exists():
+            return f"Error: File '{file_path}' does not exist."
+        if not path.is_file():
+            return f"Error: '{file_path}' is not a regular file."
+
+        file_size = path.stat().st_size
+        # Guardrail against files larger than 1MB when requesting excessive unpaginated reads
+        if file_size > MAX_UNPAGINATED_FILE_SIZE and line_count > 500:
+            line_count = 500
+
+        try:
+            content = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            content = path.read_text(encoding="utf-8", errors="replace")
+
+        lines = content.splitlines()
+        total_lines = len(lines)
+
+        if total_lines == 0:
+            return f"[File '{file_path}' is empty]"
+
+        start_idx = max(1, int(start_line))
+        if start_idx > total_lines:
+            return f"Error: start_line ({start_idx}) exceeds total lines ({total_lines}) in '{file_path}'."
+
+        count = max(1, int(line_count))
+        end_idx = min(total_lines, start_idx + count - 1)
+
+        selected_lines = lines[start_idx - 1 : end_idx]
+
+        if include_line_numbers:
+            pad_width = max(4, len(str(end_idx)))
+            formatted_lines = [
+                f"{line_num:>{pad_width}} | {line}"
+                for line_num, line in enumerate(selected_lines, start=start_idx)
+            ]
+        else:
+            formatted_lines = selected_lines
+
+        output_text = "\n".join(formatted_lines)
+
+        if end_idx < total_lines:
+            output_text += (
+                f"\n\n[Showing lines {start_idx}-{end_idx} of {total_lines:,}. "
+                f"Use start_line={end_idx + 1} to read further]"
+            )
+
+        return output_text
     except FileNotFoundError as e:
-        return f"File {file_path} not found. Error: {e}"
-    except:
+        return f"File '{file_path}' not found. Error: {e}"
+    except Exception as e:
         return f"Error reading file '{file_path}': {e}"
+
+
+def search_file_content(
+    query: str,
+    file_path: Optional[str] = None,
+    max_matches: int = 20,
+    context_lines: int = 2,
+) -> str:
+    """
+    Use this tool to search for regex patterns or literal strings across files in the workspace or in a specific file/directory.
+    Args:
+        query: Regex pattern or literal string to search for.
+        file_path: Target specific file or directory path. If omitted or None, searches across the project workspace.
+        max_matches: Maximum matching occurrences to return with context lines (defaults to 20).
+        context_lines: Number of surrounding context lines to include before and after matches (defaults to 2).
+    Returns:
+        Structured search matches with line numbers and context, or a notice if no matches were found.
+    """
+    if not query or not query.strip():
+        return "Error: query cannot be empty."
+
+    raw_query = query.strip()
+    try:
+        pattern = re.compile(raw_query, re.IGNORECASE)
+    except re.error:
+        pattern = re.compile(re.escape(raw_query), re.IGNORECASE)
+
+    max_matches = max(1, int(max_matches))
+    context_lines = max(0, int(context_lines))
+
+    IGNORE_DIRS = {
+        'node_modules', '.git', 'venv', '.env', '.venv', 'env', '__pycache__',
+        'dist', 'build', '.pytest_cache', '.mypy_cache', '.ruff_cache',
+        '.turbo', '.next', '.nuxt', '.cache', '.idea', '.vscode', '.vs',
+        '.coverage', 'htmlcov'
+    }
+    IGNORE_EXTS = {
+        '.pyc', '.pyo', '.pyd', '.png', '.jpg', '.jpeg', '.gif', '.ico',
+        '.pdf', '.zip', '.tar', '.gz', '.7z', '.exe', '.dll', '.so', '.dylib',
+        '.woff', '.woff2', '.ttf', '.eot', '.mp4', '.mp3', '.mov'
+    }
+
+    files_to_search: list[Path] = []
+
+    if file_path and file_path.strip():
+        target = Path(file_path.strip())
+        if is_sensitive_file(str(target)):
+            return f"ACCESS DENIED for {file_path}. Reason: SENSITIVE FILE."
+        if not target.exists():
+            return f"Error: Path '{file_path}' does not exist."
+
+        if target.is_file():
+            files_to_search.append(target)
+        else:
+            for root, dirs, files in os.walk(target):
+                dirs[:] = [
+                    d for d in dirs
+                    if d not in IGNORE_DIRS
+                    and not d.endswith(".egg-info")
+                    and not (("venv" in d.lower() or d.lower() == "env") and (Path(root) / d / "pyvenv.cfg").exists())
+                ]
+                for file in files:
+                    p = Path(root) / file
+                    if p.suffix.lower() in IGNORE_EXTS or is_sensitive_file(str(p)):
+                        continue
+                    files_to_search.append(p)
+    else:
+        for root, dirs, files in os.walk("."):
+            dirs[:] = [
+                d for d in dirs
+                if d not in IGNORE_DIRS
+                and not d.endswith(".egg-info")
+                and not (("venv" in d.lower() or d.lower() == "env") and (Path(root) / d / "pyvenv.cfg").exists())
+            ]
+            for file in files:
+                p = Path(root) / file
+                if p.suffix.lower() in IGNORE_EXTS or is_sensitive_file(str(p)):
+                    continue
+                files_to_search.append(p)
+
+    total_matches = 0
+    results_by_file: list[str] = []
+
+    for path in files_to_search:
+        if total_matches >= max_matches:
+            break
+
+        try:
+            if path.stat().st_size > MAX_UNPAGINATED_FILE_SIZE:
+                continue
+
+            try:
+                content = path.read_text(encoding="utf-8")
+            except UnicodeDecodeError:
+                continue
+
+            lines = content.splitlines()
+            if not lines:
+                continue
+
+            matching_indices = [
+                idx for idx, line in enumerate(lines)
+                if pattern.search(line)
+            ]
+
+            if not matching_indices:
+                continue
+
+            ranges: list[tuple[int, int]] = []
+            for m_idx in matching_indices:
+                if total_matches >= max_matches:
+                    break
+                total_matches += 1
+                r_start = max(0, m_idx - context_lines)
+                r_end = min(len(lines), m_idx + context_lines + 1)
+                if not ranges:
+                    ranges.append((r_start, r_end))
+                else:
+                    prev_start, prev_end = ranges[-1]
+                    if r_start <= prev_end:
+                        ranges[-1] = (prev_start, max(prev_end, r_end))
+                    else:
+                        ranges.append((r_start, r_end))
+
+            match_set = set(matching_indices)
+            try:
+                rel_path = path.relative_to(".").as_posix()
+            except ValueError:
+                rel_path = path.as_posix()
+
+            file_output = [f"--- {rel_path} ---"]
+            for r_start, r_end in ranges:
+                pad_width = max(4, len(str(r_end)))
+                for line_no in range(r_start + 1, r_end + 1):
+                    line_content = lines[line_no - 1]
+                    marker = ">" if (line_no - 1) in match_set else " "
+                    file_output.append(f"{marker} {line_no:>{pad_width}} | {line_content}")
+                file_output.append("...")
+
+            if file_output[-1] == "...":
+                file_output.pop()
+
+            results_by_file.append("\n".join(file_output))
+
+        except Exception:
+            continue
+
+    if not results_by_file:
+        return f"No matches found for '{query}'."
+
+    final_result = "\n\n".join(results_by_file)
+    if total_matches >= max_matches:
+        final_result += f"\n\n[Showing first {max_matches} matches. Narrow your query or specify a file_path for more specific results.]"
+
+    return final_result
     
 def create_file(file_path: str, content: str = "") -> str:
     """
