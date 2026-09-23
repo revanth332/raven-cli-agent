@@ -4,6 +4,7 @@ import re
 import fnmatch
 from typing import Optional
 from agent.utils import backup_file
+from agent.core.hook_engine import run_post_edit_hooks, format_verification_feedback
 
 MAX_UNPAGINATED_FILE_SIZE = 1 * 1024 * 1024  # 1 MB
 
@@ -70,7 +71,15 @@ def patch_file(file_path:str,search_block:str,replace_block:str):
 
         updated_content = content_norm.replace(search_block_norm,replace_block_norm)
         path.write_text(updated_content,encoding='utf-8')
-        return f"Successfully updated '{file_path}'."
+
+        # Run automated post-edit verification hook
+        verify_res = run_post_edit_hooks(file_path, content=updated_content)
+        feedback = format_verification_feedback(verify_res)
+
+        msg = f"Successfully updated '{file_path}'."
+        if feedback:
+            msg += f"\n{feedback}"
+        return msg
         
     except Exception as e:
         return f"Failed to patch file '{file_path}': {e}"
@@ -421,7 +430,15 @@ def create_file(file_path: str, content: str = "") -> str:
         path.parent.mkdir(parents=True, exist_ok=True)
         
         path.write_text(content, encoding="utf-8")
-        return f"Successfully created file '{file_path}'."
+
+        # Run automated post-edit verification hook
+        verify_res = run_post_edit_hooks(file_path, content=content)
+        feedback = format_verification_feedback(verify_res)
+
+        msg = f"Successfully created file '{file_path}'."
+        if feedback:
+            msg += f"\n{feedback}"
+        return msg
     except Exception as e:
         return f"Error creating file '{file_path}': {e}"
 

@@ -36,6 +36,7 @@ def format_patch_diff(
     replace_block: str,
     include_header: bool = False,
     expanded: bool = False,
+    result_str: str = "",
 ) -> Text:
     """Formats a syntax-highlighted git/patch diff preview with expandable lines."""
     tool_logs = Text()
@@ -56,6 +57,12 @@ def format_patch_diff(
         tool_logs.append(" and ", style="dim white")
         tool_logs.append(f"{search_count} ", style="bold red" if search_count else "dim white")
         tool_logs.append("removal\n" if search_count == 1 else "removals\n", style="dim white")
+
+        if result_str and "SYNTAX VERIFICATION WARNING" in result_str:
+            tool_logs.append("   |_ ⚠ Syntax Warning Detected\n", style="bold yellow")
+            for w_line in result_str.splitlines():
+                if any(k in w_line for k in ("Details:", "Syntax", "Error:", "JSONDecodeError", "SyntaxError")):
+                    tool_logs.append(f"       {w_line.strip()}\n", style="yellow")
 
         diff_limit = 1000 if expanded else MAX_DIFF_LINES
 
@@ -306,7 +313,7 @@ def format_tool_result_preview(
         replace_block = args.get("replace_block", "")
         file_path = args.get("file_path", "Unknown")
         if search_block or replace_block:
-            return format_patch_diff(file_path, search_block, replace_block, expanded=expanded)
+            return format_patch_diff(file_path, search_block, replace_block, expanded=expanded, result_str=str(result or ""))
         return format_generic_tool_result(tool_name, result, expanded=expanded)
     elif tool_name == "execute_command":
         cmd = args.get("command", "")
