@@ -1,10 +1,436 @@
 import re
-from typing import Any
+from dataclasses import dataclass
+from typing import Any, List, Optional
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Static, Button
 from rich.markdown import Markdown
-from rich.console import Group
+from rich.console import Group, RenderableType
+from rich.text import Text
+
+MAX_DIFF_LINES = 8
+MAX_ARG_LENGTH = 80
+MAX_RESULT_LINES = 6
+
+
+def format_tool_header(display_name: str, display_value: str = "", tool_name: str = "") -> Text:
+    """Formats a tool invocation header Text renderable."""
+    tool_logs = Text()
+    tool_logs.append("\n• ", style="bold cyan")
+    tool_logs.append(display_name, style="bold cyan")
+    if display_value:
+        clean_val = " ".join(str(display_value).split())
+        max_len = 120 if tool_name == "search_codebase" else MAX_ARG_LENGTH
+        if len(clean_val) > max_len:
+            clean_val = clean_val[: max_len - 3] + "..."
+        tool_logs.append("(", style="dim white")
+        tool_logs.append(clean_val, style="dim white")
+        tool_logs.append(")", style="dim white")
+    tool_logs.append("\n")
+    return tool_logs
+
+
+def format_patch_diff(
+    file_path: str,
+    search_block: str,
+    replace_block: str,
+    include_header: bool = False,
+    expanded: bool = False,
+) -> Text:
+    """Formats a syntax-highlighted git/patch diff preview with expandable lines."""
+    tool_logs = Text()
+    if include_header:
+        tool_logs.append(format_tool_header("Update", file_path))
+
+    if search_block or replace_block:
+        search_block_lines = search_block.rstrip().split("\n") if search_block else []
+        replace_block_lines = replace_block.rstrip().split("\n") if replace_block else []
+        search_count = len(search_block_lines)
+        replace_count = len(replace_block_lines)
+
+        tool_logs.append("   |_ Updated ", style="dim white")
+        tool_logs.append(f"{file_path} ")
+        tool_logs.append("with ", style="dim white")
+        tool_logs.append(f"{replace_count} ", style="bold green" if replace_count else "dim white")
+        tool_logs.append("addition" if replace_count == 1 else "additions", style="dim white")
+        tool_logs.append(" and ", style="dim white")
+        tool_logs.append(f"{search_count} ", style="bold red" if search_count else "dim white")
+        tool_logs.append("removal\n" if search_count == 1 else "removals\n", style="dim white")
+
+        diff_limit = 1000 if expanded else MAX_DIFF_LINES
+
+        if search_block_lines:
+            visible_search = search_block_lines[:diff_limit]
+            for line in visible_search:
+                tool_logs.append("       ")
+                tool_logs.append(f"- {line}\n", style="white on #961b1b")
+            collapsed_search = search_count - len(visible_search)
+            if collapsed_search > 0:
+                tool_logs.append(f"       ▶ ... [{collapsed_search} search lines collapsed - click to expand]\n", style="dim cyan italic")
+
+        if replace_block_lines:
+            visible_replace = replace_block_lines[:diff_limit]
+            for line in visible_replace:
+                tool_logs.append("       ")
+                tool_logs.append(f"+ {line}\n", style="white on #26753a")
+            collapsed_replace = replace_count - len(visible_replace)
+            if collapsed_replace > 0:
+                tool_logs.append(f"       ▶ ... [{collapsed_replace} replace lines collapsed - click to expand]\n", style="dim cyan italic")
+
+        if expanded and (search_count > MAX_DIFF_LINES or replace_count > MAX_DIFF_LINES):
+            tool_logs.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+
+    return tool_logs
+
+
+def format_command_result(command: str, raw_output: str, expanded: bool = False) -> Text:
+    """Formats a concise preview of command execution results with expansion."""
+    result_text = Text()
+    lines = str(raw_output).splitlines()
+    exit_code = 0
+    stdout_lines = []
+    stderr_lines = []
+    in_stdout = False
+    in_stderr = False
+
+    for line in lines:
+        if line.startswith("Exit Code:"):
+            try:
+                exit_code = int(line.split(":", 1)[1].strip())
+            except Exception:
+                exit_code = 0
+        elif line.startswith("STDOUT:"):
+            in_stdout = True
+            in_stderr = False
+        elif line.startswith("STDERR:"):
+            in_stdout = False
+            in_stderr = True
+        elif in_stdout:
+            stdout_lines.append(line)
+        elif in_stderr:
+            stderr_lines.append(line)
+        else:
+            stdout_lines.append(line)
+
+    limit = 1000 if expanded else MAX_RESULT_LINES
+
+    if exit_code == 0:
+        result_text.append("   |_ Exit 0\n", style="bold green")
+        clean_lines = [l for l in stdout_lines if l.strip()]
+        if clean_lines:
+            visible_lines = clean_lines[:limit]
+            for l in visible_lines:
+                clean_l = l if len(l) <= 120 else l[:117] + "..."
+                result_text.append(f"       {clean_l}\n", style="dim white")
+            collapsed = len(clean_lines) - len(visible_lines)
+            if collapsed > 0:
+                result_text.append(f"       ▶ ... [{collapsed} lines collapsed - click to expand]\n", style="dim cyan italic")
+            elif expanded and len(clean_lines) > MAX_RESULT_LINES:
+                result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+    else:
+        result_text.append(f"   |_ Exit Code: {exit_code} (Failed)\n", style="bold red")
+        error_lines = [l for l in (stderr_lines or stdout_lines) if l.strip()]
+        if error_lines:
+            visible_lines = error_lines[:limit]
+            for l in visible_lines:
+                clean_l = l if len(l) <= 120 else l[:117] + "..."
+                result_text.append(f"       {clean_l}\n", style="red")
+            collapsed = len(error_lines) - len(visible_lines)
+            if collapsed > 0:
+                result_text.append(f"       ▶ ... [{collapsed} error lines collapsed - click to expand]\n", style="dim cyan italic")
+            elif expanded and len(error_lines) > MAX_RESULT_LINES:
+                result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+    return result_text
+
+
+def format_read_result(file_path: str, content: str, expanded: bool = False) -> Text:
+    """Formats file read results showing line count and expandable content."""
+    result_text = Text()
+    content_str = str(content)
+    if content_str.startswith("Error:") or content_str.startswith("ACCESS DENIED"):
+        result_text.append(f"   |_ {content_str.strip()}\n", style="bold red")
+        return result_text
+
+    lines = content_str.splitlines()
+    num_lines = len(lines)
+    size_bytes = len(content_str.encode("utf-8", errors="ignore"))
+    if size_bytes < 1024:
+        size_str = f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        size_str = f"{size_bytes / 1024:.1f} KB"
+    else:
+        size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
+
+    line_word = "line" if num_lines == 1 else "lines"
+    result_text.append(f"   |_ Read {num_lines} {line_word} ({size_str})\n", style="dim white")
+
+    if expanded and lines:
+        limit = 50
+        visible_lines = lines[:limit]
+        for l in visible_lines:
+            clean_l = l if len(l) <= 100 else l[:97] + "..."
+            result_text.append(f"       {clean_l}\n", style="dim white")
+        collapsed = num_lines - len(visible_lines)
+        if collapsed > 0:
+            result_text.append(f"       ... [{collapsed} more lines]\n", style="dim italic white")
+        result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+    elif not expanded and num_lines > 4:
+        result_text.append("       ▶ ... [Click to view file content]\n", style="dim cyan italic")
+
+    return result_text
+
+
+def format_find_result(file_name: str, result_str: str, expanded: bool = False) -> Text:
+    """Formats file search results showing match count or paths."""
+    result_text = Text()
+    clean = str(result_str).strip()
+    if "not found" in clean.lower():
+        result_text.append(f"   |_ {clean}\n", style="dim yellow")
+    elif "access denied" in clean.lower():
+        result_text.append(f"   |_ {clean}\n", style="bold red")
+    else:
+        try:
+            import ast
+            parsed = ast.literal_eval(clean)
+            if isinstance(parsed, list):
+                if not parsed:
+                    result_text.append("   |_ No matching files found\n", style="dim yellow")
+                elif len(parsed) == 1:
+                    result_text.append(f"   |_ Found: {parsed[0]}\n", style="dim white")
+                else:
+                    count = len(parsed)
+                    if expanded:
+                        result_text.append(f"   |_ Found {count} files:\n", style="dim white")
+                        for p in parsed:
+                            result_text.append(f"       {p}\n", style="dim white")
+                        result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+                    else:
+                        preview = ", ".join(parsed[:2])
+                        if count > 2:
+                            preview += f", ... (+{count - 2} more)"
+                        result_text.append(f"   |_ Found {count} files: {preview}\n", style="dim white")
+                        if count > 2:
+                            result_text.append("       ▶ ... [Click to view all matches]\n", style="dim cyan italic")
+                return result_text
+        except Exception:
+            pass
+        if len(clean) > 80 and not expanded:
+            clean = clean[:77] + "..."
+        result_text.append(f"   |_ Found: {clean}\n", style="dim white")
+    return result_text
+
+
+def format_generic_tool_result(tool_name: str, result: Any, expanded: bool = False) -> Text:
+    """Formats a concise fallback preview for any tool result."""
+    result_text = Text()
+    clean = str(result).strip()
+    if clean.startswith("Error:") or clean.startswith("ACCESS DENIED"):
+        result_text.append(f"   |_ {clean}\n", style="bold red")
+    else:
+        lines = [l for l in clean.splitlines() if l.strip()]
+        if not lines:
+            result_text.append("   |_ Completed\n", style="dim white")
+            return result_text
+
+        if len(lines) == 1 or not expanded:
+            first_line = lines[0]
+            if len(first_line) > 100:
+                first_line = first_line[:97] + "..."
+            result_text.append(f"   |_ {first_line}\n", style="dim white")
+            if len(lines) > 1 and not expanded:
+                result_text.append(f"       ▶ ... [{len(lines) - 1} more lines - click to expand]\n", style="dim cyan italic")
+        else:
+            result_text.append(f"   |_ {lines[0]}\n", style="dim white")
+            for l in lines[1:20]:
+                clean_l = l if len(l) <= 100 else l[:97] + "..."
+                result_text.append(f"       {clean_l}\n", style="dim white")
+            if len(lines) > 20:
+                result_text.append(f"       ... [{len(lines) - 20} more lines]\n", style="dim italic white")
+            result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+    return result_text
+
+
+def format_tool_result_preview(
+    tool_name: str,
+    tool_args: dict,
+    result: Any,
+    expanded: bool = False,
+) -> Text:
+    """Dispatches to the appropriate tool result formatter."""
+    args = tool_args or {}
+    if tool_name == "patch_file":
+        search_block = args.get("search_block", "")
+        replace_block = args.get("replace_block", "")
+        file_path = args.get("file_path", "Unknown")
+        if search_block or replace_block:
+            return format_patch_diff(file_path, search_block, replace_block, expanded=expanded)
+        return format_generic_tool_result(tool_name, result, expanded=expanded)
+    elif tool_name == "execute_command":
+        cmd = args.get("command", "")
+        return format_command_result(cmd, str(result), expanded=expanded)
+    elif tool_name == "read_file":
+        file_path = args.get("file_path", "")
+        return format_read_result(file_path, str(result), expanded=expanded)
+    elif tool_name == "find_file":
+        file_name = args.get("file_name", "")
+        return format_find_result(file_name, str(result), expanded=expanded)
+    else:
+        return format_generic_tool_result(tool_name, result, expanded=expanded)
+
+
+@dataclass
+class TextBlock:
+    content: str = ""
+
+
+@dataclass
+class ToolCallBlock:
+    tool_name: str
+    display_name: str
+    display_val: str = ""
+    status: str = "running"  # "running", "completed", "error", "denied"
+
+
+@dataclass
+class ToolResultBlock:
+    tool_name: str
+    renderable: Any = None
+    plain_text: str = ""
+    tool_args: dict = None
+    raw_result: Any = None
+    expanded: bool = False
+
+
+@dataclass
+class StatusBlock:
+    message: str
+    style: str = "dim white"
+
+
+class ResponseTimeline:
+    """Maintains a chronological sequence of text, tool call, and result blocks for an agent response."""
+
+    def __init__(self):
+        self.blocks: List[Any] = []
+
+    def append_text(self, text: str) -> None:
+        """Appends streaming delta text into the current active TextBlock."""
+        if not text:
+            return
+        if self.blocks and isinstance(self.blocks[-1], TextBlock):
+            self.blocks[-1].content += text
+        else:
+            self.blocks.append(TextBlock(content=text))
+
+    def add_tool_call(self, tool_name: str, display_name: str, display_val: str = "", status: str = "running") -> None:
+        """Appends a tool invocation header to the timeline."""
+        self.blocks.append(ToolCallBlock(
+            tool_name=tool_name,
+            display_name=display_name,
+            display_val=display_val,
+            status=status,
+        ))
+
+    def add_tool_result(
+        self,
+        tool_name: str,
+        renderable: Any = None,
+        plain_text: str = "",
+        tool_args: dict = None,
+        raw_result: Any = None,
+        expanded: bool = False,
+    ) -> None:
+        """Appends a tool execution result preview to the timeline and updates tool status."""
+        for block in reversed(self.blocks):
+            if isinstance(block, ToolCallBlock) and block.tool_name == tool_name and block.status == "running":
+                block.status = "completed"
+                break
+        self.blocks.append(ToolResultBlock(
+            tool_name=tool_name,
+            renderable=renderable,
+            plain_text=plain_text or (renderable.plain if hasattr(renderable, "plain") else str(renderable or "")),
+            tool_args=tool_args or {},
+            raw_result=raw_result,
+            expanded=expanded,
+        ))
+
+    def add_status(self, message: str, style: str = "dim white") -> None:
+        """Appends an operational status or timing note to the timeline."""
+        self.blocks.append(StatusBlock(message=message, style=style))
+
+    def to_renderables(self) -> list:
+        """Compiles the timeline into a list of Rich renderables."""
+        renderables = []
+        for block in self.blocks:
+            if isinstance(block, TextBlock):
+                if block.content.strip():
+                    renderables.append(Markdown(block.content))
+            elif isinstance(block, ToolCallBlock):
+                header = format_tool_header(block.display_name, block.display_val, block.tool_name)
+                renderables.append(header)
+                if block.status == "running":
+                    running_text = Text("   |_ Running...\n", style="dim cyan italic")
+                    renderables.append(running_text)
+            elif isinstance(block, ToolResultBlock):
+                if block.raw_result is not None or (block.tool_args and block.renderable is None):
+                    formatted = format_tool_result_preview(
+                        block.tool_name,
+                        block.tool_args,
+                        block.raw_result,
+                        expanded=block.expanded,
+                    )
+                    renderables.append(formatted)
+                elif block.renderable is not None:
+                    renderables.append(block.renderable)
+            elif isinstance(block, StatusBlock):
+                renderables.append(Text(f"\n{block.message}\n", style=block.style))
+        return renderables
+
+    def to_renderable(self) -> Group:
+        """Compiles the timeline into a Rich Group for Textual rendering."""
+        renderables = self.to_renderables()
+        if not renderables:
+            return Group(Text(""))
+        return Group(*renderables)
+
+    def to_plain_text(self) -> str:
+        """Produces a clean plain-text transcript suitable for clipboard copying."""
+        parts = []
+        for block in self.blocks:
+            if isinstance(block, TextBlock):
+                clean = block.content.strip()
+                if clean:
+                    parts.append(clean)
+            elif isinstance(block, ToolCallBlock):
+                header = format_tool_header(block.display_name, block.display_val, block.tool_name)
+                parts.append(header.plain.strip())
+            elif isinstance(block, ToolResultBlock):
+                if block.raw_result is not None or (block.tool_args and block.renderable is None):
+                    formatted = format_tool_result_preview(
+                        block.tool_name,
+                        block.tool_args,
+                        block.raw_result,
+                        expanded=block.expanded,
+                    )
+                    parts.append(formatted.plain.strip())
+                elif block.plain_text:
+                    parts.append(block.plain_text.strip())
+                elif hasattr(block.renderable, "plain") and block.renderable.plain:
+                    parts.append(block.renderable.plain.strip())
+            elif isinstance(block, StatusBlock):
+                clean = block.message.strip()
+                if clean:
+                    parts.append(clean)
+        return "\n\n".join(parts)
+
+    def is_empty(self) -> bool:
+        """Checks if the timeline contains any meaningful content."""
+        for block in self.blocks:
+            if isinstance(block, TextBlock) and block.content.strip():
+                return False
+            if isinstance(block, (ToolCallBlock, ToolResultBlock, StatusBlock)):
+                return False
+        return True
 
 
 class ChatMessageWidget(Vertical):
@@ -75,6 +501,7 @@ class ChatMessageWidget(Vertical):
         self.image_badge = image_badge
         self.raw_text = self._format_multimodal_text(raw_text)
         self._pending_renderable = None
+        self._timeline: Optional[ResponseTimeline] = None
 
     def _format_multimodal_text(self, content: Any) -> str:
         if isinstance(content, str):
@@ -125,7 +552,11 @@ class ChatMessageWidget(Vertical):
             self.update(self.raw_text)
 
     def update(self, renderable, raw_text: Any = None) -> None:
-        if isinstance(renderable, Group):
+        if isinstance(renderable, ResponseTimeline):
+            self._timeline = renderable
+            self.raw_text = renderable.to_plain_text()
+            renderable = renderable.to_renderable()
+        elif isinstance(renderable, Group):
             group_texts = []
             for item in renderable.renderables:
                 if hasattr(item, "plain") and item.plain:
@@ -157,13 +588,42 @@ class ChatMessageWidget(Vertical):
         except Exception:
             self._pending_renderable = renderable
 
+    def update_timeline(self, timeline: ResponseTimeline) -> None:
+        """Helper to update widget directly from a ResponseTimeline."""
+        self.update(timeline)
+
+    def toggle_tool_expansion(self, index: int = -1) -> bool:
+        """Toggles expansion of tool result block(s). If index is -1, toggles all tool blocks."""
+        if not self._timeline:
+            return False
+        toggled = False
+        tool_blocks = [b for b in self._timeline.blocks if isinstance(b, ToolResultBlock)]
+        if 0 <= index < len(tool_blocks):
+            tool_blocks[index].expanded = not tool_blocks[index].expanded
+            toggled = True
+        else:
+            for b in tool_blocks:
+                b.expanded = not b.expanded
+                toggled = True
+
+        if toggled:
+            self.update_timeline(self._timeline)
+        return toggled
+
     def on_click(self, event) -> None:
         if event.control and event.control.id == "copy_btn":
             event.stop()
             self.copy_to_clipboard()
+            return
+
+        if self._timeline and any(isinstance(b, ToolResultBlock) for b in self._timeline.blocks):
+            self.toggle_tool_expansion()
 
     def copy_to_clipboard(self) -> None:
         text_to_copy = self.raw_text
+        if not text_to_copy and self._timeline:
+            text_to_copy = self._timeline.to_plain_text()
+
         if not text_to_copy:
             try:
                 content_static = self.query_one("#msg_content", Static)

@@ -21,7 +21,11 @@ from agent.core.vision import is_model_vision_capable, transcribe_image_with_vis
 from agent.core.settings import settings
 from agent.core.safety import is_command_dangerous
 from agent.terminal_ui.chat_input import ChatInput
-from agent.terminal_ui.chat_message import ChatMessageWidget
+from agent.terminal_ui.chat_message import (
+    ChatMessageWidget,
+    ResponseTimeline,
+    format_tool_result_preview,
+)
 from agent.terminal_ui.permission_box import PermissionBox, PermissionBar
 from agent.terminal_ui.thinking_loader import ThinkingMessage
 from agent.terminal_ui.model_select_modal import ModelSelectModal
@@ -540,7 +544,9 @@ class RavenTUI(App):
         except Exception:
             pass
 
-        if raw_text is not None:
+        if isinstance(content, ResponseTimeline):
+            raven_card.update_timeline(content)
+        elif raw_text is not None:
             raven_card.update(content, raw_text)
         else:
             raven_card.update(content)
@@ -719,9 +725,17 @@ class RavenTUI(App):
                 if main_container.has_class("centered"):
                     main_container.remove_class("centered")
 
-                for msg in self.chat_session.messages:
+                i = 0
+                msgs = self.chat_session.messages
+                while i < len(msgs):
+                    msg = msgs[i]
                     role = msg.get("role")
                     content = msg.get("content")
+
+                    if role == "system":
+                        i += 1
+                        continue
+
                     if role == "user" and content:
                         if isinstance(content, list):
                             text_str = ""
@@ -736,9 +750,77 @@ class RavenTUI(App):
                         else:
                             card = ChatMessageWidget(role="user", raw_text=content, classes="user-msg")
                         history_container.mount(card)
-                    elif role == "assistant" and content:
-                        card = ChatMessageWidget(role="assistant", raw_text=content, classes="raven-msg")
-                        history_container.mount(card)
+                        i += 1
+                        continue
+
+                    if role in ("assistant", "tool"):
+                        turn_timeline = ResponseTimeline()
+                        has_content = False
+                        tool_args_map = {}
+                        tool_args_by_name = {}
+                        while i < len(msgs) and msgs[i].get("role") in ("assistant", "tool"):
+                            sub_msg = msgs[i]
+                            sub_role = sub_msg.get("role")
+                            sub_content = sub_msg.get("content")
+
+                            if sub_role == "assistant":
+                                if sub_content:
+                                    turn_timeline.append_text(sub_content)
+                                    has_content = True
+                                tool_calls = sub_msg.get("tool_calls") or []
+                                for tc in tool_calls:
+                                    tc_id = tc.get("id")
+                                    fn = tc.get("function", {})
+                                    name = fn.get("name", "")
+                                    raw_args = fn.get("arguments", "{}")
+                                    try:
+                                        targs = json.loads(raw_args) if isinstance(raw_args, str) else (raw_args or {})
+                                    except Exception:
+                                        targs = {}
+                                    if tc_id:
+                                        tool_args_map[tc_id] = targs
+                                    tool_args_by_name[name] = targs
+
+                                    tool_meta = TOOL_REGISTRY.get(name, {})
+                                    disp_name = "Update" if name == "patch_file" else tool_meta.get("display_name", name)
+                                    arg_keys = tool_meta.get("display_arg")
+                                    disp_val = ""
+                                    if name == "patch_file":
+                                        disp_val = targs.get("file_path", "")
+                                    elif isinstance(arg_keys, str):
+                                        disp_val = targs.get(arg_keys, "")
+                                    elif isinstance(arg_keys, list):
+                                        disp_val = ",".join(str(targs.get(k, "")) for k in arg_keys)
+                                    turn_timeline.add_tool_call(tool_name=name, display_name=disp_name, display_val=disp_val, status="completed")
+                                    has_content = True
+                            elif sub_role == "tool":
+                                t_name = sub_msg.get("name", "")
+                                tc_id = sub_msg.get("tool_call_id")
+                                raw_res = sub_msg.get("content", "")
+                                try:
+                                    t_res = json.loads(raw_res) if isinstance(raw_res, str) else raw_res
+                                except Exception:
+                                    t_res = raw_res
+                                targs = tool_args_map.get(tc_id) or tool_args_by_name.get(t_name, {})
+                                preview = format_tool_result_preview(t_name, targs, t_res)
+                                turn_timeline.add_tool_result(
+                                    t_name,
+                                    renderable=preview,
+                                    plain_text=str(t_res),
+                                    tool_args=targs,
+                                    raw_result=t_res,
+                                )
+                                has_content = True
+
+                            i += 1
+
+                        if has_content and not turn_timeline.is_empty():
+                            card = ChatMessageWidget(role="assistant", classes="raven-msg")
+                            history_container.mount(card)
+                            card.update_timeline(turn_timeline)
+                        continue
+
+                    i += 1
 
             self.scroll_to_bottom()
         except Exception:
@@ -1082,7 +1164,7 @@ class RavenTUI(App):
 
     @work(thread=True)
     def stream_response(self, query: str | list = None, raven_card: ChatMessageWidget = None):
-        """Background thread that streams the AI response without freezing the UI."""
+        """Background thread that streams the AI response with chronological interleaved timeline."""
         if not self.chat_session:
             self.call_from_thread(self.safe_update_raven_card, raven_card, "[red]AI is still initializing. Please try again.[/red]")
             return
@@ -1097,32 +1179,13 @@ class RavenTUI(App):
         )
         try:
             thinking_container = self.query_one("#thinking_container")
-            text_response = ""
-            tool_logs = Text()
-
-            MAX_DIFF_LINES = 8
-            MAX_ARG_LENGTH = 80
-
-            def append_tool_header(display_name: str, display_value: str = "", tool_name: str = "") -> None:
-                """Append a consistently styled tool header without Rich markup parsing values."""
-                tool_logs.append("\n• ", style="bold cyan")
-                tool_logs.append(display_name, style="bold cyan")
-                if display_value:
-                    clean_val = " ".join(str(display_value).split())
-                    max_len = 120 if tool_name == "search_codebase" else MAX_ARG_LENGTH
-                    if len(clean_val) > max_len:
-                        clean_val = clean_val[:max_len - 3] + "..."
-                    tool_logs.append("(", style="dim white")
-                    tool_logs.append(clean_val, style="dim white")
-                    tool_logs.append(")", style="dim white")
-                tool_logs.append("\n")
-
-            def tool_log_snapshot() -> Text:
-                """Return an immutable render snapshot for the UI thread."""
-                return tool_logs.copy()
+            timeline = ResponseTimeline()
+            total_text_response = ""
 
             while True:
                 if self.cancel_event.is_set():
+                    timeline.add_status("Generation stopped by user.", style="bold yellow")
+                    self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                     break
 
                 guard_state = loop_guard.get_state()
@@ -1131,17 +1194,19 @@ class RavenTUI(App):
                 if guard_state == LoopGuardState.WRAP_UP:
                     execution_instruction = loop_guard.get_wrap_up_instruction()
                 elif guard_state == LoopGuardState.FINALIZE:
-                    tool_logs.append(f"\n\n[Warning] {loop_guard.get_limit_warning()}\n", style="bold yellow")
+                    timeline.add_status(f"[Warning] {loop_guard.get_limit_warning()}", style="bold yellow")
+                    self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                     execution_instruction = loop_guard.get_finalization_instruction()
                     allow_tools = False
 
                 function_calls = {}
+                round_text = ""
                 max_retries = 5
                 thinking_message = ThinkingMessage()
                 user_message_committed = query is None
                 for attempt in range(max_retries):
                     try:
-                        self.call_from_thread(thinking_container.mount,thinking_message)
+                        self.call_from_thread(thinking_container.mount, thinking_message)
                         generator = self.chat_session.send_message_stream(
                             query,
                             execution_instruction=execution_instruction,
@@ -1156,30 +1221,30 @@ class RavenTUI(App):
                             if not chunk.choices:
                                 continue
                             delta = chunk.choices[0].delta
-                            if hasattr(delta,"tool_calls") and delta.tool_calls:
+                            if hasattr(delta, "tool_calls") and delta.tool_calls:
                                 for tool_call in delta.tool_calls:
                                     tool_idx = tool_call.index
                                     if tool_idx not in function_calls:
-                                        function_calls[tool_idx] = {"id":"","name":"","arguments":""}
+                                        function_calls[tool_idx] = {"id": "", "name": "", "arguments": ""}
                                     if tool_call.id:
                                         function_calls[tool_idx]["id"] = tool_call.id
                                     if tool_call.function.name:
                                         function_calls[tool_idx]["name"] += tool_call.function.name
                                     if tool_call.function.arguments:
                                         function_calls[tool_idx]["arguments"] += tool_call.function.arguments
-                                    if getattr(tool_call, 'extra_content', None):
-                                        if isinstance(tool_call.extra_content,str): function_calls[tool_idx]["extra_content"] += tool_call.extra_content
-                                        else: function_calls[tool_idx]["extra_content"] = tool_call.extra_content
-                            
-                            if hasattr(delta,"content") and delta.content:
-                                text_response += delta.content
-                                if tool_logs:
-                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
-                                else:
-                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(text_response), text_response)
+                                    if getattr(tool_call, "extra_content", None):
+                                        if isinstance(tool_call.extra_content, str):
+                                            function_calls[tool_idx]["extra_content"] += tool_call.extra_content
+                                        else:
+                                            function_calls[tool_idx]["extra_content"] = tool_call.extra_content
+
+                            if hasattr(delta, "content") and delta.content:
+                                round_text += delta.content
+                                timeline.append_text(delta.content)
+                                self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                         break
                     except Exception as api_error:
-                        if thinking_message:                                                                                                                                
+                        if thinking_message:
                             self.call_from_thread(thinking_message.remove)
                         error_str = str(api_error).lower()
                         if "image_url" in error_str or "multimodal" in error_str:
@@ -1189,7 +1254,7 @@ class RavenTUI(App):
                         if "429" in error_str or "exhausted" in error_str or "quota" in error_str:
                             if attempt < max_retries - 1:
                                 # Exponential backoff: 2, 4, 8, 16 seconds...
-                                sleep_time = 2 ** (attempt + 1) 
+                                sleep_time = 2 ** (attempt + 1)
                                 msg = f"*API Rate Limit hit. (Retrying in {sleep_time}s)*"
                                 self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(msg), msg)
                                 time.sleep(sleep_time)
@@ -1199,62 +1264,58 @@ class RavenTUI(App):
                     self.call_from_thread(thinking_message.remove)
 
                 if self.cancel_event.is_set():
-                    tool_logs.append("\n\nGeneration stopped by user.")
+                    timeline.add_status("Generation stopped by user.", style="bold yellow")
+                    self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                     break
 
-                if text_response or function_calls:
+                if round_text:
+                    if total_text_response:
+                        total_text_response += "\n\n" + round_text
+                    else:
+                        total_text_response = round_text
+
+                if round_text or function_calls:
                     assistant_tool_calls = None
                     if function_calls:
                         assistant_tool_calls = []
-                        for _,fc in function_calls.items():
+                        for _, fc in function_calls.items():
                             assistant_tool_calls.append({
-                                "id":fc["id"],
-                                "type":"function",
-                                "function":{
-                                    "name":fc["name"],
-                                    "arguments":fc["arguments"]
+                                "id": fc["id"],
+                                "type": "function",
+                                "function": {
+                                    "name": fc["name"],
+                                    "arguments": fc["arguments"]
                                 },
-                                "extra_content":fc.get("extra_content","")
+                                "extra_content": fc.get("extra_content", "")
                             })
-                    self.chat_session.commit_assistant_message(content=text_response or None,tool_calls=assistant_tool_calls)
+                    self.chat_session.commit_assistant_message(content=round_text or None, tool_calls=assistant_tool_calls)
 
                 if not function_calls:
                     break
                 if not allow_tools:
-                    tool_logs.append("\nFinal response completed without additional tool execution.\n", style="dim yellow")
+                    timeline.add_status("Final response completed without additional tool execution.", style="dim yellow")
+                    self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                     break
 
                 loop_guard.increment_turn()
                 round_made_progress = False
-                tool_calls_to_append = []
                 tool_responses_to_append = []
-                for _,fc in function_calls.items():
+                for _, fc in function_calls.items():
                     loop_guard.record_tool_call()
                     if self.cancel_event.is_set():
                         break
-                        
+
                     tool_name = fc["name"]
                     try:
                         tool_args = json.loads(fc["arguments"])
                     except Exception as e:
                         raise e
-                    tool_calls_to_append.append({
-                        "id":fc["id"],
-                        "type":"function",
-                        "function":{
-                            "name":fc["name"],
-                            "arguments":fc["arguments"]
-                        },
-                        "extra_content":fc.get("extra_content","")
-                    })
 
                     is_dup, dup_msg = loop_guard.check_duplicate(tool_name, tool_args)
                     if is_dup:
-                        tool_logs.append(f"\n• Intercepted Duplicate Call: {tool_name}\n", style="yellow")
-                        if text_response:
-                            self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
-                        else:
-                            self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
+                        timeline.add_tool_call(tool_name, "Duplicate Intercepted", tool_name)
+                        timeline.add_tool_result(tool_name, Text(f"   |_ {dup_msg}\n", style="yellow"), plain_text=dup_msg)
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
 
                         tool_responses_to_append.append({
                             "role": "tool",
@@ -1268,7 +1329,16 @@ class RavenTUI(App):
 
                     if tool_name in TOOL_REGISTRY:
                         tool_meta = TOOL_REGISTRY[tool_name]
-                        
+                        display_name = "Update" if tool_name == "patch_file" else tool_meta.get("display_name", tool_name)
+                        arg_keys = tool_meta.get("display_arg")
+                        display_val = ""
+                        if tool_name == "patch_file":
+                            display_val = tool_args.get("file_path", "")
+                        elif isinstance(arg_keys, str):
+                            display_val = tool_args.get(arg_keys, "")
+                        elif isinstance(arg_keys, list):
+                            display_val = ",".join(str(tool_args.get(key, "")) for key in arg_keys)
+
                         if tool_name in ["execute_command", "commit_staged_git_changes"]:
                             bypass_prompt = False
                             if settings.RAVEN_AUTO_APPROVE:
@@ -1293,10 +1363,14 @@ class RavenTUI(App):
                                     instr = getattr(self, "permission_instruction", "")
                                     if instr:
                                         result = f"User denied permission and provided instructions: '{instr}'"
-                                        tool_logs.append(f"\nPermission Denied (Instruction: \"{instr}\")\n", style="bold red")
+                                        status_renderable = Text(f"   |_ Permission Denied (Instruction: \"{instr}\")\n", style="bold red")
                                     else:
                                         result = "Error: User denied permission."
-                                        tool_logs.append("\nPermission Denied\n", style="bold red")
+                                        status_renderable = Text("   |_ Permission Denied by user\n", style="bold red")
+
+                                    timeline.add_tool_call(tool_name, display_name, display_val, status="denied")
+                                    timeline.add_tool_result(tool_name, status_renderable, plain_text=result)
+                                    self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
 
                                     tool_responses_to_append.append({
                                         "role": "tool",
@@ -1304,98 +1378,53 @@ class RavenTUI(App):
                                         "name": fc["name"],
                                         "content": result
                                     })
-                                    if text_response:
-                                        self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
-                                    else:
-                                        self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
                                     continue
 
-                                if text_response:
-                                    self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
-                                else:
-                                    self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
+                        # Add tool call to timeline with status "running"
+                        timeline.add_tool_call(tool_name, display_name, display_val, status="running")
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
 
-                        if tool_name == "patch_file":
-                            file_path = tool_args.get("file_path", "Unknown")
-                            search_block = tool_args.get("search_block", "")
-                            replace_block = tool_args.get("replace_block", "")
-                            
-                            append_tool_header("Update", file_path)
-                            if search_block or replace_block:
-                                search_block_lines = search_block.rstrip().split("\n") if search_block else []
-                                replace_block_lines = replace_block.rstrip().split("\n") if replace_block else []
-                                search_count = len(search_block_lines)
-                                replace_count = len(replace_block_lines)
-
-                                tool_logs.append("   |_ Updated ", style="dim white")
-                                tool_logs.append(f"{file_path} ")
-                                tool_logs.append("with ", style="dim white")
-                                tool_logs.append(f"{replace_count} ", style="bold green" if replace_count else "dim white")
-                                tool_logs.append("addition" if replace_count == 1 else "additions", style="dim white")
-                                tool_logs.append(" and ", style="dim white")
-                                tool_logs.append(f"{search_count} ", style="bold red" if search_count else "dim white")
-                                tool_logs.append("removal\n" if search_count == 1 else "removals\n", style="dim white")
-
-                                if search_block_lines:
-                                    visible_search = search_block_lines[:MAX_DIFF_LINES]
-                                    for line in visible_search:
-                                        tool_logs.append("       ")
-                                        tool_logs.append(f"- {line}\n", style="white on #961b1b")
-                                    collapsed_search = search_count - len(visible_search)
-                                    if collapsed_search > 0:
-                                        tool_logs.append(f"       ... [{collapsed_search} search lines collapsed]\n", style="dim italic white")
-
-                                if replace_block_lines:
-                                    visible_replace = replace_block_lines[:MAX_DIFF_LINES]
-                                    for line in visible_replace:
-                                        tool_logs.append("       ")
-                                        tool_logs.append(f"+ {line}\n", style="white on #26753a")
-                                    collapsed_replace = replace_count - len(visible_replace)
-                                    if collapsed_replace > 0:
-                                        tool_logs.append(f"       ... [{collapsed_replace} replace lines collapsed]\n", style="dim italic white")
-                            
-                            tool_logs.append("\n")
-                            if text_response:
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
-                            else:
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
-                        elif not tool_meta.get("ignore_display"):  
-                            display_name = tool_meta["display_name"]
-
-                            arg_keys = tool_meta["display_arg"]
-                            display_val = ""
-                            if isinstance(arg_keys, str):
-                                display_val = tool_args.get(arg_keys, "")
-                            elif isinstance(arg_keys, list):
-                                display_val = ",".join(
-                                    str(tool_args.get(key, "")) for key in arg_keys
-                                )
-                            append_tool_header(display_name, display_val)
-                            if text_response:
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
-                            else:
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
-                        tool_status = ThinkingMessage("Working...")
+                        tool_status = ThinkingMessage(f"Executing {display_name}...")
                         try:
-                            self.call_from_thread(thinking_container.mount,tool_status)
+                            self.call_from_thread(thinking_container.mount, tool_status)
                             result = tool_meta["fn"](**tool_args)
                         except Exception as e:
                             result = f"Error: {e}"
                         finally:
                             if tool_status:
                                 self.call_from_thread(tool_status.remove)
+
+                        preview_renderable = format_tool_result_preview(tool_name, tool_args, result)
+                        timeline.add_tool_result(
+                            tool_name,
+                            renderable=preview_renderable,
+                            plain_text=str(result),
+                            tool_args=tool_args,
+                            raw_result=result,
+                        )
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                     else:
                         result = "Error: Tool not found."
+                        timeline.add_tool_call(tool_name, tool_name, str(tool_args), status="error")
+                        timeline.add_tool_result(tool_name, Text(f"   |_ {result}\n", style="bold red"), plain_text=result)
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+
                     if loop_guard.result_made_progress(result):
                         round_made_progress = True
                     tool_responses_to_append.append({
-                                                "role": "tool",
-                                                "tool_call_id": fc["id"],
-                                                "name": fc["name"],
-                                                "content": json.dumps(result)
-                                            })
+                        "role": "tool",
+                        "tool_call_id": fc["id"],
+                        "name": fc["name"],
+                        "content": json.dumps(result)
+                    })
+
                 for tool_response in tool_responses_to_append:
-                    self.chat_session.add_message(role="tool",tool_call_id=tool_response["tool_call_id"],name=tool_response["name"],content=tool_response["content"])
+                    self.chat_session.add_message(
+                        role="tool",
+                        tool_call_id=tool_response["tool_call_id"],
+                        name=tool_response["name"],
+                        content=tool_response["content"]
+                    )
                 loop_guard.record_round_outcome(round_made_progress)
                 query = None
 
@@ -1406,12 +1435,9 @@ class RavenTUI(App):
                 time_str = f"{mins}m {secs:.1f}s"
             else:
                 time_str = f"{elapsed:.1f}s"
-            
-            tool_logs.append(f"\n\nGeneration took {time_str}",style="dim white")
-            if text_response:
-                self.call_from_thread(self.safe_update_raven_card, raven_card, Group(tool_log_snapshot(), Markdown(text_response)), text_response)
-            else:
-                self.call_from_thread(self.safe_update_raven_card, raven_card, tool_log_snapshot())
+
+            timeline.add_status(f"Generation took {time_str}", style="dim white")
+            self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
 
             if self.chat_session:
                 needs_ai_title = getattr(self.chat_session, "_needs_ai_title", False)
@@ -1422,9 +1448,9 @@ class RavenTUI(App):
                         if msg.get("role") == "user":
                             first_user_msg = msg.get("content", "")
                             break
-                    self.generate_session_title_worker(first_user_msg, text_response[:300])
+                    self.generate_session_title_worker(first_user_msg, total_text_response[:300])
 
-                summary = self.chat_session.record_turn_usage(assistant_response=text_response)
+                summary = self.chat_session.record_turn_usage(assistant_response=total_text_response)
                 try:
                     sidebar = self.query_one(ConsumptionSidebar)
                     session_title = getattr(self.chat_session, "session_title", "New Conversation")
@@ -1433,7 +1459,7 @@ class RavenTUI(App):
                     self.call_from_thread(sidebar.update_metrics, summary, session_title, project_name)
                 except Exception:
                     pass
-                
+
         except Exception as e:
             self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(f"**Error:** {e}"), f"Error: {e}")
         finally:
