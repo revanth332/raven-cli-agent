@@ -1,11 +1,37 @@
 from pathlib import Path
 import os
+import fnmatch
 from agent.utils import backup_file
 
-def is_sensitive_file(file_path:str):
-    sensitive_file_exts = {".env"}
-    if any(file_path.lower().endswith(ext) for ext in sensitive_file_exts):
+def is_sensitive_file(file_path: str) -> bool:
+    """
+    Check if a file path points to a sensitive file (e.g., secrets, credentials, env files).
+    """
+    if not file_path:
+        return False
+    path = Path(file_path)
+    name_lower = path.name.lower()
+
+    # Check for .env files (.env, .env.local, .env.production, something.env, .envrc)
+    if name_lower == ".env" or name_lower.startswith(".env") or name_lower.endswith(".env"):
         return True
+
+    # Check sensitive credential and key extensions
+    sensitive_file_exts = {".pem", ".key", ".pkcs12", ".pfx", ".keystore"}
+    if any(name_lower.endswith(ext) for ext in sensitive_file_exts):
+        return True
+
+    # Check SSH private keys
+    ssh_keys = {"id_rsa", "id_ecdsa", "id_ed25519", "id_dsa"}
+    if name_lower in ssh_keys:
+        return True
+
+    # Check path segments
+    for part in path.parts:
+        part_lower = part.lower()
+        if part_lower == ".env" or part_lower.startswith(".env") or part_lower.endswith(".env"):
+            return True
+
     return False
 
 def patch_file(file_path:str,search_block:str,replace_block:str):
@@ -45,40 +71,101 @@ def patch_file(file_path:str,search_block:str,replace_block:str):
     except Exception as e:
         return f"Failed to patch file '{file_path}': {e}"
 
-def find_file(file_name:str):
+def find_file(file_name: str, max_results: int = 50) -> str:
     """
     Use this tool to search for a specific file in the current project directory.
-    Accepts both simple filenames (e.g., 'auth.py') and relative/partial paths (e.g., 'security/auth.py').
+    Accepts simple filenames (e.g., 'auth.py'), relative/partial paths (e.g., 'security/auth.py'),
+    or glob patterns (e.g., '*.py', 'test_*.py', 'skills/*.md').
     Args:
-        file_name: The file name or exact partial relative path to search for.
+        file_name: The file name, exact partial relative path, or glob pattern to search for.
+        max_results: Maximum number of matches to return (defaults to 50).
     Returns:
         A list of matching filepaths, or a message saying no matches were found.
     """
-    IGNORE_DIRS = {'node_modules', '.git', 'venv', '.env', '.venv', '__pycache__', 'dist', 'build'}
-    IGNORE_EXTS = {
-            '.env'
-        }
-    if is_sensitive_file(file_name):
-        return f"ACCESS DENIED for {file_name}. Reason: SENSITIVE FILE."
-    matches = []
-    normalized_file_path = Path(file_name).as_posix()
-    for root,dirs,files in os.walk("."):
+    if not file_name or not file_name.strip():
+        return "Error: file_name cannot be empty."
+
+    raw_query = file_name.strip()
+    norm_query = raw_query.replace("\\", "/").rstrip("/")
+    if norm_query.startswith("./"):
+        norm_query = norm_query[2:]
+
+    if is_sensitive_file(raw_query) or is_sensitive_file(norm_query):
+        return f"ACCESS DENIED for {raw_query}. Reason: SENSITIVE FILE."
+
+    has_wildcard = any(c in norm_query for c in "*?[]")
+    query_lower = norm_query.lower()
+    query_is_path = "/" in norm_query
+
+    IGNORE_DIRS = {
+        'node_modules', '.git', 'venv', '.env', '.venv', 'env', '__pycache__',
+        'dist', 'build', '.pytest_cache', '.mypy_cache', '.ruff_cache',
+        '.turbo', '.next', '.nuxt', '.cache', '.idea', '.vscode', '.vs',
+        '.coverage', 'htmlcov'
+    }
+    IGNORE_EXTS = {'.pyc', '.pyo', '.pyd'}
+
+    matches = {}
+
+    for root, dirs, files in os.walk("."):
         # Filter directories dynamically to skip standard ignored folders and any custom venvs
         dirs[:] = [
-            d for d in dirs 
-            if d not in IGNORE_DIRS and not (Path(root) / d / "pyvenv.cfg").exists()
+            d for d in dirs
+            if d not in IGNORE_DIRS
+            and not d.endswith(".egg-info")
+            and not (("venv" in d.lower() or d.lower() == "env") and (Path(root) / d / "pyvenv.cfg").exists())
         ]
+
         for file in files:
-            if any(file.lower().endswith(ext) for ext in IGNORE_EXTS):
+            f_lower = file.lower()
+            if any(f_lower.endswith(ext) for ext in IGNORE_EXTS):
                 continue
-            rel_path = Path(root) / file
-            rel_path = rel_path.as_posix()
-            if not rel_path.endswith(".env") and file == normalized_file_path or rel_path.endswith(normalized_file_path):
-                matches.append(rel_path)
+
+            try:
+                rel_path = Path(os.path.join(root, file)).relative_to(".").as_posix()
+            except ValueError:
+                rel_path = (Path(root) / file).as_posix().lstrip("./")
+
+            # Always reject sensitive files during traversal
+            if is_sensitive_file(rel_path):
+                continue
+
+            rel_lower = rel_path.lower()
+            file_stem_lower = Path(file).stem.lower()
+
+            rank = None
+            if not has_wildcard:
+                if f_lower == query_lower:
+                    rank = 0
+                elif rel_lower == query_lower:
+                    rank = 1
+                elif rel_lower.endswith("/" + query_lower):
+                    rank = 2
+                elif file_stem_lower == query_lower or (query_is_path and rel_lower.endswith("/" + query_lower)):
+                    rank = 3
+                elif query_lower in f_lower:
+                    rank = 6
+                elif query_lower in rel_lower:
+                    rank = 7
+            else:
+                if query_is_path:
+                    if fnmatch.fnmatchcase(rel_lower, query_lower):
+                        rank = 4
+                else:
+                    if fnmatch.fnmatchcase(f_lower, query_lower):
+                        rank = 4
+                    elif fnmatch.fnmatchcase(rel_lower, query_lower):
+                        rank = 5
+
+            if rank is not None:
+                if rel_path not in matches or rank < matches[rel_path]:
+                    matches[rel_path] = rank
 
     if not matches:
         return f"File '{file_name}' not found."
-    return str([str(m) for m in matches])
+
+    sorted_matches = sorted(matches.keys(), key=lambda p: (matches[p], len(p), p))
+    return str(sorted_matches[:max_results])
 
 def read_file(file_path:str):
     """
@@ -132,7 +219,7 @@ def delete_file(file_path: str) -> str:
     Returns:
         A success or error message.
     """
-    if is_sensitive_file:
+    if is_sensitive_file(file_path):
         return f"ACCESS DENIED for {file_path}. Reason: SENSITIVE FILE."
     try:
         path = Path(file_path)

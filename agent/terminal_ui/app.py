@@ -815,9 +815,8 @@ class RavenTUI(App):
                             i += 1
 
                         if has_content and not turn_timeline.is_empty():
-                            card = ChatMessageWidget(role="assistant", classes="raven-msg")
+                            card = ChatMessageWidget(role="assistant", timeline=turn_timeline, classes="raven-msg")
                             history_container.mount(card)
-                            card.update_timeline(turn_timeline)
                         continue
 
                     i += 1

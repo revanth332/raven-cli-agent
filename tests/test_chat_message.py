@@ -264,17 +264,25 @@ class TestChatMessageWidget(unittest.TestCase):
         self.assertIn("working tree clean", cmd_res.plain)
 
     def test_tool_result_expansion_toggle(self):
-        from agent.terminal_ui.chat_message import ResponseTimeline
+        from agent.terminal_ui.chat_message import ResponseTimeline, ToolResultWidget
 
         timeline = ResponseTimeline()
         timeline.append_text("Running suite...")
-        long_output = "Exit Code: 0\nSTDOUT:\n" + "\n".join([f"line_{i}" for i in range(12)])
+        long_output_1 = "Exit Code: 0\nSTDOUT:\n" + "\n".join([f"line_{i}" for i in range(12)])
+        long_output_2 = "Exit Code: 0\nSTDOUT:\n" + "\n".join([f"extra_{i}" for i in range(10)])
         timeline.add_tool_call("execute_command", "Execute", "pytest")
         timeline.add_tool_result(
             "execute_command",
             tool_args={"command": "pytest"},
-            raw_result=long_output,
-            plain_text=long_output,
+            raw_result=long_output_1,
+            plain_text=long_output_1,
+        )
+        timeline.add_tool_call("execute_command", "Execute", "flake8")
+        timeline.add_tool_result(
+            "execute_command",
+            tool_args={"command": "flake8"},
+            raw_result=long_output_2,
+            plain_text=long_output_2,
         )
 
         app = ChatMessageTestApp(role="assistant", raw_text="")
@@ -283,25 +291,59 @@ class TestChatMessageWidget(unittest.TestCase):
             async with app.run_test() as pilot:
                 widget = app.query_one("#test_msg", ChatMessageWidget)
                 widget.update_timeline(timeline)
-
-                # Collapsed state has chevron expand hint
-                self.assertIn("▶", widget.raw_text)
-                self.assertIn("click to expand", widget.raw_text)
-
-                # Toggle expand
-                widget.toggle_tool_expansion()
                 await pilot.pause()
 
-                self.assertIn("▼", widget.raw_text)
-                self.assertIn("Click to collapse", widget.raw_text)
-                self.assertIn("line_11", widget.raw_text)
+                tool_widgets = list(widget.query(ToolResultWidget))
+                self.assertEqual(len(tool_widgets), 2)
+                self.assertFalse(tool_widgets[0].block.expanded)
+                self.assertFalse(tool_widgets[1].block.expanded)
 
-                # Toggle collapse
-                widget.toggle_tool_expansion()
+                # Click specifically on tool widget 0
+                await pilot.click(tool_widgets[0])
                 await pilot.pause()
 
-                self.assertIn("▶", widget.raw_text)
-                self.assertIn("click to expand", widget.raw_text)
+                # Tool 0 must be expanded, but Tool 1 must remain collapsed
+                self.assertTrue(tool_widgets[0].block.expanded)
+                self.assertFalse(tool_widgets[1].block.expanded)
+
+                # Click tool widget 1
+                await pilot.click(tool_widgets[1])
+                await pilot.pause()
+                self.assertTrue(tool_widgets[0].block.expanded)
+                self.assertTrue(tool_widgets[1].block.expanded)
+
+                # Click tool widget 0 again to collapse
+                await pilot.click(tool_widgets[0])
+                await pilot.pause()
+                self.assertFalse(tool_widgets[0].block.expanded)
+                self.assertTrue(tool_widgets[1].block.expanded)
+
+        asyncio.run(run_test())
+
+    def test_assistant_message_direct_timeline_mount(self):
+        from agent.terminal_ui.chat_message import ResponseTimeline, ToolResultWidget
+
+        timeline = ResponseTimeline()
+        timeline.append_text("Reloading previous turn...")
+        timeline.add_tool_call("read_file", "Read", "agent/main.py")
+        timeline.add_tool_result("read_file", tool_args={"file_path": "agent/main.py"}, raw_result="def main():\n    pass\n")
+
+        class DirectTimelineApp(App):
+            def compose(self) -> ComposeResult:
+                yield ChatMessageWidget(role="assistant", timeline=timeline, id="reloaded_card")
+
+        app = DirectTimelineApp()
+
+        async def run_test():
+            async with app.run_test() as pilot:
+                widget = app.query_one("#reloaded_card", ChatMessageWidget)
+                await pilot.pause()
+
+                # Verify timeline container has children rendered on mount without user clicking
+                tool_widgets = list(widget.query(ToolResultWidget))
+                self.assertEqual(len(tool_widgets), 1)
+                self.assertIn("• Read(agent/main.py)", widget.raw_text)
+                self.assertIn("Read 2 lines", widget.raw_text)
 
         asyncio.run(run_test())
 

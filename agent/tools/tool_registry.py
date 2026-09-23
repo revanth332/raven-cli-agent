@@ -112,13 +112,13 @@ raven_tools = [
         "type": "function",
         "function": {
             "name": "find_file",
-            "description": "Search for a specific file in the current project directory. Accepts both simple filenames and relative/partial paths.",
+            "description": "Search for a specific file in the current project directory. Accepts simple filenames, relative/partial paths, or glob patterns (e.g., '*.py', 'test_*.py').",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "file_name": {
                         "type": "string",
-                        "description": "The file name or exact partial relative path to search for."
+                        "description": "The file name, exact partial relative path, or glob pattern to search for."
                     }
                 },
                 "required": [

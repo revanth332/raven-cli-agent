@@ -433,6 +433,41 @@ class ResponseTimeline:
         return True
 
 
+class ToolResultWidget(Static):
+    """Interactive widget for an individual tool result preview that expands/collapses on click."""
+
+    DEFAULT_CSS = """
+    ToolResultWidget {
+        height: auto;
+        width: 100%;
+    }
+    """
+
+    def __init__(self, block: ToolResultBlock, parent_widget: Any = None, **kwargs):
+        super().__init__(**kwargs)
+        self.block = block
+        self.parent_widget = parent_widget
+
+    def on_mount(self) -> None:
+        self.refresh_preview()
+
+    def refresh_preview(self) -> None:
+        preview = format_tool_result_preview(
+            self.block.tool_name,
+            self.block.tool_args,
+            self.block.raw_result,
+            expanded=self.block.expanded,
+        )
+        self.update(preview)
+
+    def on_click(self, event) -> None:
+        event.stop()
+        self.block.expanded = not self.block.expanded
+        self.refresh_preview()
+        if self.parent_widget and getattr(self.parent_widget, "_timeline", None):
+            self.parent_widget.raw_text = self.parent_widget._timeline.to_plain_text()
+
+
 class ChatMessageWidget(Vertical):
     DEFAULT_CSS = """
     ChatMessageWidget {
@@ -493,15 +528,32 @@ class ChatMessageWidget(Vertical):
         height: auto;
         width: 100%;
     }
+
+    .timeline-container {
+        height: auto;
+        width: 100%;
+    }
+
+    .timeline-item {
+        height: auto;
+        width: 100%;
+    }
     """
 
-    def __init__(self, role: str = "user", raw_text: Any = "", image_badge: str = "", **kwargs):
+    def __init__(
+        self,
+        role: str = "user",
+        raw_text: Any = "",
+        image_badge: str = "",
+        timeline: Optional[ResponseTimeline] = None,
+        **kwargs
+    ):
         super().__init__(**kwargs)
         self.role = role
         self.image_badge = image_badge
         self.raw_text = self._format_multimodal_text(raw_text)
-        self._pending_renderable = None
-        self._timeline: Optional[ResponseTimeline] = None
+        self._timeline: Optional[ResponseTimeline] = timeline
+        self._pending_renderable = timeline if timeline is not None else None
 
     def _format_multimodal_text(self, content: Any) -> str:
         if isinstance(content, str):
@@ -541,10 +593,58 @@ class ChatMessageWidget(Vertical):
             yield Static("Copy", id="copy_btn", classes="copy-btn")
         if self.image_badge:
             yield Static(f"[bold #06B6D4]◆ Image: {self.image_badge}[/bold #06B6D4]", id="img_badge", classes="img-badge")
+        yield Vertical(id="timeline_container", classes="timeline-container")
         yield Static(id="msg_content", classes="msg-content")
 
+    def _sync_timeline_widgets(self) -> None:
+        """Syncs child widgets in timeline_container with self._timeline.blocks."""
+        if not self._timeline:
+            return
+
+        try:
+            container = self.query_one("#timeline_container", Vertical)
+            content_static = self.query_one("#msg_content", Static)
+            content_static.display = False
+            container.display = True
+        except Exception:
+            return
+
+        blocks = self._timeline.blocks
+        children = list(container.children)
+
+        # Update existing widgets or mount new ones
+        for idx, block in enumerate(blocks):
+            if idx < len(children):
+                child = children[idx]
+                if isinstance(block, TextBlock) and isinstance(child, Static):
+                    child.update(Markdown(block.content) if block.content.strip() else Text(""))
+                elif isinstance(block, ToolCallBlock) and isinstance(child, Static):
+                    child.update(format_tool_header(block.display_name, block.display_val, block.tool_name))
+                elif isinstance(block, ToolResultBlock) and isinstance(child, ToolResultWidget):
+                    child.block = block
+                    child.refresh_preview()
+                elif isinstance(block, StatusBlock) and isinstance(child, Static):
+                    child.update(Text(f"\n{block.message}\n", style=block.style))
+            else:
+                # Mount new widget for new block
+                if isinstance(block, TextBlock):
+                    w = Static(Markdown(block.content) if block.content.strip() else Text(""), classes="timeline-item")
+                elif isinstance(block, ToolCallBlock):
+                    w = Static(format_tool_header(block.display_name, block.display_val, block.tool_name), classes="timeline-item")
+                elif isinstance(block, ToolResultBlock):
+                    w = ToolResultWidget(block, parent_widget=self, classes="timeline-item")
+                elif isinstance(block, StatusBlock):
+                    w = Static(Text(f"\n{block.message}\n", style=block.style), classes="timeline-item")
+                else:
+                    w = Static(classes="timeline-item")
+                container.mount(w)
+
     def on_mount(self) -> None:
-        if self._pending_renderable is not None:
+        if self._timeline is not None:
+            self.raw_text = self._timeline.to_plain_text()
+            self._sync_timeline_widgets()
+            self._pending_renderable = None
+        elif self._pending_renderable is not None:
             pending = self._pending_renderable
             self._pending_renderable = None
             self.update(pending, self.raw_text)
@@ -555,8 +655,12 @@ class ChatMessageWidget(Vertical):
         if isinstance(renderable, ResponseTimeline):
             self._timeline = renderable
             self.raw_text = renderable.to_plain_text()
-            renderable = renderable.to_renderable()
-        elif isinstance(renderable, Group):
+            self._pending_renderable = renderable
+            self._sync_timeline_widgets()
+            return
+
+        self._timeline = None
+        if isinstance(renderable, Group):
             group_texts = []
             for item in renderable.renderables:
                 if hasattr(item, "plain") and item.plain:
@@ -579,7 +683,10 @@ class ChatMessageWidget(Vertical):
             self.raw_text = renderable.plain
 
         try:
+            container = self.query_one("#timeline_container", Vertical)
+            container.display = False
             content_static = self.query_one("#msg_content", Static)
+            content_static.display = True
             if isinstance(renderable, (str, list)):
                 content_static.update(Markdown(self.raw_text))
             else:
@@ -596,28 +703,24 @@ class ChatMessageWidget(Vertical):
         """Toggles expansion of tool result block(s). If index is -1, toggles all tool blocks."""
         if not self._timeline:
             return False
-        toggled = False
         tool_blocks = [b for b in self._timeline.blocks if isinstance(b, ToolResultBlock)]
+        if not tool_blocks:
+            return False
+
         if 0 <= index < len(tool_blocks):
             tool_blocks[index].expanded = not tool_blocks[index].expanded
-            toggled = True
         else:
             for b in tool_blocks:
                 b.expanded = not b.expanded
-                toggled = True
 
-        if toggled:
-            self.update_timeline(self._timeline)
-        return toggled
+        self.update_timeline(self._timeline)
+        return True
 
     def on_click(self, event) -> None:
         if event.control and event.control.id == "copy_btn":
             event.stop()
             self.copy_to_clipboard()
             return
-
-        if self._timeline and any(isinstance(b, ToolResultBlock) for b in self._timeline.blocks):
-            self.toggle_tool_expansion()
 
     def copy_to_clipboard(self) -> None:
         text_to_copy = self.raw_text
