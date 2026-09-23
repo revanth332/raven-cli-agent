@@ -1,6 +1,7 @@
 from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,update_architecture_map,get_active_projects,recall_memory
 from agent.tools.file_tools import find_file,read_file,create_file,patch_file,search_file_content
 from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff,get_git_log
+from agent.tools.checkpoint_tools import create_checkpoint,rollback_checkpoint,list_checkpoints
 from agent.tools.miscellaneous_tools import execute_command,get_current_timestamp
 from agent.tools.web_tools import web_search,extract_content_from_web_links
 from agent.core.indexer import search_codebase
@@ -480,10 +481,80 @@ raven_tools = [
                 ]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "create_checkpoint",
+            "description": "Create a transactional workspace checkpoint/snapshot before performing multi-file edits or risky actions.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "checkpoint_name": {
+                        "type": "string",
+                        "description": "Descriptive label for the task boundary (e.g., 'pre-refactor-auth', 'before-test-fix')."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rollback_checkpoint",
+            "description": "Roll back the workspace to a previously saved checkpoint.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "checkpoint_id": {
+                        "type": "string",
+                        "description": "Specific checkpoint ID to restore. If omitted, rolls back to the immediate previous checkpoint."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_checkpoints",
+            "description": "List all recent checkpoints created for this project.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "integer",
+                        "description": "Maximum number of recent checkpoints to display (defaults to 10).",
+                        "default": 10
+                    }
+                },
+                "required": []
+            }
+        }
     }
 ]
 
 TOOL_REGISTRY = {
+    "create_checkpoint": {
+        "fn": create_checkpoint,
+        "display_name": "Checkpoint",
+        "display_arg": "checkpoint_name",
+        "ignore_display": False
+    },
+    "rollback_checkpoint": {
+        "fn": rollback_checkpoint,
+        "display_name": "Rollback Checkpoint",
+        "display_arg": "checkpoint_id",
+        "ignore_display": False
+    },
+    "list_checkpoints": {
+        "fn": list_checkpoints,
+        "display_name": "List Checkpoints",
+        "display_arg": None,
+        "ignore_display": False
+    },
     "save_to_memory": {
         "fn": save_to_memory, 
         "display_name": "Remember", 

@@ -300,6 +300,25 @@ def format_search_content_result(query: str, result_str: str, expanded: bool = F
     return result_text
 
 
+def format_checkpoint_result(tool_name: str, result_str: str, expanded: bool = False) -> Text:
+    """Formats checkpoint and rollback tool feedback."""
+    result_text = Text()
+    clean = str(result_str).strip()
+    if clean.startswith("Error:") or clean.startswith("Failed"):
+        result_text.append(f"   |_ {clean}\n", style="bold red")
+    else:
+        lines = [l for l in clean.splitlines() if l.strip()]
+        if not lines:
+            result_text.append("   |_ Checkpoint completed\n", style="bold green")
+            return result_text
+        
+        header_style = "bold green" if "Successfully" in lines[0] else "dim white"
+        result_text.append(f"   |_ {lines[0]}\n", style=header_style)
+        for line in lines[1:]:
+            result_text.append(f"       {line}\n", style="dim white")
+    return result_text
+
+
 def format_tool_result_preview(
     tool_name: str,
     tool_args: dict,
@@ -327,6 +346,8 @@ def format_tool_result_preview(
     elif tool_name == "search_file_content":
         query = args.get("query", "")
         return format_search_content_result(query, str(result), expanded=expanded)
+    elif tool_name in ("create_checkpoint", "rollback_checkpoint", "list_checkpoints"):
+        return format_checkpoint_result(tool_name, str(result), expanded=expanded)
     else:
         return format_generic_tool_result(tool_name, result, expanded=expanded)
 
