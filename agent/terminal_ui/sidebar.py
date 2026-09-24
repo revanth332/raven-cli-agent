@@ -29,22 +29,32 @@ class ConsumptionSidebar(Vertical):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self.metrics_static = Static(id="sidebar_metrics")
+        self.session_name = "New Conversation"
+        self.project_name = "New Project"
 
     def compose(self):
         yield self.metrics_static
 
     def on_mount(self):
+        from agent.utils import get_active_project_name
+        from pathlib import Path
+        proj = get_active_project_name() or Path.cwd().name
+        self.project_name = proj
         self.update_metrics()
 
     def update_metrics(
         self,
         metrics: Dict[str, Any] | None = None,
-        session_name: str = "New Conversation",
-        project_name: str = "New Project"
+        session_name: str | None = None,
+        project_name: str | None = None
     ):
         """
         Updates the sidebar with session/project context as well as usage, context, and cost metrics.
         """
+        if session_name is not None:
+            self.session_name = session_name
+        if project_name is not None:
+            self.project_name = project_name
         if metrics is None:
             metrics = {
                 "last_prompt_tokens": 0,
@@ -89,8 +99,10 @@ class ConsumptionSidebar(Vertical):
         bar_str = f"[{bar_color}]" + "█" * filled_length + f"[dim white]" + "░" * empty_length + f"[/dim white][/{bar_color}]"
 
         # Truncate long session / project names for side panel display
-        clean_session = session_name if len(session_name) <= 26 else session_name[:24] + ".."
-        clean_project = project_name if len(project_name) <= 26 else project_name[:24] + ".."
+        s_name = self.session_name or "New Conversation"
+        p_name = self.project_name or "New Project"
+        clean_session = s_name if len(s_name) <= 26 else s_name[:24] + ".."
+        clean_project = p_name if len(p_name) <= 26 else p_name[:24] + ".."
 
         # Render context bar using markup format in static
         text_markup = (

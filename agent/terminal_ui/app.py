@@ -697,11 +697,6 @@ class RavenTUI(App):
                 self.chat_session = get_chat_session(session_id=selected_session_id)
                 self.reload_history_ui()
                 self.update_status_bar()
-                try:
-                    sidebar = self.query_one(ConsumptionSidebar)
-                    sidebar.update_metrics(self.chat_session.get_context_usage())
-                except Exception:
-                    pass
                 self.notify(f"Switched session to '{self.chat_session.session_title}'", title="Session Changed", severity="information")
             else:
                 if self.chat_session:
