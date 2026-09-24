@@ -11,6 +11,7 @@ from rich.console import Group
 from rich.text import Text
 
 from agent.tools.tool_registry import TOOL_REGISTRY
+from agent.tools.checkpoint_tools import create_checkpoint, rollback_checkpoint, list_checkpoints
 from agent.core.llm import get_chat_session, generate_ai_session_title
 from agent.utils import (
     read_prompt_from_file, get_active_project_name,
@@ -30,6 +31,7 @@ from agent.terminal_ui.permission_box import PermissionBox, PermissionBar
 from agent.terminal_ui.thinking_loader import ThinkingMessage
 from agent.terminal_ui.model_select_modal import ModelSelectModal
 from agent.terminal_ui.session_select_modal import SessionSelectModal
+from agent.terminal_ui.checkpoint_modal import CheckpointSelectModal
 from agent.terminal_ui.skills_modal import SkillsManagerModal, CreateSkillModal
 from agent.terminal_ui.sidebar import ConsumptionSidebar
 from agent.core.session_manager import create_session, list_sessions
@@ -109,6 +111,21 @@ SLASH_COMMANDS = {
     "/compact":{
         "description":"Summarize and compact conversation history",
         "placeholder":"/compact [optional instructions]",
+        "system_prompt":""
+    },
+    "/checkpoint":{
+        "description":"Create a transactional workspace snapshot",
+        "placeholder":"/checkpoint [name]",
+        "system_prompt":""
+    },
+    "/rollback":{
+        "description":"Roll back to previous or specified checkpoint",
+        "placeholder":"/rollback [checkpoint_id]",
+        "system_prompt":""
+    },
+    "/checkpoints":{
+        "description":"List all saved project checkpoints",
+        "placeholder":"/checkpoints",
         "system_prompt":""
     },
     "/coach":{
@@ -439,7 +456,7 @@ class RavenTUI(App):
                 self.exit()
                 return
 
-            if cmd == "/model":
+            if cmd in ["/model", "/models"]:
                 chat_input.text = ""
                 self.open_model_select_modal()
                 return
@@ -457,6 +474,11 @@ class RavenTUI(App):
             if cmd == "/add-skill":
                 chat_input.text = ""
                 self.open_create_skill_modal()
+                return
+
+            if cmd == "/checkpoints":
+                chat_input.text = ""
+                self.show_checkpoint_modal()
                 return
 
             if cmd == "/new":
@@ -696,6 +718,25 @@ class RavenTUI(App):
                             self.update_status_bar()
 
         self.push_screen(SessionSelectModal(), on_session_dismiss)
+
+    def show_checkpoint_modal(self) -> None:
+        """Opens the checkpoint select modal for inspecting and restoring snapshots."""
+        def on_checkpoint_dismiss(result: tuple | None = None) -> None:
+            if not result:
+                return
+            if isinstance(result, (tuple, list)) and len(result) >= 2 and result[0] == "restore":
+                ckpt_id = result[1]
+                rollback_res = rollback_checkpoint(ckpt_id)
+                main_container = self.query_one("#main_container")
+                if main_container.has_class("centered"):
+                    main_container.remove_class("centered")
+                history_container = self.query_one("#history")
+                card = ChatMessageWidget(role="assistant", raw_text=rollback_res, classes="raven-msg")
+                history_container.mount(card)
+                self.scroll_to_bottom()
+                self.notify(f"Restored checkpoint '{ckpt_id}'", title="Checkpoint Restored", severity="information")
+
+        self.push_screen(CheckpointSelectModal(), on_checkpoint_dismiss)
 
     def reload_history_ui(self) -> None:
         try:
@@ -942,7 +983,7 @@ class RavenTUI(App):
             self.start_new_session()
             return
 
-        if user_input.lower() == "/model" or user_input.lower().startswith("/model "):
+        if user_input.lower() in ["/model", "/models"] or user_input.lower().startswith(("/model ", "/models ")):
             input_widget = event.text_area
             input_widget.text = ""
             self.query_one('#autocomplete_list', OptionList).styles.display = "none"
@@ -1076,6 +1117,55 @@ class RavenTUI(App):
 
             self.execute_compact_history(custom_instructions)
             return
+
+        if user_input.lower() in ["/checkpoints", "/checkpoints "] or user_input.lower().startswith("/checkpoints "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.show_checkpoint_modal()
+            return
+
+        if user_input.lower() == "/checkpoint" or user_input.lower().startswith("/checkpoint "):
+            parts = user_input.split(" ", 1)
+            ckpt_name = parts[1].strip() if len(parts) > 1 else ""
+
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            history_container = self.query_one("#history")
+            user_card = ChatMessageWidget(role="user", raw_text=user_input, classes="user-msg")
+            history_container.mount(user_card)
+
+            result_str = create_checkpoint(ckpt_name)
+            raven_card = ChatMessageWidget(role="assistant", raw_text=result_str, classes="raven-msg")
+            history_container.mount(raven_card)
+            self.scroll_to_bottom()
+            return
+
+        if user_input.lower() == "/rollback" or user_input.lower().startswith("/rollback"):
+            parts = user_input.split(" ", 1)
+            ckpt_id = parts[1].strip() if len(parts) > 1 and parts[1].strip() else "latest-checkpoint"
+
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            history_container = self.query_one("#history")
+            user_card = ChatMessageWidget(role="user", raw_text=user_input, classes="user-msg")
+            history_container.mount(user_card)
+
+            result_str = rollback_checkpoint(ckpt_id)
+            raven_card = ChatMessageWidget(role="assistant", raw_text=result_str, classes="raven-msg")
+            history_container.mount(raven_card)
+            self.scroll_to_bottom()
+            return
         
         main_container = self.query_one("#main_container")
         if main_container.has_class("centered"):
@@ -1167,6 +1257,13 @@ class RavenTUI(App):
         if not self.chat_session:
             self.call_from_thread(self.safe_update_raven_card, raven_card, "[red]AI is still initializing. Please try again.[/red]")
             return
+
+        # Deterministic auto-checkpoint before AI turn starts
+        try:
+            create_checkpoint("latest-checkpoint")
+        except Exception:
+            pass
+
         start_time = time.time()
         self.cancel_event.clear()
         loop_guard = LoopGuard(

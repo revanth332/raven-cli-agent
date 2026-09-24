@@ -5,6 +5,8 @@ from agent.tools.checkpoint_tools import (
     create_checkpoint,
     rollback_checkpoint,
     list_checkpoints,
+    get_project_checkpoints,
+    delete_checkpoint,
 )
 from agent.tools.tool_registry import TOOL_REGISTRY, raven_tools
 
@@ -101,12 +103,62 @@ def test_rollback_invalid_id(tmp_path, monkeypatch):
     assert "Error:" in res
 
 
+def test_get_and_delete_checkpoints(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent.tools.checkpoint_tools.get_project_root", lambda: tmp_path)
+    monkeypatch.setattr("agent.tools.checkpoint_tools._get_checkpoints_dir", lambda project_name=None: tmp_path / ".checkpoints")
+
+    create_checkpoint("chk-alpha")
+    create_checkpoint("chk-beta")
+
+    items = get_project_checkpoints()
+    assert len(items) == 2
+    assert items[0]["checkpoint_name"] == "chk-beta"
+
+    # Delete first
+    target_id = items[0]["checkpoint_id"]
+    assert delete_checkpoint(target_id) is True
+
+    remaining = get_project_checkpoints()
+    assert len(remaining) == 1
+    assert remaining[0]["checkpoint_name"] == "chk-alpha"
+
+
 def test_tool_registry_registration():
     assert "create_checkpoint" in TOOL_REGISTRY
     assert "rollback_checkpoint" in TOOL_REGISTRY
     assert "list_checkpoints" in TOOL_REGISTRY
 
+    # LLM tool list should not include autonomous checkpoint mutations
     names = [t["function"]["name"] for t in raven_tools]
-    assert "create_checkpoint" in names
-    assert "rollback_checkpoint" in names
-    assert "list_checkpoints" in names
+    assert "create_checkpoint" not in names
+
+
+import pytest
+from textual.app import App, ComposeResult
+from agent.terminal_ui.checkpoint_modal import CheckpointSelectModal
+
+
+class CheckpointTestApp(App):
+    def compose(self) -> ComposeResult:
+        yield CheckpointSelectModal()
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_modal_cancel_button(tmp_path, monkeypatch):
+    monkeypatch.setattr("agent.tools.checkpoint_tools.get_project_root", lambda: tmp_path)
+    monkeypatch.setattr("agent.tools.checkpoint_tools._get_checkpoints_dir", lambda project_name=None: tmp_path / ".checkpoints")
+
+    create_checkpoint("alpha-test")
+    app = CheckpointTestApp()
+
+    async with app.run_test() as pilot:
+        modal = app.query_one(CheckpointSelectModal)
+        assert modal is not None
+        opt_list = modal.query_one("#checkpoint_option_list")
+        assert opt_list.option_count == 1
+
+        # Press cancel button
+        cancel_btn = modal.query_one("#btn_cancel")
+        await pilot.click(cancel_btn)
+        # Verify dismissal without crashing
+

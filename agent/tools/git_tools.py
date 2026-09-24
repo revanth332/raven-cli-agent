@@ -70,18 +70,47 @@ def get_git_diff(file_path: str = None, staged: bool = False):
     except Exception as e:
         return f"Failed to get git diff: {e}"
 
-def get_staged_git_changes():
+def get_staged_git_changes(max_lines: int = 500) -> str:
     """
     Use this tool to retrieve the current staged git changes.
+
+    Args:
+        max_lines: Maximum number of diff lines to return to avoid context blowup. Defaults to 500.
+    Returns:
+        Staged git diff output string or status/error message.
     """
     try:
-        result = subprocess.run(["git", "diff", "--cached", "--quiet"], capture_output=True)
-        if result.returncode == 0:
-            return "No staged changes found. Please stage files before committing."
-        diff_output = subprocess.run(["git", "diff", "--cached"], capture_output=True, text=True, encoding="utf-8", errors="replace").stdout
+        command = [
+            "git", "diff", "--cached",
+            "--",
+            ".",
+            ":(exclude)*lock*",
+            ":(exclude)*.min.*",
+            ":(exclude)node_modules/*",
+            ":(exclude)dist/*",
+            ":(exclude)build/*"
+        ]
+        result = subprocess.run(command, capture_output=True, text=True, encoding="utf-8", errors="replace")
+        if result.returncode != 0:
+            return f"Failed to get staged git changes: {result.stderr.strip()}"
+
+        diff_output = (result.stdout or "").strip()
+        if not diff_output:
+            # Fallback check without exclusions in case only lockfiles or excluded files were staged
+            fallback = subprocess.run(["git", "diff", "--cached"], capture_output=True, text=True, encoding="utf-8", errors="replace")
+            if fallback.returncode == 0 and fallback.stdout.strip():
+                diff_output = fallback.stdout.strip()
+            else:
+                return "No staged changes found. Please stage files before committing."
+
+        lines = diff_output.splitlines()
+        if len(lines) > max_lines:
+            truncated_diff = "\n".join(lines[:max_lines])
+            return f"{truncated_diff}\n\n[Diff truncated. Showing {max_lines} of {len(lines)} total lines to protect context window.]"
+
         return diff_output
-    except subprocess.CalledProcessError as e:
-        return f"Failed to get the staged changes {e}"
+    except Exception as e:
+        return f"Failed to get staged git changes: {e}"
 
 def commit_staged_git_changes(message:str):
     """
@@ -98,7 +127,7 @@ def commit_staged_git_changes(message:str):
         if result.returncode != 0:
             return f"Failed to commit: {result.stderr.strip()}"
         return "Successfully committed the changes"
-    except subprocess.CalledProcessError as e:
+    except Exception as e:
         return f"Failed to commit: {e}"
 
 def get_git_log(

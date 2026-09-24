@@ -202,6 +202,21 @@ def create_checkpoint(checkpoint_name: str = "") -> str:
 
         # Update checkpoint index
         index = _load_checkpoint_index(ckpt_dir)
+        if label == "latest-checkpoint":
+            # Prune previous auto latest-checkpoint entries to maintain a single slot
+            new_index = []
+            for item in index:
+                if item.get("checkpoint_name") == "latest-checkpoint":
+                    old_path = ckpt_dir / item.get("checkpoint_id", "")
+                    if old_path.exists() and old_path != snapshot_path:
+                        try:
+                            shutil.rmtree(old_path, ignore_errors=True)
+                        except Exception:
+                            pass
+                else:
+                    new_index.append(item)
+            index = new_index
+
         index.insert(0, {
             "checkpoint_id": checkpoint_id,
             "checkpoint_name": label,
@@ -245,8 +260,12 @@ def rollback_checkpoint(checkpoint_id: Optional[str] = None) -> str:
         return "Error: No checkpoints found for this project."
 
     target_id = checkpoint_id.strip() if checkpoint_id and checkpoint_id.strip() else ""
-    if not target_id or target_id.lower() == "latest":
+    if not target_id or target_id.lower() in ("latest", "latest-checkpoint"):
         target_id = index[0]["checkpoint_id"]
+    else:
+        matched = next((c["checkpoint_id"] for c in index if c.get("checkpoint_name") == target_id or c.get("checkpoint_id") == target_id), None)
+        if matched:
+            target_id = matched
 
     snapshot_path = ckpt_dir / target_id
     meta_file = snapshot_path / "metadata.json"
@@ -385,3 +404,29 @@ def list_checkpoints(limit: int = 10) -> str:
         lines.append(f"  {idx}. [{cid}] '{cname}' ({ts}) - {files_count} file(s)")
 
     return "\n".join(lines)
+
+
+def get_project_checkpoints(limit: int = 50) -> List[Dict[str, Any]]:
+    """Returns structured list of checkpoint dictionaries for the project."""
+    ckpt_dir = _get_checkpoints_dir()
+    index = _load_checkpoint_index(ckpt_dir)
+    return index[:limit]
+
+
+def delete_checkpoint(checkpoint_id: str) -> bool:
+    """Deletes a specific checkpoint from disk and index."""
+    if not checkpoint_id:
+        return False
+    ckpt_dir = _get_checkpoints_dir()
+    index = _load_checkpoint_index(ckpt_dir)
+    target = next((item for item in index if item.get("checkpoint_id") == checkpoint_id), None)
+    if not target:
+        return False
+
+    snapshot_path = ckpt_dir / checkpoint_id
+    if snapshot_path.exists():
+        shutil.rmtree(snapshot_path, ignore_errors=True)
+
+    new_index = [item for item in index if item.get("checkpoint_id") != checkpoint_id]
+    _save_checkpoint_index(ckpt_dir, new_index)
+    return True

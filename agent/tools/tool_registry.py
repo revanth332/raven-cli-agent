@@ -481,58 +481,6 @@ raven_tools = [
                 ]
             }
         }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "create_checkpoint",
-            "description": "Create a transactional workspace checkpoint/snapshot before performing multi-file edits or risky actions.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "checkpoint_name": {
-                        "type": "string",
-                        "description": "Descriptive label for the task boundary (e.g., 'pre-refactor-auth', 'before-test-fix')."
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "rollback_checkpoint",
-            "description": "Roll back the workspace to a previously saved checkpoint.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "checkpoint_id": {
-                        "type": "string",
-                        "description": "Specific checkpoint ID to restore. If omitted, rolls back to the immediate previous checkpoint."
-                    }
-                },
-                "required": []
-            }
-        }
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "list_checkpoints",
-            "description": "List all recent checkpoints created for this project.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "limit": {
-                        "type": "integer",
-                        "description": "Maximum number of recent checkpoints to display (defaults to 10).",
-                        "default": 10
-                    }
-                },
-                "required": []
-            }
-        }
     }
 ]
 
@@ -629,7 +577,7 @@ TOOL_REGISTRY = {
     },
     "get_staged_git_changes":{
         "fn": get_staged_git_changes,
-        "display_name": "Search changes",
+        "display_name": "Staged Changes",
         "display_arg": "",
         "ignore_display": False
     },
