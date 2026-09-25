@@ -1,8 +1,20 @@
+import os
+import re
 import subprocess
 from datetime import datetime
 
 MAX_COMMAND_OUTPUT_CHARS = 6000
 MAX_COMMAND_OUTPUT_LINES = 120
+
+ANSI_ESCAPE_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+
+def strip_ansi(text: str) -> str:
+    """Removes ANSI escape codes and cleans carriage returns from terminal output."""
+    if not text:
+        return text
+    # Normalize carriage returns that overwrite terminal lines
+    text = re.sub(r'\r\n?', '\n', text)
+    return ANSI_ESCAPE_RE.sub('', text)
 
 def truncate_output(text: str, max_chars: int = MAX_COMMAND_OUTPUT_CHARS, max_lines: int = MAX_COMMAND_OUTPUT_LINES) -> str:
     """
@@ -56,6 +68,12 @@ def execute_command(command: str) -> str:
         The exit code, stdout, and stderr output of the command (safely capped if excessive).
     """
     try:
+        # Prepare environment disabling ANSI colors in test runners/CLI tools
+        env = dict(os.environ)
+        env["NO_COLOR"] = "1"
+        env["FORCE_COLOR"] = "0"
+        env["TERM"] = "dumb"
+
         # Run the command, capturing output and ignoring encoding errors on Windows
         result = subprocess.run(
             command, 
@@ -63,14 +81,17 @@ def execute_command(command: str) -> str:
             capture_output=True, 
             text=True, 
             encoding="utf-8", 
-            errors="ignore"
+            errors="ignore",
+            env=env
         )
         
         output = f"Exit Code: {result.returncode}\n"
         if result.stdout:
-            output += f"STDOUT:\n{truncate_output(result.stdout)}\n"
+            stdout_clean = strip_ansi(result.stdout)
+            output += f"STDOUT:\n{truncate_output(stdout_clean)}\n"
         if result.stderr:
-            output += f"STDERR:\n{truncate_output(result.stderr, max_chars=3000, max_lines=60)}\n"
+            stderr_clean = strip_ansi(result.stderr)
+            output += f"STDERR:\n{truncate_output(stderr_clean, max_chars=3000, max_lines=60)}\n"
             
         return output
     except Exception as e:

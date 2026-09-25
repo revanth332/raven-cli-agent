@@ -8,6 +8,8 @@ from rich.markdown import Markdown
 from rich.console import Group, RenderableType
 from rich.text import Text
 
+from agent.tools.miscellaneous_tools import strip_ansi
+
 MAX_DIFF_LINES = 8
 MAX_ARG_LENGTH = 80
 MAX_RESULT_LINES = 6
@@ -93,7 +95,8 @@ def format_patch_diff(
 def format_command_result(command: str, raw_output: str, expanded: bool = False) -> Text:
     """Formats a concise preview of command execution results with expansion."""
     result_text = Text()
-    lines = str(raw_output).splitlines()
+    clean_output = strip_ansi(str(raw_output))
+    lines = clean_output.splitlines()
     exit_code = 0
     stdout_lines = []
     stderr_lines = []
