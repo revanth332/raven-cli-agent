@@ -12,7 +12,7 @@ from rich.text import Text
 
 from agent.tools.tool_registry import TOOL_REGISTRY
 from agent.tools.checkpoint_tools import create_checkpoint, rollback_checkpoint, list_checkpoints
-from agent.core.llm import get_chat_session, generate_ai_session_title
+from agent.core.llm import get_chat_session, generate_ai_session_title, reset_genai_client
 from agent.utils import (
     read_prompt_from_file, get_active_project_name,
     encode_image_file, grab_clipboard_image, create_multimodal_content,
@@ -29,6 +29,7 @@ from agent.terminal_ui.chat_message import (
 )
 from agent.terminal_ui.permission_box import PermissionBox, PermissionBar
 from agent.terminal_ui.thinking_loader import ThinkingMessage
+from agent.terminal_ui.connect_modal import ConnectModal
 from agent.terminal_ui.model_select_modal import ModelSelectModal
 from agent.terminal_ui.session_select_modal import SessionSelectModal
 from agent.terminal_ui.checkpoint_modal import CheckpointSelectModal
@@ -58,6 +59,16 @@ ASK_PROMPT = read_prompt_from_file("prompts/ask_prompt.md")
 EXPLAIN_PROMPT=read_prompt_from_file("prompts/explain_prompt.md")
 
 SLASH_COMMANDS = {
+    "/connect":{
+        "description":"Connect to LLM provider (Base URL, API Key, Model)",
+        "placeholder":"/connect",
+        "system_prompt":""
+    },
+    "/usage":{
+        "description":"Open interactive HTML usage & token analytics dashboard",
+        "placeholder":"/usage",
+        "system_prompt":""
+    },
     "/exit":{
         "description":"Exit Raven CLI Agent",
         "placeholder":"/exit",
@@ -456,6 +467,16 @@ class RavenTUI(App):
                 self.exit()
                 return
 
+            if cmd == "/connect":
+                chat_input.text = ""
+                self.open_connect_modal()
+                return
+
+            if cmd == "/usage":
+                chat_input.text = ""
+                self.open_usage_dashboard()
+                return
+
             if cmd in ["/model", "/models"]:
                 chat_input.text = ""
                 self.open_model_select_modal()
@@ -794,12 +815,15 @@ class RavenTUI(App):
                         has_content = False
                         tool_args_map = {}
                         tool_args_by_name = {}
+                        turn_model = None
                         while i < len(msgs) and msgs[i].get("role") in ("assistant", "tool"):
                             sub_msg = msgs[i]
                             sub_role = sub_msg.get("role")
                             sub_content = sub_msg.get("content")
 
                             if sub_role == "assistant":
+                                if not turn_model and sub_msg.get("model_name"):
+                                    turn_model = sub_msg.get("model_name")
                                 if sub_content:
                                     turn_timeline.append_text(sub_content)
                                     has_content = True
@@ -851,7 +875,8 @@ class RavenTUI(App):
                             i += 1
 
                         if has_content and not turn_timeline.is_empty():
-                            card = ChatMessageWidget(role="assistant", timeline=turn_timeline, classes="raven-msg")
+                            card_model = turn_model or getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+                            card = ChatMessageWidget(role="assistant", timeline=turn_timeline, model_name=card_model, classes="raven-msg")
                             history_container.mount(card)
                         continue
 
@@ -861,10 +886,75 @@ class RavenTUI(App):
         except Exception:
             pass
 
+    def open_connect_modal(self) -> None:
+        def on_connect_dismiss(conn_data: dict | None) -> None:
+            if not conn_data:
+                return
+            base_url = conn_data.get("base_url")
+            api_key = conn_data.get("api_key")
+
+            settings.set_config({
+                "RAVEN_BASE_URL": base_url,
+                "RAVEN_API_KEY": api_key,
+            })
+            reset_genai_client()
+
+            def on_model_dismiss(selected_model: str | None) -> None:
+                if selected_model and selected_model != settings.RAVEN_MODEL:
+                    settings.set_config({"RAVEN_MODEL": selected_model})
+                    self.set_input_ready(False, f"Connecting to {selected_model}...")
+                    self.initialize_ai()
+                    self.update_status_bar()
+                    self.notify(f"Connected to {base_url} with model {selected_model}", title="Connected", severity="information")
+                else:
+                    self.set_input_ready(False, "Updating AI connection...")
+                    self.initialize_ai()
+                    self.update_status_bar()
+                    self.notify(f"Connected to {base_url} with model {settings.RAVEN_MODEL}", title="Connected", severity="information")
+
+            self.push_screen(ModelSelectModal(current_model=settings.RAVEN_MODEL), on_model_dismiss)
+
+        self.push_screen(ConnectModal(), on_connect_dismiss)
+
+    def open_usage_dashboard(self) -> None:
+        import webbrowser
+        try:
+            tracker = self.chat_session.tracker if (self.chat_session and hasattr(self.chat_session, "tracker")) else None
+            if tracker is None:
+                from agent.core.usage_tracker import UsageTracker
+                tracker = UsageTracker()
+
+            dashboard_path = tracker.get_dashboard_path()
+            webbrowser.open(dashboard_path.as_uri())
+
+            history_container = self.query_one("#history")
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            summary = tracker.get_summary(settings.RAVEN_MODEL)
+            total_tokens = summary.get("session_prompt_tokens", 0) + summary.get("session_completion_tokens", 0)
+            msg = (
+                f"📊 **Usage Analytics Dashboard Launched**\n\n"
+                f"Opened `{dashboard_path}` in your browser.\n\n"
+                f"- **Session Requests:** `{summary.get('total_requests', 0)}`\n"
+                f"- **Session Tokens:** `{total_tokens:,}`\n"
+                f"- **Estimated Cost:** `${summary.get('session_cost', 0.0):.4f}`\n\n"
+                f"_Refresh the browser page anytime to see live daily updates!_"
+            )
+            card = ChatMessageWidget(role="assistant", raw_text=msg, classes="raven-msg")
+            history_container.mount(card)
+            self.scroll_to_bottom()
+        except Exception as e:
+            self.notify(f"Failed to launch usage dashboard: {e}", title="Error", severity="error")
+
     def open_model_select_modal(self) -> None:
         def on_model_dismiss(selected_model: str | None) -> None:
             if selected_model and selected_model != settings.RAVEN_MODEL:
                 settings.set_config({"RAVEN_MODEL": selected_model})
+                if self.chat_session:
+                    self.chat_session.model_name = selected_model
+                    self.chat_session.save_session_state()
                 self.set_input_ready(False, f"Switching to {selected_model}...")
                 self.initialize_ai()
                 self.update_status_bar()
@@ -971,6 +1061,20 @@ class RavenTUI(App):
             self.open_session_select_modal()
             return
 
+        if user_input.lower() == "/connect" or user_input.lower().startswith("/connect "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.open_connect_modal()
+            return
+
+        if user_input.lower() == "/usage" or user_input.lower().startswith("/usage "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.open_usage_dashboard()
+            return
+
         if user_input.lower() == "/new" or user_input.lower().startswith("/new "):
             input_widget = event.text_area
             input_widget.text = ""
@@ -1050,11 +1154,11 @@ class RavenTUI(App):
             user_card = ChatMessageWidget(role="user", raw_text=image_query, image_badge=badge_label, classes="user-msg")
             history_container.mount(user_card)
 
-            raven_card = ChatMessageWidget(role="assistant", raw_text="", classes="raven-msg")
+            active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+            raven_card = ChatMessageWidget(role="assistant", raw_text="", model_name=active_model, classes="raven-msg")
             self.scroll_to_bottom()
             self.is_generating = True
 
-            active_model = settings.RAVEN_MODEL
             if is_model_vision_capable(active_model):
                 multimodal_content = create_multimodal_content(image_query, encoded["data_uri"])
                 self.stream_response(multimodal_content, raven_card)
@@ -1086,11 +1190,11 @@ class RavenTUI(App):
             user_card = ChatMessageWidget(role="user", raw_text=image_query, image_badge=badge_label, classes="user-msg")
             history_container.mount(user_card)
 
-            raven_card = ChatMessageWidget(role="assistant", raw_text="", classes="raven-msg")
+            active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+            raven_card = ChatMessageWidget(role="assistant", raw_text="", model_name=active_model, classes="raven-msg")
             self.scroll_to_bottom()
             self.is_generating = True
 
-            active_model = settings.RAVEN_MODEL
             if is_model_vision_capable(active_model):
                 multimodal_content = create_multimodal_content(image_query, encoded["data_uri"])
                 self.stream_response(multimodal_content, raven_card)
@@ -1190,7 +1294,8 @@ class RavenTUI(App):
                 user_input = f"{SLASH_COMMANDS[cmd]['system_prompt']}\n {query}"
 
         # 2. Instantiate Raven response card but do not mount it yet
-        raven_card = ChatMessageWidget(role="assistant", raw_text="", classes="raven-msg")
+        active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+        raven_card = ChatMessageWidget(role="assistant", raw_text="", model_name=active_model, classes="raven-msg")
         self.scroll_to_bottom()
 
         self.is_generating = True

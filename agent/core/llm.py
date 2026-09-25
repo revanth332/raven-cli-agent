@@ -159,13 +159,27 @@ class AgentChatSession:
         self.save_session_state()
         return summary
 
+    @staticmethod
+    def _sanitize_message_for_api(msg: dict) -> dict:
+        """Strips internal tracking metadata (like model_name) before passing to provider API."""
+        clean = {"role": msg["role"]}
+        if "content" in msg and msg["content"] is not None:
+            clean["content"] = msg["content"]
+        if "tool_calls" in msg and msg["tool_calls"] is not None:
+            clean["tool_calls"] = msg["tool_calls"]
+        if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+            clean["tool_call_id"] = msg["tool_call_id"]
+        if "name" in msg and msg["name"] is not None:
+            clean["name"] = msg["name"]
+        return clean
+
     def send_message_stream(self, query, execution_instruction=None, allow_tools=True):
         """Send chat history with optional transient loop-control instructions."""
-        request_messages = list(self.messages)
+        request_messages = [self._sanitize_message_for_api(m) for m in self.messages]
         if query is not None:
-            request_messages.append(self._create_message("user", content=query))
+            request_messages.append(self._sanitize_message_for_api(self._create_message("user", content=query)))
         if execution_instruction:
-            request_messages.append(self._create_message("system", content=execution_instruction))
+            request_messages.append(self._sanitize_message_for_api(self._create_message("system", content=execution_instruction)))
 
         request_args = {
             "model": self.model_name,
@@ -229,8 +243,8 @@ class AgentChatSession:
         msg = self._create_message(role,content=content,tool_call_id=tool_call_id,name=name,tool_calls=tool_calls)
         self.messages.append(msg)
 
-    def _create_message(self,role,content=None,tool_call_id=None,name=None,tool_calls=None):
-        msg = {"role":role}
+    def _create_message(self, role, content=None, tool_call_id=None, name=None, tool_calls=None, model_name=None):
+        msg = {"role": role}
         if content is not None:
             msg["content"] = content
         if tool_call_id is not None:
@@ -239,7 +253,15 @@ class AgentChatSession:
             msg["name"] = name
         if tool_calls is not None:
             msg["tool_calls"] = tool_calls
+        if role == "assistant":
+            msg["model_name"] = model_name or self.model_name
         return msg
+
+
+def reset_genai_client():
+    """Invalidates the cached OpenAI client instance to force re-instantiation with new settings."""
+    global _genai_client
+    _genai_client = None
 
 
 def get_genai_client():
@@ -321,6 +343,21 @@ def generate_ai_session_title(user_query, assistant_response=None, fallback_mode
             raw_title = resp.choices[0].message.content or ""
             clean_title = raw_title.strip().strip('"').strip("'").strip("`").replace("\n", " ").strip()
             clean_title = clean_title.rstrip(".")
+
+            # Record usage for title generation call
+            try:
+                from agent.core.usage_tracker import UsageTracker
+                from agent.core.token_counter import count_tokens
+                p_tokens = getattr(getattr(resp, "usage", None), "prompt_tokens", None)
+                c_tokens = getattr(getattr(resp, "usage", None), "completion_tokens", None)
+                if p_tokens is None:
+                    p_tokens = count_tokens(prompt, model_name)
+                if c_tokens is None:
+                    c_tokens = count_tokens(clean_title, model_name)
+                UsageTracker().record_turn(p_tokens, c_tokens, model_name)
+            except Exception:
+                pass
+
             if clean_title:
                 return clean_title[:40].strip()
         except Exception:

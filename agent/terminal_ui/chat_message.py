@@ -615,6 +615,14 @@ class ChatMessageWidget(Vertical):
         height: auto;
         width: 100%;
     }
+
+    .model-footer {
+        color: #64748B;
+        text-style: dim;
+        margin-top: 1;
+        height: auto;
+        width: 100%;
+    }
     """
 
     def __init__(
@@ -623,11 +631,13 @@ class ChatMessageWidget(Vertical):
         raw_text: Any = "",
         image_badge: str = "",
         timeline: Optional[ResponseTimeline] = None,
+        model_name: str = "",
         **kwargs
     ):
         super().__init__(**kwargs)
         self.role = role
         self.image_badge = image_badge
+        self.model_name = model_name
         self.raw_text = self._format_multimodal_text(raw_text)
         self._timeline: Optional[ResponseTimeline] = timeline
         self._pending_renderable = timeline if timeline is not None else None
@@ -672,6 +682,8 @@ class ChatMessageWidget(Vertical):
             yield Static(f"[bold #06B6D4]◆ Image: {self.image_badge}[/bold #06B6D4]", id="img_badge", classes="img-badge")
         yield Vertical(id="timeline_container", classes="timeline-container")
         yield Static(id="msg_content", classes="msg-content")
+        footer_text = f"[dim #64748B]⚡ {self.model_name}[/dim #64748B]" if (self.role == "assistant" and self.model_name) else ""
+        yield Static(footer_text, id="model_footer", classes="model-footer")
 
     def _sync_timeline_widgets(self) -> None:
         """Syncs child widgets in timeline_container with self._timeline.blocks."""
@@ -716,7 +728,29 @@ class ChatMessageWidget(Vertical):
                     w = Static(classes="timeline-item")
                 container.mount(w)
 
+    def set_model_name(self, model_name: str) -> None:
+        self.model_name = model_name
+        try:
+            footer = self.query_one("#model_footer", Static)
+            if self.role == "assistant" and model_name:
+                footer.update(f"[dim #64748B]⚡ {model_name}[/dim #64748B]")
+                footer.styles.display = "block"
+            else:
+                footer.update("")
+                footer.styles.display = "none"
+        except Exception:
+            pass
+
     def on_mount(self) -> None:
+        try:
+            footer = self.query_one("#model_footer", Static)
+            if not (self.role == "assistant" and self.model_name):
+                footer.styles.display = "none"
+            else:
+                footer.styles.display = "block"
+        except Exception:
+            pass
+
         if self._timeline is not None:
             self.raw_text = self._timeline.to_plain_text()
             self._sync_timeline_widgets()

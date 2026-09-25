@@ -75,8 +75,9 @@ class ModelSelectModal(ModalScreen[str]):
 
     Button {
         margin-left: 1;
-        min-width: 10;
+        min-width: 12;
         height: 3;
+        padding: 0 1;
     }
 
     #cancel_btn {
@@ -86,10 +87,9 @@ class ModelSelectModal(ModalScreen[str]):
     }
 
     #select_btn {
-        background: #06B6D4;
-        color: #05070B;
+        color: #FFFFFF;
+        border: round #10B981;
         text-style: bold;
-        border: none;
     }
     """
 

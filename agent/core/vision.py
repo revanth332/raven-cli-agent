@@ -99,6 +99,21 @@ def transcribe_image_with_vision_model(
         )
 
         content = response.choices[0].message.content or ""
+        
+        # Record usage for Vision Bridge transcription
+        try:
+            from agent.core.usage_tracker import UsageTracker
+            from agent.core.token_counter import count_tokens
+            p_tokens = getattr(getattr(response, "usage", None), "prompt_tokens", None)
+            c_tokens = getattr(getattr(response, "usage", None), "completion_tokens", None)
+            if p_tokens is None:
+                p_tokens = count_tokens(system_instruction, target_model) + 800  # estimated image tokens
+            if c_tokens is None:
+                c_tokens = count_tokens(content, target_model)
+            UsageTracker().record_turn(p_tokens, c_tokens, target_model)
+        except Exception:
+            pass
+
         return {
             "success": True,
             "transcription": content,
