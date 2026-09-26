@@ -31,6 +31,7 @@ class LoopGuard:
         self.tool_call_count = 0
         self.no_progress_rounds = 0
         self.wrap_up_started_at = None
+        self.extension_count = 0
         # List of canonical tool call signatures: (tool_name, normalized_args_json)
         self.history: List[Tuple[str, str]] = []
 
@@ -136,10 +137,32 @@ class LoopGuard:
             f"after {self.turn_count} tool rounds and {self.tool_call_count} tool calls."
         )
 
+    def extend_budget(self, extra_turns: int = 20, extra_tools: int = 30) -> None:
+        """
+        Extends the execution budget when approved by the user.
+        Resets the wrap-up state and increases hard ceilings.
+        """
+        self.hard_max_turns += extra_turns
+        self.max_turns += extra_turns
+        self.max_tool_calls += extra_tools
+        self.wrap_up_started_at = None
+        self.no_progress_rounds = 0
+        self.extension_count += 1
+
+    def get_checkpoint_prompt(self, extra_turns: int = 20) -> Tuple[str, str]:
+        """Returns the title and message for the user continuation prompt."""
+        title = "Execution Budget Checkpoint"
+        msg = (
+            f"Raven has completed {self.turn_count} turns and {self.tool_call_count} tool calls. "
+            f"Continue autonomous execution (+{extra_turns} turns)?"
+        )
+        return title, msg
+
     def reset(self) -> None:
         """Resets the guard for a new user turn."""
         self.turn_count = 0
         self.tool_call_count = 0
         self.no_progress_rounds = 0
         self.wrap_up_started_at = None
+        self.extension_count = 0
         self.history.clear()

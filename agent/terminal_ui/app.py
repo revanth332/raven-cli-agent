@@ -37,6 +37,7 @@ from agent.terminal_ui.skills_modal import SkillsManagerModal, CreateSkillModal
 from agent.terminal_ui.sidebar import ConsumptionSidebar
 from agent.core.session_manager import create_session, list_sessions
 from agent.core.loop_guard import LoopGuard, LoopGuardState
+from agent.core.preset_manager import get_active_preset
 
 from pathlib import Path
 import json
@@ -526,7 +527,15 @@ class RavenTUI(App):
                 event.stop()
             
 
-    def ask_permission_ui(self, title: str, message: str):
+    def ask_permission_ui(
+        self,
+        title: str,
+        message: str,
+        allow_label: str = "Allow (Enter)",
+        deny_label: str = "Deny (Esc)",
+        hint_text: str = "Press [bold]Enter[/bold] to Allow, or type an optional instruction below and press Enter to deny with feedback.",
+        placeholder: str = "Press Enter to allow, or type instruction & Enter to deny/modify..."
+    ):
         """Pushes the permission bar above the chat input area."""
         self.pending_permission = True
         self.permission_result = False
@@ -551,11 +560,19 @@ class RavenTUI(App):
         except Exception:
             pass
 
-        bar = PermissionBar(title, message, on_allow, on_deny)
+        bar = PermissionBar(
+            title,
+            message,
+            on_allow,
+            on_deny,
+            allow_label=allow_label,
+            deny_label=deny_label,
+            hint_text=hint_text
+        )
         bottom_bar.mount(bar, before=chat_input)
 
         chat_input.disabled = False
-        chat_input.placeholder = "Press Enter to allow, or type instruction & Enter to deny/modify..."
+        chat_input.placeholder = placeholder
         chat_input.focus()
 
     def resolve_permission(self, granted: bool, instruction: str = ""):
@@ -671,8 +688,12 @@ class RavenTUI(App):
                     yield Horizontal(id="thinking_container")
                     yield OptionList(id="autocomplete_list")
                     yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
+                    try:
+                        provider_display = "Vertex AI" if getattr(settings, "RAVEN_USE_VERTEX_AI", False) else get_active_preset()[0]
+                    except Exception:
+                        provider_display = "OpenAI"
                     yield Static(
-                        f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
+                        f"[dim #64748B]Provider:[/dim #64748B] [bold #38BDF8]{provider_display}[/bold #38BDF8]  │  [dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
                         id="input_status"
                     )
             yield ConsumptionSidebar(id="sidebar")
@@ -691,9 +712,18 @@ class RavenTUI(App):
             self.title = f"Raven - {session_title}"
             set_terminal_title(f"Raven - {session_title}")
 
+            if getattr(settings, "RAVEN_USE_VERTEX_AI", False):
+                provider_display = "Vertex AI"
+            else:
+                try:
+                    active_name, _ = get_active_preset()
+                    provider_display = active_name
+                except Exception:
+                    provider_display = "OpenAI"
+
             status_widget = self.query_one("#input_status", Static)
             status_widget.update(
-                f"[dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
+                f"[dim #64748B]Provider:[/dim #64748B] [bold #38BDF8]{provider_display}[/bold #38BDF8]  │  [dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
             )
 
             try:
@@ -890,29 +920,32 @@ class RavenTUI(App):
         def on_connect_dismiss(conn_data: dict | None) -> None:
             if not conn_data:
                 return
+            use_vertex_ai = conn_data.get("use_vertex_ai", False)
             base_url = conn_data.get("base_url")
             api_key = conn_data.get("api_key")
+            preset_name = conn_data.get("preset_name", "Custom")
+            default_model = conn_data.get("default_model")
 
             settings.set_config({
-                "RAVEN_BASE_URL": base_url,
-                "RAVEN_API_KEY": api_key,
+                "RAVEN_USE_VERTEX_AI": use_vertex_ai,
+                "RAVEN_BASE_URL": base_url or "",
+                "RAVEN_API_KEY": api_key or "",
             })
             reset_genai_client()
 
-            def on_model_dismiss(selected_model: str | None) -> None:
-                if selected_model and selected_model != settings.RAVEN_MODEL:
-                    settings.set_config({"RAVEN_MODEL": selected_model})
-                    self.set_input_ready(False, f"Connecting to {selected_model}...")
-                    self.initialize_ai()
-                    self.update_status_bar()
-                    self.notify(f"Connected to {base_url} with model {selected_model}", title="Connected", severity="information")
-                else:
-                    self.set_input_ready(False, "Updating AI connection...")
-                    self.initialize_ai()
-                    self.update_status_bar()
-                    self.notify(f"Connected to {base_url} with model {settings.RAVEN_MODEL}", title="Connected", severity="information")
+            initial_model = default_model or settings.RAVEN_MODEL
 
-            self.push_screen(ModelSelectModal(current_model=settings.RAVEN_MODEL), on_model_dismiss)
+            def on_model_dismiss(selected_model: str | None) -> None:
+                target_model = selected_model or initial_model
+                if target_model and target_model != settings.RAVEN_MODEL:
+                    settings.set_config({"RAVEN_MODEL": target_model})
+                self.set_input_ready(False, f"Connecting to {target_model}...")
+                self.initialize_ai()
+                self.update_status_bar()
+                display_target = "Google Vertex AI" if use_vertex_ai else (preset_name or base_url or "LLM Provider")
+                self.notify(f"Connected to {display_target} with model {target_model}", title="Connected", severity="information")
+
+            self.push_screen(ModelSelectModal(current_model=initial_model), on_model_dismiss)
 
         self.push_screen(ConnectModal(), on_connect_dismiss)
 
@@ -1390,10 +1423,44 @@ class RavenTUI(App):
                 if guard_state == LoopGuardState.WRAP_UP:
                     execution_instruction = loop_guard.get_wrap_up_instruction()
                 elif guard_state == LoopGuardState.FINALIZE:
-                    timeline.add_status(f"[Warning] {loop_guard.get_limit_warning()}", style="bold yellow")
-                    self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
-                    execution_instruction = loop_guard.get_finalization_instruction()
-                    allow_tools = False
+                    ext_turns = getattr(settings, "RAVEN_AGENT_EXTENSION_TURNS", 20)
+                    title, msg = loop_guard.get_checkpoint_prompt(extra_turns=ext_turns)
+
+                    self.permission_event.clear()
+                    self.call_from_thread(
+                        self.ask_permission_ui,
+                        title,
+                        msg,
+                        allow_label=f"Allow (+{ext_turns} turns)",
+                        deny_label="Stop & Wrap Up",
+                        hint_text="Press [bold]Enter[/bold] to continue, or type steering instructions below and press Enter.",
+                        placeholder="Press Enter to continue, or type steering instructions & Enter..."
+                    )
+                    self.permission_event.wait()
+
+                    if self.cancel_event.is_set():
+                        break
+
+                    if self.permission_result and not self.permission_instruction:
+                        loop_guard.extend_budget(extra_turns=ext_turns, extra_tools=int(ext_turns * 1.5))
+                        timeline.add_status(f"[Budget Extended] +{ext_turns} turns granted by user.", style="bold green")
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+                        execution_instruction = None
+                        allow_tools = True
+                    elif self.permission_instruction:
+                        loop_guard.extend_budget(extra_turns=ext_turns, extra_tools=int(ext_turns * 1.5))
+                        steering_msg = self.permission_instruction
+                        timeline.add_status(f"[Budget Extended] +{ext_turns} turns with guidance: \"{steering_msg}\"", style="bold green")
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+                        query = steering_msg
+                        user_message_committed = False
+                        execution_instruction = None
+                        allow_tools = True
+                    else:
+                        timeline.add_status(f"[Warning] {loop_guard.get_limit_warning()}", style="bold yellow")
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+                        execution_instruction = loop_guard.get_finalization_instruction()
+                        allow_tools = False
 
                 function_calls = {}
                 round_text = ""

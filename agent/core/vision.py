@@ -2,6 +2,7 @@
 Vision capabilities and Vision Bridge fallback helper for multimodal processing.
 """
 
+import time
 from typing import Dict, Any
 from agent.core.settings import settings
 
@@ -82,6 +83,7 @@ def transcribe_image_with_vision_model(
     if query:
         system_instruction += f"\n\nFocus specifically on answering or providing context for this user query: {query}"
 
+    t_start = time.perf_counter()
     try:
         client = get_genai_client()
         response = client.chat.completions.create(
@@ -98,6 +100,7 @@ def transcribe_image_with_vision_model(
             stream=False,
         )
 
+        duration_ms = (time.perf_counter() - t_start) * 1000.0
         content = response.choices[0].message.content or ""
         
         # Record usage for Vision Bridge transcription
@@ -110,7 +113,13 @@ def transcribe_image_with_vision_model(
                 p_tokens = count_tokens(system_instruction, target_model) + 800  # estimated image tokens
             if c_tokens is None:
                 c_tokens = count_tokens(content, target_model)
-            UsageTracker().record_turn(p_tokens, c_tokens, target_model)
+            UsageTracker().record_turn(
+                p_tokens,
+                c_tokens,
+                target_model,
+                duration_ms=duration_ms,
+                status="success"
+            )
         except Exception:
             pass
 
@@ -120,6 +129,20 @@ def transcribe_image_with_vision_model(
             "model_used": target_model
         }
     except Exception as e:
+        duration_ms = (time.perf_counter() - t_start) * 1000.0
+        try:
+            from agent.core.usage_tracker import UsageTracker
+            from agent.core.llm import extract_error_code
+            UsageTracker().record_turn(
+                0,
+                0,
+                target_model,
+                duration_ms=duration_ms,
+                status="error",
+                error_code=extract_error_code(e)
+            )
+        except Exception:
+            pass
         return {
             "success": False,
             "error": f"Vision Bridge transcription failed: {e}",

@@ -19,6 +19,7 @@ class Settings:
         "RAVEN_AGENT_MAX_TOOL_CALLS": (60, "int", ["RAVEN_AGENT_MAX_TOOL_CALLS", "AGENT_MAX_TOOL_CALLS"]),
         "RAVEN_AGENT_MAX_NO_PROGRESS": (3, "int", ["RAVEN_AGENT_MAX_NO_PROGRESS", "AGENT_MAX_NO_PROGRESS"]),
         "RAVEN_AGENT_GRACE_TURNS": (4, "int", ["RAVEN_AGENT_GRACE_TURNS", "AGENT_GRACE_TURNS"]),
+        "RAVEN_AGENT_EXTENSION_TURNS": (20, "int", ["RAVEN_AGENT_EXTENSION_TURNS", "AGENT_EXTENSION_TURNS"]),
     }
 
     def __init__(self):
@@ -97,6 +98,11 @@ class Settings:
             self.config = {}
         for key, value in config.items():
             self.config[key] = value
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = str(value)
+
             matched = False
             for canonical_attr, (default_val, val_type, lookup_keys) in self.SCHEMA.items():
                 if key in lookup_keys:
@@ -104,6 +110,10 @@ class Settings:
                     setattr(self, canonical_attr, coerced_val)
                     for alias in lookup_keys:
                         setattr(self, alias, coerced_val)
+                        if value is None:
+                            os.environ.pop(alias, None)
+                        else:
+                            os.environ[alias] = str(value)
                     matched = True
                     break
             if not matched:

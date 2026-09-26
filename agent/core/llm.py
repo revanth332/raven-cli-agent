@@ -1,7 +1,9 @@
 from dotenv import load_dotenv
 import logging
+import time
 from datetime import datetime, timedelta, timezone
 from threading import Lock
+from typing import Optional, Any, Dict
 
 from openai import OpenAI
 from google.auth import default
@@ -9,6 +11,57 @@ import google.auth.transport.requests
 
 # Suppress the automatic function calling warning from google-genai
 logging.getLogger("google_genai").setLevel(logging.ERROR)
+
+
+def extract_error_code(e: Exception) -> str:
+    """
+    Extracts normalized HTTP status or error classification string from API exceptions.
+    Matches spec codes: '429', '500', '503', 'TIMEOUT', 'CONTEXT_EXCEEDED', 'AUTH_ERROR'.
+    """
+    status_code = getattr(e, "status_code", None)
+    if status_code is None:
+        response = getattr(e, "response", None)
+        if response is not None:
+            status_code = getattr(response, "status_code", None)
+
+    msg = str(e).lower()
+    type_name = type(e).__name__
+
+    # 1. Context window exceeded
+    if "context" in msg and ("length" in msg or "exceed" in msg or "too long" in msg or "maximum" in msg or "token" in msg):
+        return "CONTEXT_EXCEEDED"
+    if "context_length_exceeded" in msg or "context_window" in msg:
+        return "CONTEXT_EXCEEDED"
+
+    # 2. Rate limiting
+    if status_code == 429 or "ratelimit" in type_name.lower() or "429" in msg or "rate limit" in msg or "quota" in msg:
+        return "429"
+
+    # 3. Timeout
+    if "timeout" in type_name.lower() or "timeout" in msg or "timed out" in msg:
+        return "TIMEOUT"
+
+    # 4. Auth or permissions
+    if status_code in (401, 403) or "auth" in type_name.lower() or "permission" in type_name.lower() or "401" in msg or "403" in msg or "unauthorized" in msg:
+        return "AUTH_ERROR"
+
+    # 5. Server errors
+    if status_code == 503 or "503" in msg or "service unavailable" in msg:
+        return "503"
+    if status_code == 500 or "500" in msg or "internal server" in msg:
+        return "500"
+    if status_code and 500 <= status_code < 600:
+        return str(status_code)
+
+    # 6. Any other explicit status code
+    if status_code:
+        return str(status_code)
+
+    # 7. Connection issues
+    if "connection" in type_name.lower() or "connection" in msg:
+        return "503"
+
+    return type_name if type_name else "UNKNOWN"
 
 from agent.utils import get_active_project_name,get_repo_map,read_prompt_from_file
 from agent.tools.memory_tools import get_memory_content,get_project_memory_info
@@ -97,6 +150,8 @@ class AgentChatSession:
         self.messages = [{"role": "system", "content": self.system_prompt}] + restored_messages
 
         self.tracker = UsageTracker()
+        self._last_duration_ms = 0.0
+        self._last_ttft_ms = None
         self.get_context_usage()
 
     def save_session_state(self):
@@ -148,13 +203,24 @@ class AgentChatSession:
         self.get_context_usage()
         return result
 
-    def record_turn_usage(self, prompt_tokens=None, completion_tokens=None, assistant_response=None):
+    def record_turn_usage(self, prompt_tokens=None, completion_tokens=None, assistant_response=None, duration_ms=None, ttft_ms=None):
         if prompt_tokens is None:
             prompt_tokens = count_tokens(self.messages, self.model_name)
         if completion_tokens is None and assistant_response is not None:
             completion_tokens = count_tokens(assistant_response, self.model_name)
         completion_tokens = completion_tokens or 0
-        summary = self.tracker.record_turn(prompt_tokens, completion_tokens, self.model_name)
+        if duration_ms is None:
+            duration_ms = getattr(self, "_last_duration_ms", 0.0)
+        if ttft_ms is None:
+            ttft_ms = getattr(self, "_last_ttft_ms", None)
+        summary = self.tracker.record_turn(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            model_name=self.model_name,
+            duration_ms=duration_ms,
+            ttft_ms=ttft_ms,
+            status="success"
+        )
         self.get_context_usage()
         self.save_session_state()
         return summary
@@ -173,6 +239,39 @@ class AgentChatSession:
             clean["name"] = msg["name"]
         return clean
 
+    def _wrap_stream(self, response, start_time: float):
+        """
+        Wraps LLM response stream to capture time-to-first-token (TTFT)
+        and total stream duration, recording errors if stream breaks.
+        """
+        ttft_recorded = False
+        ttft_ms = None
+        try:
+            for chunk in response:
+                if not ttft_recorded:
+                    ttft_ms = (time.perf_counter() - start_time) * 1000.0
+                    ttft_recorded = True
+                yield chunk
+            total_duration_ms = (time.perf_counter() - start_time) * 1000.0
+            self._last_duration_ms = total_duration_ms
+            self._last_ttft_ms = ttft_ms
+        except Exception as e:
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            error_code = extract_error_code(e)
+            try:
+                self.tracker.record_turn(
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    model_name=self.model_name,
+                    duration_ms=duration_ms,
+                    ttft_ms=ttft_ms,
+                    status="error",
+                    error_code=error_code
+                )
+            except Exception:
+                pass
+            raise e
+
     def send_message_stream(self, query, execution_instruction=None, allow_tools=True):
         """Send chat history with optional transient loop-control instructions."""
         request_messages = [self._sanitize_message_for_api(m) for m in self.messages]
@@ -189,9 +288,27 @@ class AgentChatSession:
         if allow_tools:
             request_args["tools"] = raven_tools
 
-        response = get_genai_client().chat.completions.create(**request_args)
+        start_time = time.perf_counter()
+        try:
+            response = get_genai_client().chat.completions.create(**request_args)
+        except Exception as e:
+            duration_ms = (time.perf_counter() - start_time) * 1000.0
+            error_code = extract_error_code(e)
+            try:
+                self.tracker.record_turn(
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    model_name=self.model_name,
+                    duration_ms=duration_ms,
+                    ttft_ms=None,
+                    status="error",
+                    error_code=error_code
+                )
+            except Exception:
+                pass
+            raise e
 
-        return response
+        return self._wrap_stream(response, start_time)
 
     def commit_user_message(self, content):
         if content is not None:
@@ -260,8 +377,9 @@ class AgentChatSession:
 
 def reset_genai_client():
     """Invalidates the cached OpenAI client instance to force re-instantiation with new settings."""
-    global _genai_client
+    global _genai_client, _vertex_credentials
     _genai_client = None
+    _vertex_credentials = None
 
 
 def get_genai_client():
@@ -270,6 +388,16 @@ def get_genai_client():
     base_url = settings.RAVEN_BASE_URL
     if use_vertex_ai():
         api_key = _get_vertex_access_token()
+        if not base_url:
+            project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
+            location = os.environ.get("GOOGLE_CLOUD_REGION") or os.environ.get("VERTEX_LOCATION") or "us-central1"
+            if not project_id:
+                try:
+                    _, project_id = default(scopes=["https://www.googleapis.com/auth/cloud-platform"])
+                except Exception:
+                    pass
+            if project_id:
+                base_url = f"https://{location}-aiplatform.googleapis.com/v1beta1/projects/{project_id}/locations/{location}/endpoints/openapi"
 
         if not api_key or not base_url:
             raise ValueError("Credentials are missing!!! Please use 'config' command to configure the credentials.")
@@ -333,6 +461,7 @@ def generate_ai_session_title(user_query, assistant_response=None, fallback_mode
 
     client = get_genai_client()
     for model_name in models_to_try:
+        t_start = time.perf_counter()
         try:
             resp = client.chat.completions.create(
                 model=model_name,
@@ -340,6 +469,7 @@ def generate_ai_session_title(user_query, assistant_response=None, fallback_mode
                 temperature=0.2,
                 stream=False
             )
+            title_dur_ms = (time.perf_counter() - t_start) * 1000.0
             raw_title = resp.choices[0].message.content or ""
             clean_title = raw_title.strip().strip('"').strip("'").strip("`").replace("\n", " ").strip()
             clean_title = clean_title.rstrip(".")
@@ -354,13 +484,32 @@ def generate_ai_session_title(user_query, assistant_response=None, fallback_mode
                     p_tokens = count_tokens(prompt, model_name)
                 if c_tokens is None:
                     c_tokens = count_tokens(clean_title, model_name)
-                UsageTracker().record_turn(p_tokens, c_tokens, model_name)
+                UsageTracker().record_turn(
+                    prompt_tokens=p_tokens,
+                    completion_tokens=c_tokens,
+                    model_name=model_name,
+                    duration_ms=title_dur_ms,
+                    status="success"
+                )
             except Exception:
                 pass
 
             if clean_title:
                 return clean_title[:40].strip()
-        except Exception:
+        except Exception as e:
+            title_dur_ms = (time.perf_counter() - t_start) * 1000.0
+            try:
+                from agent.core.usage_tracker import UsageTracker
+                UsageTracker().record_turn(
+                    prompt_tokens=0,
+                    completion_tokens=0,
+                    model_name=model_name,
+                    duration_ms=title_dur_ms,
+                    status="error",
+                    error_code=extract_error_code(e)
+                )
+            except Exception:
+                pass
             continue
 
     fallback_title = str(query_text).strip().replace("\n", " ")

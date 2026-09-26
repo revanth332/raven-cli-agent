@@ -6,6 +6,7 @@ from rich.align import Align
 from rich.live import Live
 from rich.spinner import Spinner
 from rich.markdown import Markdown
+from rich.prompt import Prompt
 import questionary
 from questionary import Style
 from agent.core.llm import get_chat_session
@@ -84,9 +85,37 @@ def run_agent_loop(chat_session,intial_input):
             if guard_state == LoopGuardState.WRAP_UP:
                 execution_instruction = loop_guard.get_wrap_up_instruction()
             elif guard_state == LoopGuardState.FINALIZE:
-                console.print(f"[yellow]{loop_guard.get_limit_warning()}[/yellow]")
-                execution_instruction = loop_guard.get_finalization_instruction()
-                allow_tools = False
+                ext_turns = getattr(settings, "RAVEN_AGENT_EXTENSION_TURNS", 20)
+                from agent.utils import notify_user_action_required
+                notify_user_action_required(
+                    title="Execution Budget Checkpoint",
+                    message=f"Raven reached {loop_guard.turn_count} turns and {loop_guard.tool_call_count} tool calls."
+                )
+                console.print(f"\n[bold yellow]⚠️  Execution Budget Checkpoint: {loop_guard.turn_count} turns and {loop_guard.tool_call_count} tool calls reached.[/bold yellow]")
+                try:
+                    user_choice = Prompt.ask(
+                        f"[cyan]Continue autonomous execution for +{ext_turns} turns?[/cyan] [Y/n/instructions]",
+                        default="y"
+                    ).strip()
+                except (KeyboardInterrupt, EOFError):
+                    user_choice = "n"
+
+                if user_choice.lower() in ("y", "yes", ""):
+                    loop_guard.extend_budget(extra_turns=ext_turns, extra_tools=int(ext_turns * 1.5))
+                    console.print(f"[bold green]✓ Budget extended: +{ext_turns} turns granted.[/bold green]\n")
+                    execution_instruction = None
+                    allow_tools = True
+                elif user_choice.lower() in ("n", "no"):
+                    console.print(f"[yellow]{loop_guard.get_limit_warning()}[/yellow]")
+                    execution_instruction = loop_guard.get_finalization_instruction()
+                    allow_tools = False
+                else:
+                    loop_guard.extend_budget(extra_turns=ext_turns, extra_tools=int(ext_turns * 1.5))
+                    console.print(f"[bold green]✓ Budget extended (+{ext_turns} turns) with instructions: \"{user_choice}\"[/bold green]\n")
+                    current_input = user_choice
+                    user_message_committed = False
+                    execution_instruction = None
+                    allow_tools = True
             final_response = ""
             function_calls = {}
             user_message_committed = current_input is None
@@ -152,6 +181,10 @@ def run_agent_loop(chat_session,intial_input):
                             "extra_content":fc.get("extra_content","")
                         })
                 chat_session.commit_assistant_message(content=final_response or None,tool_calls=assistant_tool_calls)
+                try:
+                    chat_session.record_turn_usage(assistant_response=final_response)
+                except Exception:
+                    pass
             if not function_calls:
                 break
             if not allow_tools:

@@ -241,6 +241,109 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             font-weight: 500;
         }
 
+        .metric-badge {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.775rem;
+            font-weight: 600;
+        }
+
+        .metric-success {
+            background: #f0fdf4;
+            color: #16a34a;
+            border: 1px solid #bbf7d0;
+        }
+
+        .metric-warning {
+            background: #fffbeb;
+            color: #b45309;
+            border: 1px solid #fde68a;
+        }
+
+        .metric-danger {
+            background: #fef2f2;
+            color: #dc2626;
+            border: 1px solid #fecaca;
+        }
+
+        .filter-bar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.85rem 1.25rem;
+            margin-bottom: 1.75rem;
+            box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04);
+            flex-wrap: wrap;
+            gap: 1rem;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+        }
+
+        .filter-label {
+            font-size: 0.825rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+        }
+
+        .filter-select {
+            padding: 0.45rem 0.9rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #ffffff;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            outline: none;
+            transition: border-color 0.15s ease;
+        }
+
+        .filter-select:focus {
+            border-color: var(--accent-primary);
+        }
+
+        .btn-group {
+            display: inline-flex;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            overflow: hidden;
+        }
+
+        .btn-toggle {
+            padding: 0.4rem 0.85rem;
+            background: #ffffff;
+            border: none;
+            font-size: 0.8rem;
+            font-weight: 600;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }
+
+        .btn-toggle.active {
+            background: var(--accent-primary);
+            color: #ffffff;
+        }
+
+        .section-header {
+            font-size: 1.1rem;
+            font-weight: 700;
+            color: var(--text-primary);
+            margin: 2.25rem 0 1rem 0;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            letter-spacing: -0.01em;
+        }
+
         .empty-state {
             text-align: center;
             padding: 4rem 2rem;
@@ -264,7 +367,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 <span class="logo-icon">⚡</span>
                 <div>
                     <h1 class="title">Raven Usage & Analytics</h1>
-                    <p class="subtitle">Daily token consumption, request frequency, and cost breakdown</p>
+                    <p class="subtitle">Daily token consumption, latency telemetry, and model reliability metrics</p>
                 </div>
             </div>
             <div class="refresh-badge">
@@ -273,7 +376,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
         </header>
 
         <div id="dashboard-content">
-            <!-- Stats -->
+            <!-- Stats Grid -->
             <div class="stats-grid">
                 <div class="stat-card">
                     <div class="stat-label">Total Tokens</div>
@@ -283,7 +386,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 <div class="stat-card">
                     <div class="stat-label">Total Requests</div>
                     <div class="stat-value" id="total-requests">0</div>
-                    <div class="stat-subtext">Across all sessions</div>
+                    <div class="stat-subtext" id="requests-sub">Across all sessions</div>
                 </div>
                 <div class="stat-card">
                     <div class="stat-label">Estimated Cost</div>
@@ -295,9 +398,71 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     <div class="stat-value" id="top-model" style="font-size: 1.15rem; word-break: break-all;">-</div>
                     <div class="stat-subtext" id="top-model-sub">0 tokens</div>
                 </div>
+                <div class="stat-card">
+                    <div class="stat-label">Avg P50 Latency</div>
+                    <div class="stat-value" id="avg-p50-latency">-</div>
+                    <div class="stat-subtext" id="avg-p50-sub">Across models</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Overall Success Rate</div>
+                    <div class="stat-value" id="overall-success-rate">100%</div>
+                    <div class="stat-subtext" id="success-rate-sub">0 ok | 0 errors</div>
+                </div>
             </div>
 
-            <!-- Charts -->
+            <!-- Controls Toolbar -->
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <span class="filter-label">Filter Model:</span>
+                    <select id="model-filter" class="filter-select" onchange="onFilterChange()">
+                        <option value="all">All Models</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <span class="filter-label">Latency Unit:</span>
+                    <div class="btn-group">
+                        <button id="btn-unit-ms" class="btn-toggle active" onclick="setLatencyUnit('ms')">ms</button>
+                        <button id="btn-unit-s" class="btn-toggle" onclick="setLatencyUnit('s')">seconds</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 1: Performance & Latency Analytics -->
+            <div class="section-header">⏱️ Model Latency & Speed Analytics</div>
+            <div class="charts-grid">
+                <div class="chart-card">
+                    <div class="chart-title">📈 Latency Trends Over Time (P50 Median & P95 Tail)</div>
+                    <div class="chart-wrapper">
+                        <canvas id="latencyTrendsChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">⚡ Latency vs. Output Tokens (Speed Analysis)</div>
+                    <div class="chart-wrapper">
+                        <canvas id="latencyScatterChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 2: Reliability & Error Analytics -->
+            <div class="section-header">🛡️ Reliability & Error Distribution</div>
+            <div class="charts-grid" style="grid-template-columns: 1fr 1fr;">
+                <div class="chart-card">
+                    <div class="chart-title">📊 Model Reliability Comparison (Normalized 100%)</div>
+                    <div class="chart-wrapper">
+                        <canvas id="reliabilityChart"></canvas>
+                    </div>
+                </div>
+                <div class="chart-card">
+                    <div class="chart-title">🚨 Error Category Breakdown</div>
+                    <div class="chart-wrapper">
+                        <canvas id="errorBreakdownChart"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Section 3: Consumption & Volume Analytics -->
+            <div class="section-header">📊 Token Consumption & Volume</div>
             <div class="charts-grid">
                 <div class="chart-card">
                     <div class="chart-title">📊 Daily Token Consumption per Model</div>
@@ -313,22 +478,25 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <div class="chart-card" style="margin-bottom: 1.75rem;">
+            <div class="chart-card" style="margin-bottom: 2rem;">
                 <div class="chart-title">📈 Daily Request Volume</div>
                 <div class="chart-wrapper">
                     <canvas id="requestsChart"></canvas>
                 </div>
             </div>
 
-            <!-- Table -->
+            <!-- Detailed Telemetry Table -->
             <div class="table-card">
-                <div class="chart-title">📋 Daily Detailed Breakdown</div>
+                <div class="chart-title">📋 Daily Detailed Telemetry Breakdown</div>
                 <table>
                     <thead>
                         <tr>
                             <th>Date</th>
                             <th>Model</th>
                             <th>Requests</th>
+                            <th>Reliability</th>
+                            <th>P50 Latency</th>
+                            <th>P95 Latency</th>
                             <th>Prompt Tokens</th>
                             <th>Completion Tokens</th>
                             <th>Total Tokens</th>
@@ -356,6 +524,46 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             '#ec4899', '#f97316', '#6366f1', '#14b8a6', '#84cc16'
         ];
 
+        let latencyUnit = 'ms'; // 'ms' | 's'
+        let activeModelFilter = 'all';
+        const chartInstances = {};
+
+        function destroyChart(id) {
+            if (chartInstances[id]) {
+                chartInstances[id].destroy();
+                delete chartInstances[id];
+            }
+        }
+
+        function setLatencyUnit(unit) {
+            if (latencyUnit === unit) return;
+            latencyUnit = unit;
+            document.getElementById('btn-unit-ms').classList.toggle('active', unit === 'ms');
+            document.getElementById('btn-unit-s').classList.toggle('active', unit === 's');
+            renderDashboard();
+        }
+
+        function onFilterChange() {
+            activeModelFilter = document.getElementById('model-filter').value;
+            renderDashboard();
+        }
+
+        function classifyError(code) {
+            const c = String(code || '').toUpperCase();
+            if (c === '429' || c.includes('RATE') || c.includes('QUOTA')) return 'Rate Limit (429)';
+            if (c === 'TIMEOUT' || c.includes('TIMED_OUT')) return 'Timeouts (TIMEOUT)';
+            if (c === 'CONTEXT_EXCEEDED' || c.includes('CONTEXT') || c === '400') return 'Context Exceeded (400/CONTEXT)';
+            if (c === 'AUTH_ERROR' || c === '401' || c === '403' || c.includes('AUTH') || c.includes('PERMISSION')) return 'Client/Auth (401/403)';
+            if (c.startsWith('5') || c.includes('SERVER') || c === '500' || c === '503') return 'Server Errors (5xx)';
+            return 'Other (' + c + ')';
+        }
+
+        function formatDuration(ms, unit) {
+            if (!ms || ms <= 0) return '-';
+            if (unit === 's') return (ms / 1000).toFixed(2) + ' s';
+            return Math.round(ms) + ' ms';
+        }
+
         function renderDashboard() {
             const rawData = window.USAGE_DATA || {};
             const dates = Object.keys(rawData).sort();
@@ -371,10 +579,22 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             let totalCompletionTokens = 0;
             let totalRequests = 0;
             let totalCost = 0.0;
+            let totalSuccess = 0;
+            let totalFailures = 0;
+            const p50Samples = [];
             const modelTokenCounts = {};
             const allModelsSet = new Set();
-
             const rows = [];
+
+            // Aggregate error categories
+            const errorCategoryCounts = {
+                'Rate Limit (429)': 0,
+                'Server Errors (5xx)': 0,
+                'Timeouts (TIMEOUT)': 0,
+                'Context Exceeded (400/CONTEXT)': 0,
+                'Client/Auth (401/403)': 0,
+                'Other': 0
+            };
 
             dates.forEach(date => {
                 const dayData = rawData[date];
@@ -387,18 +607,49 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     const reqs = m.requests || 0;
                     const cost = m.cost || 0.0;
 
+                    // Reliability metrics
+                    const rel = m.reliability || {};
+                    const successCount = rel.success_count != null ? rel.success_count : reqs;
+                    const failureCount = rel.failure_count || 0;
+                    const failureReasons = rel.failure_reasons || {};
+
+                    // Latency metrics
+                    const lat = m.latency || {};
+                    const p50 = lat.p50_ms || lat.avg_ms || 0;
+                    const p95 = lat.p95_ms || 0;
+
                     totalTokens += tokens;
                     totalPromptTokens += pTokens;
                     totalCompletionTokens += cTokens;
                     totalRequests += reqs;
                     totalCost += cost;
+                    totalSuccess += successCount;
+                    totalFailures += failureCount;
 
+                    if (p50 > 0) p50Samples.push(p50);
                     modelTokenCounts[model] = (modelTokenCounts[model] || 0) + tokens;
+
+                    // Collect errors for chart
+                    if (activeModelFilter === 'all' || activeModelFilter === model) {
+                        Object.keys(failureReasons).forEach(reason => {
+                            const cat = classifyError(reason);
+                            const count = failureReasons[reason] || 0;
+                            if (errorCategoryCounts[cat] != null) {
+                                errorCategoryCounts[cat] += count;
+                            } else {
+                                errorCategoryCounts['Other'] += count;
+                            }
+                        });
+                    }
 
                     rows.push({
                         date,
                         model,
                         requests: reqs,
+                        successCount,
+                        failureCount,
+                        p50,
+                        p95,
                         promptTokens: pTokens,
                         completionTokens: cTokens,
                         tokens,
@@ -407,9 +658,26 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 });
             });
 
+            // Populate Filter dropdown if not already populated
+            const selectEl = document.getElementById('model-filter');
+            const models = Array.from(allModelsSet).sort();
+            if (selectEl && selectEl.options.length <= 1) {
+                models.forEach(m => {
+                    const opt = document.createElement('option');
+                    opt.value = m;
+                    opt.innerText = m;
+                    selectEl.appendChild(opt);
+                });
+            }
+
+            const modelColorMap = {};
+            models.forEach((m, idx) => {
+                modelColorMap[m] = PALETTE[idx % PALETTE.length];
+            });
+
             const USD_TO_INR = 86.8;
 
-            // Summary stats
+            // 1. KPI Cards
             document.getElementById('total-tokens').innerText = totalTokens.toLocaleString();
             document.getElementById('token-split').innerText = `Prompt: ${totalPromptTokens.toLocaleString()} | Completion: ${totalCompletionTokens.toLocaleString()}`;
             document.getElementById('total-requests').innerText = totalRequests.toLocaleString();
@@ -428,16 +696,41 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             document.getElementById('top-model').innerText = topModelName;
             document.getElementById('top-model-sub').innerText = `${topModelTokens.toLocaleString()} tokens (${totalTokens > 0 ? ((topModelTokens/totalTokens)*100).toFixed(1) : 0}%)`;
 
-            // Populate Table (reverse chronological)
+            // Avg P50 Latency
+            const avgP50 = p50Samples.length > 0 ? (p50Samples.reduce((a, b) => a + b, 0) / p50Samples.length) : 0;
+            document.getElementById('avg-p50-latency').innerText = formatDuration(avgP50, latencyUnit);
+            document.getElementById('avg-p50-sub').innerText = `${p50Samples.length} samples evaluated`;
+
+            // Overall Success Rate
+            const totalTurnAttempts = totalSuccess + totalFailures;
+            const successRate = totalTurnAttempts > 0 ? ((totalSuccess / totalTurnAttempts) * 100) : 100.0;
+            const successEl = document.getElementById('overall-success-rate');
+            successEl.innerText = `${successRate.toFixed(1)}%`;
+            if (successRate >= 99.0) successEl.style.color = '#10b981';
+            else if (successRate >= 90.0) successEl.style.color = '#f59e0b';
+            else successEl.style.color = '#ef4444';
+            document.getElementById('success-rate-sub').innerText = `${totalSuccess.toLocaleString()} ok | ${totalFailures.toLocaleString()} errors`;
+
+            // 2. Populate Table (Reverse Chronological)
             const tbody = document.getElementById('table-body');
             tbody.innerHTML = '';
-            rows.reverse().forEach(r => {
+            const filteredRows = activeModelFilter === 'all' ? rows : rows.filter(r => r.model === activeModelFilter);
+            filteredRows.slice().reverse().forEach(r => {
                 const tr = document.createElement('tr');
                 const rowINR = r.cost * USD_TO_INR;
+                const turnTotal = r.successCount + r.failureCount;
+                const rowRate = turnTotal > 0 ? ((r.successCount / turnTotal) * 100).toFixed(0) : 100;
+                let relBadgeClass = 'metric-success';
+                if (rowRate < 90) relBadgeClass = 'metric-danger';
+                else if (rowRate < 99) relBadgeClass = 'metric-warning';
+
                 tr.innerHTML = `
                     <td><strong>${r.date}</strong></td>
                     <td><span class="model-tag">${r.model}</span></td>
                     <td>${r.requests}</td>
+                    <td><span class="metric-badge ${relBadgeClass}">${rowRate}% (${r.successCount}/${r.failureCount})</span></td>
+                    <td>${formatDuration(r.p50, latencyUnit)}</td>
+                    <td>${formatDuration(r.p95, latencyUnit)}</td>
                     <td>${r.promptTokens.toLocaleString()}</td>
                     <td>${r.completionTokens.toLocaleString()}</td>
                     <td><strong>${r.tokens.toLocaleString()}</strong></td>
@@ -446,16 +739,254 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 tbody.appendChild(tr);
             });
 
-            const models = Array.from(allModelsSet);
-            const modelColorMap = {};
-            models.forEach((m, idx) => {
-                modelColorMap[m] = PALETTE[idx % PALETTE.length];
+            // Filter models for charts if a specific model is selected
+            const activeModels = activeModelFilter === 'all' ? models : models.filter(m => m === activeModelFilter);
+
+            // CHART 1: Latency Trends Over Time (P50 & P95)
+            destroyChart('latencyTrendsChart');
+            const latencyDatasets = [];
+            activeModels.forEach(m => {
+                const color = modelColorMap[m] || '#2563eb';
+                // Solid P50 Line
+                latencyDatasets.push({
+                    type: 'line',
+                    label: `${m} (P50 Median)`,
+                    data: dates.map(d => {
+                        const rec = rawData[d]?.[m]?.latency;
+                        const val = rec ? (rec.p50_ms || rec.avg_ms || 0) : 0;
+                        return latencyUnit === 's' ? +(val / 1000).toFixed(2) : Math.round(val);
+                    }),
+                    borderColor: color,
+                    backgroundColor: color,
+                    borderWidth: 2.2,
+                    tension: 0.35,
+                    pointRadius: 3.5,
+                    pointHoverRadius: 6
+                });
+                // Dashed P95 Tail Line
+                latencyDatasets.push({
+                    type: 'line',
+                    label: `${m} (P95 Tail)`,
+                    data: dates.map(d => {
+                        const rec = rawData[d]?.[m]?.latency;
+                        const val = rec ? (rec.p95_ms || rec.avg_ms || 0) : 0;
+                        return latencyUnit === 's' ? +(val / 1000).toFixed(2) : Math.round(val);
+                    }),
+                    borderColor: color,
+                    borderDash: [5, 5],
+                    borderWidth: 1.5,
+                    pointRadius: 2.5,
+                    tension: 0.35,
+                    pointHoverRadius: 5
+                });
             });
 
-            // 1. Mixed Stacked Bar & Smooth Area Curve: Daily Tokens
+            chartInstances['latencyTrendsChart'] = new Chart(document.getElementById('latencyTrendsChart').getContext('2d'), {
+                type: 'line',
+                data: {
+                    labels: dates,
+                    datasets: latencyDatasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: { mode: 'index', intersect: false },
+                    scales: {
+                        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 11 } } },
+                        y: {
+                            beginAtZero: true,
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                            title: { display: true, text: latencyUnit === 's' ? 'Duration (seconds)' : 'Duration (ms)', color: '#64748b' },
+                            ticks: { color: '#64748b', font: { size: 11 } }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 11 } } },
+                        tooltip: { backgroundColor: '#0f172a', padding: 10, cornerRadius: 8 }
+                    }
+                }
+            });
+
+            // CHART 2: Model Reliability Comparison (100% Stacked Bar)
+            destroyChart('reliabilityChart');
+            const relModels = activeModels;
+            const successPercentages = [];
+            const failurePercentages = [];
+
+            relModels.forEach(m => {
+                let mSuccess = 0;
+                let mFail = 0;
+                dates.forEach(d => {
+                    const rec = rawData[d]?.[m];
+                    if (rec) {
+                        const rel = rec.reliability || {};
+                        mSuccess += (rel.success_count != null ? rel.success_count : (rec.requests || 0));
+                        mFail += (rel.failure_count || 0);
+                    }
+                });
+                const total = mSuccess + mFail;
+                if (total > 0) {
+                    successPercentages.push(+((mSuccess / total) * 100).toFixed(1));
+                    failurePercentages.push(+((mFail / total) * 100).toFixed(1));
+                } else {
+                    successPercentages.push(100);
+                    failurePercentages.push(0);
+                }
+            });
+
+            chartInstances['reliabilityChart'] = new Chart(document.getElementById('reliabilityChart').getContext('2d'), {
+                type: 'bar',
+                data: {
+                    labels: relModels,
+                    datasets: [
+                        {
+                            label: 'Success Rate (%)',
+                            data: successPercentages,
+                            backgroundColor: '#10B981',
+                            borderRadius: 4,
+                            stack: 'rel'
+                        },
+                        {
+                            label: 'Failure Rate (%)',
+                            data: failurePercentages,
+                            backgroundColor: '#EF4444',
+                            borderRadius: 4,
+                            stack: 'rel'
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    maxBarThickness: 50,
+                    scales: {
+                        x: { stacked: true, grid: { display: false }, ticks: { color: '#64748b', font: { size: 11 } } },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            max: 100,
+                            ticks: {
+                                color: '#64748b',
+                                font: { size: 11 },
+                                callback: val => val + '%'
+                            },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 12 } } },
+                        tooltip: { backgroundColor: '#0f172a', padding: 10, cornerRadius: 8 }
+                    }
+                }
+            });
+
+            // CHART 3: Error Category Breakdown (Doughnut)
+            destroyChart('errorBreakdownChart');
+            const errLabels = Object.keys(errorCategoryCounts);
+            const errData = errLabels.map(k => errorCategoryCounts[k]);
+            const totalRecordedErrors = errData.reduce((a, b) => a + b, 0);
+
+            const errChartLabels = totalRecordedErrors > 0 ? errLabels : ['100% Reliable (0 Errors)'];
+            const errChartData = totalRecordedErrors > 0 ? errData : [1];
+            const errChartColors = totalRecordedErrors > 0 ? [
+                '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#64748b'
+            ] : ['#10B981'];
+
+            chartInstances['errorBreakdownChart'] = new Chart(document.getElementById('errorBreakdownChart').getContext('2d'), {
+                type: 'doughnut',
+                data: {
+                    labels: errChartLabels,
+                    datasets: [{
+                        data: errChartData,
+                        backgroundColor: errChartColors,
+                        borderWidth: 2,
+                        borderColor: '#ffffff'
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: '#334155', boxWidth: 10, usePointStyle: true, padding: 12, font: { size: 11 } } },
+                        tooltip: { backgroundColor: '#0f172a', padding: 10, cornerRadius: 8 }
+                    }
+                }
+            });
+
+            // CHART 4: Latency vs Output Tokens Scatter Plot
+            destroyChart('latencyScatterChart');
+            const scatterDatasets = [];
+            activeModels.forEach(m => {
+                const color = modelColorMap[m] || '#2563eb';
+                const points = [];
+                dates.forEach(d => {
+                    const rec = rawData[d]?.[m];
+                    if (rec && rec.latency && rec.latency.points && rec.latency.points.length > 0) {
+                        rec.latency.points.forEach(pt => {
+                            const yVal = latencyUnit === 's' ? +(pt.duration_ms / 1000).toFixed(2) : pt.duration_ms;
+                            points.push({ x: pt.tokens || 0, y: yVal });
+                        });
+                    } else if (rec && (rec.completion_tokens || rec.tokens)) {
+                        // Fallback sample from aggregated record
+                        const p50Val = rec.latency ? (rec.latency.p50_ms || rec.latency.avg_ms || 0) : 0;
+                        if (p50Val > 0) {
+                            const yVal = latencyUnit === 's' ? +(p50Val / 1000).toFixed(2) : p50Val;
+                            points.push({ x: rec.completion_tokens || rec.tokens, y: yVal });
+                        }
+                    }
+                });
+
+                scatterDatasets.push({
+                    label: m,
+                    data: points,
+                    backgroundColor: color,
+                    borderColor: color,
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                });
+            });
+
+            chartInstances['latencyScatterChart'] = new Chart(document.getElementById('latencyScatterChart').getContext('2d'), {
+                type: 'scatter',
+                data: { datasets: scatterDatasets },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            beginAtZero: true,
+                            title: { display: true, text: 'Completion Tokens', color: '#64748b' },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                            ticks: { color: '#64748b', font: { size: 11 } }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: { display: true, text: latencyUnit === 's' ? 'Duration (seconds)' : 'Duration (ms)', color: '#64748b' },
+                            grid: { color: 'rgba(0, 0, 0, 0.05)' },
+                            ticks: { color: '#64748b', font: { size: 11 } }
+                        }
+                    },
+                    plugins: {
+                        legend: { labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 11 } } },
+                        tooltip: {
+                            backgroundColor: '#0f172a',
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(ctx) {
+                                    return `${ctx.dataset.label}: ${ctx.raw.x} tokens in ${ctx.raw.y} ${latencyUnit}`;
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+
+            // CHART 5: Daily Token Consumption per Model
+            destroyChart('tokensChart');
             const dailyTotals = dates.map(d => {
                 let daySum = 0;
-                models.forEach(m => {
+                activeModels.forEach(m => {
                     if (rawData[d] && rawData[d][m]) {
                         const rec = rawData[d][m];
                         daySum += (rec.tokens || ((rec.prompt_tokens || 0) + (rec.completion_tokens || 0)));
@@ -481,7 +1012,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 order: 0
             };
 
-            const barDatasets = models.map(m => {
+            const barDatasets = activeModels.map(m => {
                 return {
                     type: 'bar',
                     label: m,
@@ -493,7 +1024,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 };
             });
 
-            new Chart(document.getElementById('tokensChart').getContext('2d'), {
+            chartInstances['tokensChart'] = new Chart(document.getElementById('tokensChart').getContext('2d'), {
                 type: 'bar',
                 data: {
                     labels: dates,
@@ -503,16 +1034,9 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     responsive: true,
                     maintainAspectRatio: false,
                     maxBarThickness: 48,
-                    interaction: {
-                        mode: 'index',
-                        intersect: false
-                    },
+                    interaction: { mode: 'index', intersect: false },
                     scales: {
-                        x: {
-                            stacked: true,
-                            grid: { display: false },
-                            ticks: { color: '#64748b', font: { size: 12 } }
-                        },
+                        x: { stacked: true, grid: { display: false }, ticks: { color: '#64748b', font: { size: 12 } } },
                         y: {
                             beginAtZero: true,
                             grid: { color: 'rgba(0, 0, 0, 0.05)' },
@@ -528,27 +1052,20 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                         }
                     },
                     plugins: {
-                        legend: {
-                            labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 12 } }
-                        },
-                        tooltip: {
-                            backgroundColor: '#0f172a',
-                            titleColor: '#ffffff',
-                            bodyColor: '#cbd5e1',
-                            padding: 10,
-                            cornerRadius: 8
-                        }
+                        legend: { labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 12 } } },
+                        tooltip: { backgroundColor: '#0f172a', padding: 10, cornerRadius: 8 }
                     }
                 }
             });
 
-            // 2. Model Share Doughnut
-            new Chart(document.getElementById('modelShareChart').getContext('2d'), {
+            // CHART 6: Model Share Doughnut
+            destroyChart('modelShareChart');
+            chartInstances['modelShareChart'] = new Chart(document.getElementById('modelShareChart').getContext('2d'), {
                 type: 'doughnut',
                 data: {
                     labels: models,
                     datasets: [{
-                        data: models.map(m => modelTokenCounts[m]),
+                        data: models.map(m => modelTokenCounts[m] || 0),
                         backgroundColor: models.map(m => modelColorMap[m]),
                         borderWidth: 2,
                         borderColor: '#ffffff'
@@ -558,23 +1075,15 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     responsive: true,
                     maintainAspectRatio: false,
                     plugins: {
-                        legend: {
-                            position: 'bottom',
-                            labels: { color: '#334155', boxWidth: 10, usePointStyle: true, padding: 14, font: { size: 12 } }
-                        },
-                        tooltip: {
-                            backgroundColor: '#0f172a',
-                            titleColor: '#ffffff',
-                            bodyColor: '#cbd5e1',
-                            padding: 10,
-                            cornerRadius: 8
-                        }
+                        legend: { position: 'bottom', labels: { color: '#334155', boxWidth: 10, usePointStyle: true, padding: 14, font: { size: 12 } } },
+                        tooltip: { backgroundColor: '#0f172a', padding: 10, cornerRadius: 8 }
                     }
                 }
             });
 
-            // 3. Requests Bar Chart
-            const requestDatasets = models.map(m => {
+            // CHART 7: Requests Bar Chart
+            destroyChart('requestsChart');
+            const requestDatasets = activeModels.map(m => {
                 return {
                     label: m,
                     data: dates.map(d => (rawData[d][m] ? rawData[d][m].requests || 0 : 0)),
@@ -583,7 +1092,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 };
             });
 
-            new Chart(document.getElementById('requestsChart').getContext('2d'), {
+            chartInstances['requestsChart'] = new Chart(document.getElementById('requestsChart').getContext('2d'), {
                 type: 'bar',
                 data: {
                     labels: dates,
@@ -594,10 +1103,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     maintainAspectRatio: false,
                     maxBarThickness: 48,
                     scales: {
-                        x: {
-                            grid: { display: false },
-                            ticks: { color: '#64748b', font: { size: 12 } }
-                        },
+                        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 12 } } },
                         y: {
                             beginAtZero: true,
                             grid: { color: 'rgba(0, 0, 0, 0.05)' },
@@ -605,16 +1111,8 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                         }
                     },
                     plugins: {
-                        legend: {
-                            labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 12 } }
-                        },
-                        tooltip: {
-                            backgroundColor: '#0f172a',
-                            titleColor: '#ffffff',
-                            bodyColor: '#cbd5e1',
-                            padding: 10,
-                            cornerRadius: 8
-                        }
+                        legend: { labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 12 } } },
+                        tooltip: { backgroundColor: '#0f172a', padding: 10, cornerRadius: 8 }
                     }
                 }
             });
