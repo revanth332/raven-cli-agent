@@ -12,6 +12,14 @@ DEFAULT_PRESETS = {
         "api_key": "",
         "default_model": "anthropic/claude-3.7-sonnet",
         "use_vertex_ai": False,
+        "models": [
+            "anthropic/claude-3.7-sonnet",
+            "google/gemini-2.5-flash",
+            "google/gemini-2.5-pro",
+            "deepseek/deepseek-r1",
+            "meta-llama/llama-3.3-70b-instruct",
+            "openrouter/free",
+        ],
     },
     "Google Vertex AI": {
         "provider_type": "vertex",
@@ -19,6 +27,12 @@ DEFAULT_PRESETS = {
         "api_key": None,
         "default_model": "google/gemini-2.5-flash",
         "use_vertex_ai": True,
+        "models": [
+            "google/gemini-2.5-flash",
+            "google/gemini-2.5-pro",
+            "google/gemini-3-flash-preview",
+            "google/gemini-3.1-pro-preview",
+        ],
     },
     "Local Ollama": {
         "provider_type": "openai",
@@ -26,6 +40,11 @@ DEFAULT_PRESETS = {
         "api_key": "ollama",
         "default_model": "qwen2.5-coder:14b",
         "use_vertex_ai": False,
+        "models": [
+            "qwen2.5-coder:14b",
+            "deepseek-r1:14b",
+            "llama3.3:latest",
+        ],
     },
     "Groq": {
         "provider_type": "openai",
@@ -33,6 +52,12 @@ DEFAULT_PRESETS = {
         "api_key": "",
         "default_model": "llama-3.3-70b-versatile",
         "use_vertex_ai": False,
+        "models": [
+            "llama-3.3-70b-versatile",
+            "llama-3.1-8b-instant",
+            "mixtral-8x7b-32768",
+            "deepseek-r1-distill-llama-70b",
+        ],
     },
 }
 
@@ -75,10 +100,21 @@ class PresetManager:
                 content = self.config_path.read_text(encoding="utf-8")
                 data = json.loads(content)
                 if isinstance(data, dict) and "presets" in data and isinstance(data["presets"], dict):
-                    # Ensure standard built-in presets exist
+                    # Ensure standard built-in presets exist and have models list
                     for k, v in DEFAULT_PRESETS.items():
                         if k not in data["presets"]:
                             data["presets"][k] = copy.deepcopy(v)
+                        else:
+                            # Backfill models list if missing in existing user preset
+                            if "models" not in data["presets"][k] or not isinstance(data["presets"][k]["models"], list):
+                                data["presets"][k]["models"] = list(v.get("models", []))
+                    
+                    # Ensure custom presets also have a models list
+                    for k, preset_obj in data["presets"].items():
+                        if "models" not in preset_obj or not isinstance(preset_obj["models"], list):
+                            default_m = preset_obj.get("default_model")
+                            preset_obj["models"] = [default_m] if default_m else []
+
                     if not data.get("active_preset") or data["active_preset"] not in data["presets"]:
                         use_vertex = getattr(settings, "RAVEN_USE_VERTEX_AI", False)
                         data["active_preset"] = "Google Vertex AI" if use_vertex else "OpenRouter"
@@ -106,14 +142,30 @@ class PresetManager:
         base_url = config.get("base_url")
         api_key = config.get("api_key")
 
+        # Existing preset models or fallback to default
+        existing_models = []
+        if name in data.get("presets", {}):
+            existing_models = data["presets"][name].get("models", [])
+        elif name in DEFAULT_PRESETS:
+            existing_models = list(DEFAULT_PRESETS[name].get("models", []))
+
+        models = config.get("models")
+        if models is None or not isinstance(models, list):
+            models = existing_models
+        
+        default_model = config.get("default_model") or (
+            "google/gemini-2.5-flash" if use_vertex else "anthropic/claude-3.7-sonnet"
+        )
+        if default_model and default_model not in models:
+            models = [default_model] + [m for m in models if m != default_model]
+
         preset_data = {
             "provider_type": "vertex" if use_vertex else "openai",
             "base_url": (base_url.strip() if isinstance(base_url, str) and base_url.strip() else None),
             "api_key": None if use_vertex else (api_key.strip() if isinstance(api_key, str) else api_key),
-            "default_model": config.get("default_model") or (
-                "google/gemini-2.5-flash" if use_vertex else "anthropic/claude-3.7-sonnet"
-            ),
+            "default_model": default_model,
             "use_vertex_ai": use_vertex,
+            "models": models,
         }
 
         data.setdefault("presets", {})[name] = preset_data
@@ -155,6 +207,43 @@ class PresetManager:
             data["active_preset"] = name
             self._save_to_disk(data)
 
+    def get_preset_models(self, name: str | None = None) -> list[str]:
+        """Returns list of configured favorite/default models for a preset."""
+        data = self.load_presets()
+        target = name or data.get("active_preset") or "OpenRouter"
+        preset = data.get("presets", {}).get(target)
+        if preset and "models" in preset and isinstance(preset["models"], list):
+            return list(preset["models"])
+        if target in DEFAULT_PRESETS:
+            return list(DEFAULT_PRESETS[target].get("models", []))
+        return []
+
+    def add_preset_model(self, preset_name: str, model_id: str) -> None:
+        """Adds a model to a preset's model list if not present."""
+        if not preset_name or not model_id or not model_id.strip():
+            return
+        model_id = model_id.strip()
+        data = self.load_presets()
+        if preset_name in data.get("presets", {}):
+            models = data["presets"][preset_name].setdefault("models", [])
+            if model_id not in models:
+                models.append(model_id)
+                self._save_to_disk(data)
+
+    def remove_preset_model(self, preset_name: str, model_id: str) -> bool:
+        """Removes a model from a preset's model list."""
+        if not preset_name or not model_id:
+            return False
+        model_id = model_id.strip()
+        data = self.load_presets()
+        if preset_name in data.get("presets", {}):
+            models = data["presets"][preset_name].get("models", [])
+            if model_id in models:
+                models.remove(model_id)
+                self._save_to_disk(data)
+                return True
+        return False
+
 
 _default_manager = PresetManager()
 
@@ -177,3 +266,15 @@ def get_active_preset() -> tuple[str, dict]:
 
 def set_active_preset(name: str) -> None:
     return _default_manager.set_active_preset(name)
+
+
+def get_preset_models(name: str | None = None) -> list[str]:
+    return _default_manager.get_preset_models(name)
+
+
+def add_preset_model(preset_name: str, model_id: str) -> None:
+    return _default_manager.add_preset_model(preset_name, model_id)
+
+
+def remove_preset_model(preset_name: str, model_id: str) -> bool:
+    return _default_manager.remove_preset_model(preset_name, model_id)

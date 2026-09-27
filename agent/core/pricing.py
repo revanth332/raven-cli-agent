@@ -45,22 +45,53 @@ DEFAULT_MODEL_PRICING = {
     "context_limit": 128000
 }
 
+# Dynamically registered model pricing from discovery endpoints
+DYNAMIC_MODEL_PRICING_REGISTRY: Dict[str, Dict[str, Any]] = {}
+
+
+def register_dynamic_model_pricing(
+    model_name: str,
+    input_cost_per_1m: float,
+    output_cost_per_1m: float,
+    context_limit: int = 128000
+) -> None:
+    """
+    Registers or updates model pricing and context limit dynamically at runtime.
+    """
+    if not model_name:
+        return
+    lower_model = model_name.lower().strip()
+    DYNAMIC_MODEL_PRICING_REGISTRY[lower_model] = {
+        "input_cost_per_1m": float(input_cost_per_1m),
+        "output_cost_per_1m": float(output_cost_per_1m),
+        "context_limit": int(context_limit) if context_limit else 128000,
+    }
+
 
 def get_model_pricing(model_name: str) -> Dict[str, Any]:
     """
     Returns pricing and context limit configuration for a model name.
-    Matches exact or partial key names (case-insensitive).
+    Matches dynamic registry first, then static registry (exact or partial, case-insensitive).
     """
     if not model_name:
         return DEFAULT_MODEL_PRICING.copy()
         
     lower_model = model_name.lower().strip()
     
-    # Direct match
+    # Dynamic registry direct match
+    if lower_model in DYNAMIC_MODEL_PRICING_REGISTRY:
+        return DYNAMIC_MODEL_PRICING_REGISTRY[lower_model].copy()
+
+    # Dynamic registry partial match
+    for key, info in DYNAMIC_MODEL_PRICING_REGISTRY.items():
+        if key in lower_model or lower_model.endswith(key):
+            return info.copy()
+
+    # Static registry direct match
     if lower_model in MODEL_PRICING_REGISTRY:
         return MODEL_PRICING_REGISTRY[lower_model].copy()
         
-    # Substring / prefix match
+    # Static registry substring / prefix match
     for key, info in MODEL_PRICING_REGISTRY.items():
         if key in lower_model or lower_model.endswith(key):
             return info.copy()

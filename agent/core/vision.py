@@ -36,14 +36,34 @@ TEXT_ONLY_EXCLUSION_KEYWORDS = [
 
 DEFAULT_FALLBACK_VISION_MODEL = "google/gemini-2.5-flash"
 
+DYNAMIC_VISION_CAPABLE_MODELS: set[str] = set()
+
+
+def register_dynamic_vision_model(model_name: str, is_capable: bool = True) -> None:
+    """
+    Dynamically registers or unregisters a model's vision capability.
+    """
+    if not model_name:
+        return
+    lower = model_name.lower().strip()
+    if is_capable:
+        DYNAMIC_VISION_CAPABLE_MODELS.add(lower)
+    else:
+        DYNAMIC_VISION_CAPABLE_MODELS.discard(lower)
+
 
 def is_model_vision_capable(model_name: str) -> bool:
     """
-    Determines if an AI model supports multimodal image/vision inputs based on model naming conventions.
+    Determines if an AI model supports multimodal image/vision inputs based on model naming conventions
+    or dynamic registry.
     """
     if not model_name:
         return False
     lower = model_name.lower().strip()
+
+    # Dynamic registry check
+    if lower in DYNAMIC_VISION_CAPABLE_MODELS:
+        return True
 
     # If it explicitly has vision or vl in name, it's vision-capable
     if "vision" in lower or "-vl" in lower or "vl-" in lower:
