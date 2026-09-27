@@ -190,16 +190,15 @@ class ConnectModal(ModalScreen[dict | None]):
             yield Label("Base URL:", classes="field_label", id="base_url_label")
             yield Input(
                 value=base_url,
-                placeholder="Using Google Cloud ADC authentication" if is_vertex else "e.g. https://openrouter.ai/api/v1 or http://localhost:11434/v1",
+                placeholder="Optional custom OpenAPI endpoint or leave blank for default" if is_vertex else "e.g. https://openrouter.ai/api/v1 or http://localhost:11434/v1",
                 id="base_url_input",
                 classes="field_input",
-                disabled=is_vertex,
             )
 
             yield Label("API Key:", classes="field_label", id="api_key_label")
             yield Input(
                 value=api_key,
-                placeholder="Google Cloud ADC credentials active" if is_vertex else "Enter API key",
+                placeholder="Auto-generated via Google Cloud ADC" if is_vertex else "Enter API key",
                 password=True,
                 id="api_key_input",
                 classes="field_input",
@@ -252,12 +251,12 @@ class ConnectModal(ModalScreen[dict | None]):
 
             if is_vertex:
                 self.query_one("#radio_vertex", RadioButton).value = True
-                base_url_input.value = ""
-                base_url_input.disabled = True
-                base_url_input.placeholder = "Using Google Cloud ADC authentication"
+                base_url_input.value = cfg.get("base_url") or ""
+                base_url_input.disabled = False
+                base_url_input.placeholder = "Optional custom OpenAPI endpoint or leave blank for default"
                 api_key_input.value = ""
                 api_key_input.disabled = True
-                api_key_input.placeholder = "Google Cloud ADC credentials active"
+                api_key_input.placeholder = "Auto-generated via Google Cloud ADC"
             else:
                 self.query_one("#radio_openai", RadioButton).value = True
                 base_url_input.disabled = False
@@ -279,12 +278,11 @@ class ConnectModal(ModalScreen[dict | None]):
         error_label.styles.display = "none"
 
         if is_vertex:
-            base_url_input.disabled = True
-            base_url_input.value = ""
-            base_url_input.placeholder = "Using Google Cloud ADC authentication"
+            base_url_input.disabled = False
+            base_url_input.placeholder = "Optional custom OpenAPI endpoint or leave blank for default"
             api_key_input.disabled = True
             api_key_input.value = ""
-            api_key_input.placeholder = "Google Cloud ADC credentials active"
+            api_key_input.placeholder = "Auto-generated via Google Cloud ADC"
         else:
             base_url_input.disabled = False
             base_url_input.placeholder = "e.g. https://openrouter.ai/api/v1 or http://localhost:11434/v1"
@@ -365,7 +363,7 @@ class ConnectModal(ModalScreen[dict | None]):
                 "preset_name": target_preset,
                 "provider_type": "vertex",
                 "use_vertex_ai": True,
-                "base_url": None,
+                "base_url": base_url or None,
                 "api_key": None,
                 "default_model": default_model,
             }

@@ -24,6 +24,7 @@ def compact_content(content: str) -> dict:
 
     # Break circular import of get_genai_client by importing it inside the function scope
     from agent.core.llm import get_genai_client
+    from agent.core.settings import settings
 
     try:
         prompt = read_prompt_from_file("prompts/compaction_prompt.md")
@@ -31,41 +32,55 @@ def compact_content(content: str) -> dict:
         logger.error(f"Failed to read compaction prompt file: {e}")
         return {"success": False, "content": content}
 
+    # Use SMALL_MODEL with fallback to main model
+    primary_model = getattr(settings, "RAVEN_SMALL_MODEL", None) or getattr(settings, "SMALL_MODEL", None)
+    fallback_model = getattr(settings, "RAVEN_MODEL", None) or getattr(settings, "MODEL", None)
+    models_to_try = []
+    if primary_model:
+        models_to_try.append(primary_model)
+    if fallback_model and fallback_model not in models_to_try:
+        models_to_try.append(fallback_model)
+
+    if not models_to_try:
+        logger.error("No model configured for compaction")
+        return {"success": False, "content": content}
+
     max_retries = 3
     tried = 1
     while tried <= max_retries:
-        try:
-            response = get_genai_client().chat.completions.create(
-                model="google/gemini-2.5-flash",
-                messages=[
-                    {"role": "system", "content": prompt},
-                    {"role": "user", "content": f"Memory:\n {content}"}
-                ],
-                stream=False,
-            )
-            compacted_content = response.choices[0].message.content
-            if not compacted_content:
-                tried += 1
-                continue
-
-            token_count_original = count_tokens(content)
-            token_count_compacted = count_tokens(compacted_content)
-
-            if token_count_original < token_count_compacted:
-                logger.warning(
-                    f"Compaction attempt {tried} produced larger text "
-                    f"({token_count_compacted} tokens) than original ({token_count_original} tokens). Retrying..."
+        for model in models_to_try:
+            try:
+                response = get_genai_client().chat.completions.create(
+                    model=model,
+                    messages=[
+                        {"role": "system", "content": prompt},
+                        {"role": "user", "content": f"Memory:\n {content}"}
+                    ],
+                    stream=False,
                 )
-                tried += 1
-            else:
-                return {"success": True, "content": compacted_content}
-        except Exception as error:
-            error_str = str(error)
-            logger.warning(f"Compaction attempt {tried} failed: {error_str}")
-            if "429" in error_str or "exhausted" in error_str or "quota" in error_str:
-                tried += 1
-            else:
-                return {"success": False, "content": content}
+                compacted_content = response.choices[0].message.content
+                if not compacted_content:
+                    tried += 1
+                    continue
+
+                token_count_original = count_tokens(content)
+                token_count_compacted = count_tokens(compacted_content)
+
+                if token_count_original < token_count_compacted:
+                    logger.warning(
+                        f"Compaction attempt {tried} produced larger text "
+                        f"({token_count_compacted} tokens) than original ({token_count_original} tokens). Retrying..."
+                    )
+                    tried += 1
+                else:
+                    return {"success": True, "content": compacted_content}
+            except Exception as error:
+                error_str = str(error)
+                logger.warning(f"Compaction attempt {tried} failed: {error_str}")
+                if "429" in error_str or "exhausted" in error_str or "quota" in error_str:
+                    tried += 1
+                else:
+                    return {"success": False, "content": content}
 
     return {"success": False, "content": content}
 
@@ -166,7 +181,7 @@ def compact_conversation_history(messages: list[dict], custom_instructions: str 
             "error": "No meaningful history to compact."
         }
 
-    from agent.core.llm import get_genai_client
+        from agent.core.llm import get_genai_client
     from agent.core.settings import settings
 
     try:
@@ -179,7 +194,10 @@ def compact_conversation_history(messages: list[dict], custom_instructions: str 
     if custom_instructions and custom_instructions.strip():
         user_prompt += f"\n\nADDITIONAL FOCUS INSTRUCTIONS FROM USER:\n{custom_instructions.strip()}"
 
-    target_model = model_name or settings.RAVEN_MODEL
+    # Use SMALL_MODEL with fallback to main model
+    primary_model = getattr(settings, "RAVEN_SMALL_MODEL", None) or getattr(settings, "SMALL_MODEL", None)
+    fallback_model = model_name or getattr(settings, "RAVEN_MODEL", None) or getattr(settings, "MODEL", None)
+    target_model = primary_model or fallback_model
 
     try:
         response = get_genai_client().chat.completions.create(

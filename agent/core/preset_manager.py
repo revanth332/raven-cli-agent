@@ -108,7 +108,7 @@ class PresetManager:
 
         preset_data = {
             "provider_type": "vertex" if use_vertex else "openai",
-            "base_url": None if use_vertex else (base_url.strip() if isinstance(base_url, str) else base_url),
+            "base_url": (base_url.strip() if isinstance(base_url, str) and base_url.strip() else None),
             "api_key": None if use_vertex else (api_key.strip() if isinstance(api_key, str) else api_key),
             "default_model": config.get("default_model") or (
                 "google/gemini-2.5-flash" if use_vertex else "anthropic/claude-3.7-sonnet"
