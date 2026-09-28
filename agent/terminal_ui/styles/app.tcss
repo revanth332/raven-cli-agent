@@ -1,0 +1,198 @@
+Screen {
+    color: #E2E8F0;      /* Crisp, bright off-white text */
+}
+
+Header {
+    color: #090D16;      /* High-contrast dark text inside the header */
+    text-style: bold;
+    height: 3;           /* Makes the header slightly taller and cleaner */
+    content-align: center middle;
+}
+Footer {
+    background: #05070B; /* Sleek black footer */
+    color: #64748B;      /* Dim keybind labels */
+}
+
+#workspace_container {
+    height: 1fr;
+    width: 100%;
+}
+
+#main_container {
+    height: 1fr;
+    width: 1fr;
+}
+
+#main_container.centered {
+    height: 1fr;
+    align: center middle;
+}
+
+#main_container.centered #history {
+    height: auto;
+    max-height: 50%;
+    width: 60%;
+    min-width: 50;
+    align: center middle;
+    content-align: center middle;
+    margin-bottom: 1;
+}
+
+#main_container.centered #bottom_bar {
+    dock: none;
+    height: auto;
+    width: 60%;
+    min-width: 50;
+    align: center middle;
+    padding: 0;
+    margin: 1 0;
+}
+
+#welcome-container {
+    align: center middle;
+    content-align: center middle;
+    width: 100%;
+    height: auto;
+}
+
+.logo-text {
+    width: auto;
+    height: auto;
+    content-align: center middle;
+}
+
+.version-text {
+    width: auto;
+    height: auto;
+    content-align: center middle;
+    text-align: center;
+    padding-top: 1;
+}
+
+#history {
+    height: 1fr;
+    padding: 1 2;
+    background: transparent;
+    overflow-y: scroll;
+    scrollbar-size: 0 0;
+}
+
+.message {
+    margin: 1 0;
+    padding: 1 1;
+    border-title-align: left;
+}
+
+.user-msg {
+    color: #F8FAFC;
+    background: #1e1e1e;
+    border: none;
+    border-left: heavy #06B6D4;
+    padding: 1 2;
+}
+
+.raven-msg {
+    color: #ECFDF5;
+}
+
+ChatInput {
+    border: none;
+    border-left: heavy #06B6D4;
+    margin: 0;
+    padding: 1 2;
+    color: #F8FAFC;         /* Bright text while typing */
+    height: auto;
+    min-height: 2;
+    max-height: 10;
+    background: #1e1e1e;
+}
+
+ChatInput > .text-area--background {
+    background: transparent;
+}
+
+ChatInput:focus {
+    border: none;
+    border-left: heavy #22D3EE;
+    background: #1e1e1e;
+}
+
+ChatInput:disabled {
+    opacity: 0.6;
+    border-left: heavy #64748B;
+}
+
+#input_status {
+    border: none;
+    border-left: heavy #06B6D4;
+    margin: 0;
+    padding: 0 2 1 2;
+    height: auto;
+    background: #1e1e1e;
+}
+
+#permission_bar {
+    background: #1e1e1e;
+    border: none;
+    border-left: heavy #EF4048;
+    padding: 1 2;
+    margin-bottom: 1;
+    height: auto;
+}
+
+#perm-buttons {
+    height: auto;
+    margin-top: 1;
+}
+
+#perm-buttons Button {
+    margin-right: 3;
+    min-width: 14;
+    height: 1;
+    background: transparent;
+    border: none;
+    text-style: bold;
+}
+#perm-buttons Button:hover {
+    background: rgba(255, 255, 255, 0.1);
+}
+#perm-buttons #yes {
+    color: #10B981;
+    background: transparent;
+    border: none;
+}
+#perm-buttons #no {
+    color: #FACC15;
+    background: transparent;
+    border: none;
+}
+#thinking_container {
+    height: auto;
+    border: none;
+    margin-bottom: 1;
+    padding: 0 1;
+}
+#bottom_bar {
+    dock: bottom;
+    height: auto;
+    padding: 1 2 1 2;
+}
+#autocomplete_list {
+    display: none;
+    max-height: 10;
+    border: none;
+    border-left: heavy #06B6D4;
+    margin: 0;
+    padding: 1 0;
+    background: #1e1e1e;
+    scrollbar-size: 1 1;
+}
+
+#autocomplete_list > .option-list--option {
+    padding: 0 2;
+}
+
+#autocomplete_list > .option-list--option-highlighted {
+    background: #2d3748;
+    color: #38BDF8;
+}

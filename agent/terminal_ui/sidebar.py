@@ -2,6 +2,7 @@
 Sidebar component for displaying token, context, and cost consumption metrics in Textual TUI.
 """
 
+from pathlib import Path
 from textual.containers import Vertical
 from textual.widgets import Static
 from rich.panel import Panel
@@ -10,21 +11,15 @@ from rich.console import Group
 from typing import Dict, Any
 
 
+_SIDEBAR_CSS = (Path(__file__).parent / "styles" / "sidebar.tcss").read_text(encoding="utf-8")
+
+
 class ConsumptionSidebar(Vertical):
     """
     TUI Sidebar widget displaying real-time token usage, context fill ratio, and session cost analytics.
     """
 
-    DEFAULT_CSS = """
-    ConsumptionSidebar {
-        width: 38;
-        min-width: 32;
-        max-width: 44;
-        height: 100%;
-        background: #1e1e1e;
-        padding: 1 1;
-    }
-    """
+    DEFAULT_CSS = _SIDEBAR_CSS
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)

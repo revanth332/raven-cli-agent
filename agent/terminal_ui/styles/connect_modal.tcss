@@ -1,0 +1,118 @@
+ConnectModal {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.7);
+}
+
+#modal_container {
+    width: 74;
+    height: auto;
+    max-height: 90%;
+    background: #1e1e1e;
+    border: heavy #06B6D4;
+    padding: 1 2;
+}
+
+#modal_title {
+    text-style: bold;
+    color: #06B6D4;
+    margin-bottom: 1;
+    content-align: center middle;
+    text-align: center;
+}
+
+.field_label {
+    color: #94A3B8;
+    margin-top: 1;
+    margin-bottom: 0;
+    text-style: bold;
+}
+
+.field_input {
+    margin-bottom: 1;
+    background: #121212;
+    border: none;
+    color: #F8FAFC;
+}
+
+.field_input:disabled {
+    opacity: 0.55;
+    background: #18181b;
+    color: #64748B;
+}
+
+#preset_select {
+    margin-bottom: 1;
+    background: #121212;
+    border: round #334155;
+    color: #F8FAFC;
+}
+
+#provider_type_radios {
+    height: auto;
+    background: transparent;
+    border: none;
+    margin-bottom: 1;
+    layout: horizontal;
+}
+
+#provider_type_radios > RadioButton {
+    background: transparent;
+    padding: 0 1;
+    margin-right: 2;
+    color: #E2E8F0;
+}
+
+#error_label {
+    color: #EF4444;
+    text-style: italic;
+    margin-top: 0;
+    margin-bottom: 1;
+    display: none;
+}
+
+#button_container {
+    height: auto;
+    align: right middle;
+    margin-top: 1;
+}
+
+Button {
+    margin-left: 1;
+    min-width: 10;
+    height: 3;
+    padding: 0 1;
+}
+
+#cancel_btn {
+    background: transparent;
+    color: #E2E8F0;
+    border: round #64748B;
+}
+
+#delete_btn {
+    background: transparent;
+    color: #EF4444;
+    border: round #EF4444;
+    min-width: 13;
+}
+
+#delete_btn:disabled {
+    color: #475569;
+    border: round #334155;
+    opacity: 0.4;
+}
+
+#save_btn {
+    background: transparent;
+    color: #38BDF8;
+    border: round #0284C7;
+    min-width: 15;
+    text-style: bold;
+}
+
+#submit_btn {
+    color: #FFFFFF;
+    border: round #10B981;
+    min-width: 11;
+    text-style: bold;
+}

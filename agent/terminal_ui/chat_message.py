@@ -1,5 +1,6 @@
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, List, Optional
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
@@ -510,15 +511,13 @@ class ResponseTimeline:
         return True
 
 
+_CHAT_MESSAGE_CSS = (Path(__file__).parent / "styles" / "chat_message.tcss").read_text(encoding="utf-8")
+
+
 class ToolResultWidget(Static):
     """Interactive widget for an individual tool result preview that expands/collapses on click."""
 
-    DEFAULT_CSS = """
-    ToolResultWidget {
-        height: auto;
-        width: 100%;
-    }
-    """
+    DEFAULT_CSS = _CHAT_MESSAGE_CSS
 
     def __init__(self, block: ToolResultBlock, parent_widget: Any = None, **kwargs):
         super().__init__(**kwargs)
@@ -546,84 +545,7 @@ class ToolResultWidget(Static):
 
 
 class ChatMessageWidget(Vertical):
-    DEFAULT_CSS = """
-    ChatMessageWidget {
-        margin: 1 0;
-        padding: 1 2;
-        height: auto;
-        width: 100%;
-        background: #1e1e1e;
-    }
-
-    ChatMessageWidget.user-msg {
-        color: #F8FAFC;
-        background: #1e1e1e;
-        border-left: heavy #06B6D4;
-    }
-
-    ChatMessageWidget.raven-msg {
-        color: #ECFDF5;
-        background: #1e1e1e;
-        border-left: heavy #10B981;
-    }
-
-    .msg-header {
-        height: 1;
-        width: 100%;
-        margin-bottom: 1;
-    }
-
-    .msg-role {
-        text-style: bold;
-        height: 1;
-        width: 1fr;
-    }
-
-    .copy-btn {
-        width: auto;
-        height: 1;
-        padding: 0 1;
-        color: #64748B;
-        background: transparent;
-        text-align: right;
-        content-align: right middle;
-    }
-
-    .copy-btn:hover {
-        color: #38BDF8;
-        background: #27272a;
-    }
-
-    .img-badge {
-        color: #06B6D4;
-        text-style: bold;
-        height: auto;
-        margin-bottom: 1;
-    }
-
-    .msg-content {
-        height: auto;
-        width: 100%;
-    }
-
-    .timeline-container {
-        height: auto;
-        width: 100%;
-    }
-
-    .timeline-item {
-        height: auto;
-        width: 100%;
-    }
-
-    .model-footer {
-        color: #64748B;
-        text-style: dim;
-        margin-top: 1;
-        height: auto;
-        width: 100%;
-    }
-    """
+    DEFAULT_CSS = _CHAT_MESSAGE_CSS
 
     def __init__(
         self,

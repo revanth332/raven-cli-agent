@@ -19,75 +19,7 @@ class SessionSelectModal(ModalScreen[str]):
     Returns selected session_id or None if dismissed.
     """
 
-    DEFAULT_CSS = """
-    SessionSelectModal {
-        align: center middle;
-        background: rgba(0, 0, 0, 0.6);
-    }
-
-    #session_modal_container {
-        width: 70%;
-        max-width: 80;
-        height: 65%;
-        background: #1e1e1e;
-        border: none;
-        padding: 1 2;
-    }
-
-    #session_modal_title {
-        text-align: center;
-        margin-bottom: 1;
-        color: #06B6D4;
-        text-style: bold;
-    }
-
-    #session_search_input {
-        margin-bottom: 1;
-        background: #252526;
-        border: solid #06B6D4;
-    }
-
-    #session_option_list {
-        height: 1fr;
-        background: #1e1e1e;
-        border: none;
-        margin-bottom: 1;
-    }
-
-    #session_option_list > .option-list--option {
-        padding: 1 2;
-    }
-
-    #session_option_list > .option-list--option-highlighted {
-        background: #2d3748;
-    }
-
-    #session_modal_actions {
-        height: auto;
-        align: right middle;
-        margin-top: 1;
-    }
-
-    Button {
-        margin-left: 1;
-        min-width: 12;
-        height: 3;
-        padding: 0 1;
-    }
-
-    #btn_cancel {
-        background: transparent;
-        color: #E2E8F0;
-        border: round #64748B;
-    }
-
-
-    #btn_delete {
-        color: #FFFFFF;
-        border: round #EF4048;
-        text-style: bold;
-    }
-    """
+    CSS_PATH = "styles/session_select_modal.tcss"
 
     def compose(self) -> ComposeResult:
         with Vertical(id="session_modal_container"):
