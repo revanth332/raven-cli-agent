@@ -181,7 +181,7 @@ def compact_conversation_history(messages: list[dict], custom_instructions: str 
             "error": "No meaningful history to compact."
         }
 
-        from agent.core.llm import get_genai_client
+    from agent.core.llm import get_genai_client
     from agent.core.settings import settings
 
     try:
