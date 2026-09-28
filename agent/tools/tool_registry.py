@@ -3,6 +3,12 @@ from agent.tools.file_tools import find_file,read_file,create_file,patch_file,se
 from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff,get_git_log
 from agent.tools.checkpoint_tools import create_checkpoint,rollback_checkpoint,list_checkpoints
 from agent.tools.miscellaneous_tools import execute_command,get_current_timestamp
+from agent.tools.process_tools import (
+    start_background_process,
+    check_process_status,
+    stop_background_process,
+    list_background_processes,
+)
 from agent.tools.web_tools import web_search,extract_content_from_web_links
 from agent.core.indexer import search_codebase
 
@@ -258,6 +264,92 @@ raven_tools = [
                 "required": [
                     "command"
                 ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "start_background_process",
+            "description": "Starts a long-running process (dev server, test runner, watcher, build daemon) in the background without blocking the agent harness.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to launch in the background (e.g., 'npm run dev', 'python app.py')."
+                    },
+                    "process_name": {
+                        "type": "string",
+                        "description": "Optional human-readable identifier for the process (e.g., 'vite-server')."
+                    },
+                    "working_dir": {
+                        "type": "string",
+                        "description": "Optional working directory where the process command executes."
+                    }
+                },
+                "required": [
+                    "command"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "check_process_status",
+            "description": "Checks the status, health, and recent log outputs of a background process by handle or PID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "handle_or_pid": {
+                        "type": "string",
+                        "description": "The handle (e.g. 'process_0') or PID of the background process."
+                    },
+                    "tail_lines": {
+                        "type": "integer",
+                        "description": "Number of recent stdout/stderr log lines to retrieve (default: 50).",
+                        "default": 50
+                    }
+                },
+                "required": [
+                    "handle_or_pid"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_background_process",
+            "description": "Stops and terminates a running background process tree by handle or PID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "handle_or_pid": {
+                        "type": "string",
+                        "description": "The handle or PID of the background process to terminate."
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Whether to forcefully kill the process tree (SIGKILL/taskkill /F). Defaults to false.",
+                        "default": False
+                    }
+                },
+                "required": [
+                    "handle_or_pid"
+                ]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_background_processes",
+            "description": "Lists all active and managed background processes with handles, PIDs, and running statuses.",
+            "parameters": {
+                "type": "object",
+                "properties": {}
             }
         }
     },
@@ -537,6 +629,30 @@ TOOL_REGISTRY = {
         "fn": execute_command, 
         "display_name": "Execute", 
         "display_arg": "command", 
+        "ignore_display": False
+    },
+    "start_background_process": {
+        "fn": start_background_process,
+        "display_name": "Start Process",
+        "display_arg": "command",
+        "ignore_display": False
+    },
+    "check_process_status": {
+        "fn": check_process_status,
+        "display_name": "Check Process",
+        "display_arg": "handle_or_pid",
+        "ignore_display": False
+    },
+    "stop_background_process": {
+        "fn": stop_background_process,
+        "display_name": "Stop Process",
+        "display_arg": "handle_or_pid",
+        "ignore_display": False
+    },
+    "list_background_processes": {
+        "fn": list_background_processes,
+        "display_name": "List Processes",
+        "display_arg": None,
         "ignore_display": False
     },
     "get_current_timestamp": {

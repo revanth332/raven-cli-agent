@@ -553,6 +553,17 @@ class RavenTUI(App):
                                     disp_val = ""
                                     if name == "patch_file":
                                         disp_val = targs.get("file_path", "")
+                                    elif name == "read_file":
+                                        fpath = targs.get("file_path", "")
+                                        s_line = targs.get("start_line")
+                                        l_count = targs.get("line_count")
+                                        if s_line is not None and int(s_line) > 1 or (l_count is not None and int(l_count) != 250):
+                                            start_val = int(s_line) if s_line else 1
+                                            count_val = int(l_count) if l_count else 250
+                                            end_val = start_val + count_val - 1
+                                            disp_val = f"{fpath}:{start_val}-{end_val}"
+                                        else:
+                                            disp_val = fpath
                                     elif isinstance(arg_keys, str):
                                         disp_val = targs.get(arg_keys, "")
                                     elif isinstance(arg_keys, list):
@@ -1273,17 +1284,28 @@ class RavenTUI(App):
                         display_val = ""
                         if tool_name == "patch_file":
                             display_val = tool_args.get("file_path", "")
+                        elif tool_name == "read_file":
+                            fpath = tool_args.get("file_path", "")
+                            s_line = tool_args.get("start_line")
+                            l_count = tool_args.get("line_count")
+                            if s_line is not None and int(s_line) > 1 or (l_count is not None and int(l_count) != 250):
+                                start_val = int(s_line) if s_line else 1
+                                count_val = int(l_count) if l_count else 250
+                                end_val = start_val + count_val - 1
+                                display_val = f"{fpath}:{start_val}-{end_val}"
+                            else:
+                                display_val = fpath
                         elif isinstance(arg_keys, str):
                             display_val = tool_args.get(arg_keys, "")
                         elif isinstance(arg_keys, list):
                             display_val = ",".join(str(tool_args.get(key, "")) for key in arg_keys)
 
-                        if tool_name in ["execute_command", "commit_staged_git_changes"]:
+                        if tool_name in ["execute_command", "start_background_process", "commit_staged_git_changes"]:
                             bypass_prompt = False
                             if settings.RAVEN_AUTO_APPROVE:
                                 if tool_name == "commit_staged_git_changes":
                                     bypass_prompt = True
-                                elif tool_name == "execute_command":
+                                elif tool_name in ["execute_command", "start_background_process"]:
                                     cmd_str = tool_args.get("command", "")
                                     if not is_command_dangerous(cmd_str):
                                         bypass_prompt = True

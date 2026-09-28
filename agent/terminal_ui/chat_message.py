@@ -154,16 +154,20 @@ def format_command_result(command: str, raw_output: str, expanded: bool = False)
     return result_text
 
 
-def format_read_result(file_path: str, content: str, expanded: bool = False) -> Text:
-    """Formats file read results showing line count and expandable content."""
+def format_read_result(file_path: str, content: str, expanded: bool = False, args: Optional[dict] = None) -> Text:
+    """Formats file read results showing start/end line range, line count, and expandable content."""
     result_text = Text()
     content_str = str(content)
     if content_str.startswith("Error:") or content_str.startswith("ACCESS DENIED"):
         result_text.append(f"   |_ {content_str.strip()}\n", style="bold red")
         return result_text
 
-    lines = content_str.splitlines()
-    num_lines = len(lines)
+    if content_str.startswith("[File '") and content_str.endswith("is empty]"):
+        result_text.append("   |_ Empty file (0 lines)\n", style="dim yellow")
+        return result_text
+
+    raw_lines = [l for l in content_str.splitlines() if not l.startswith("[Showing lines ")]
+    num_lines = len(raw_lines)
     size_bytes = len(content_str.encode("utf-8", errors="ignore"))
     if size_bytes < 1024:
         size_str = f"{size_bytes} B"
@@ -172,12 +176,34 @@ def format_read_result(file_path: str, content: str, expanded: bool = False) -> 
     else:
         size_str = f"{size_bytes / (1024 * 1024):.1f} MB"
 
-    line_word = "line" if num_lines == 1 else "lines"
-    result_text.append(f"   |_ Read {num_lines} {line_word} ({size_str})\n", style="dim white")
+    tool_args = args or {}
+    start_line = int(tool_args.get("start_line", 1))
 
-    if expanded and lines:
+    # Check for pagination banner in output: e.g. [Showing lines 1-250 of 1,200. Use start_line=251 to read further]
+    pagination_match = re.search(r"\[Showing lines (\d+)-(\d+) of ([0-9,]+)", content_str)
+    if pagination_match:
+        s_line = int(pagination_match.group(1))
+        e_line = int(pagination_match.group(2))
+        total_str = pagination_match.group(3)
+        result_text.append(f"   |_ Read lines {s_line}-{e_line} of {total_str} ({size_str})\n", style="dim white")
+    else:
+        # Check first and last line number markers in numbered output: e.g. "  42 | ..."
+        first_num_match = re.match(r"^\s*(\d+)\s*\|", raw_lines[0]) if raw_lines else None
+        last_num_match = re.match(r"^\s*(\d+)\s*\|", raw_lines[-1]) if raw_lines else None
+        if first_num_match and last_num_match:
+            s_line = int(first_num_match.group(1))
+            e_line = int(last_num_match.group(1))
+            result_text.append(f"   |_ Read lines {s_line}-{e_line} ({num_lines} lines, {size_str})\n", style="dim white")
+        else:
+            end_line = start_line + max(0, num_lines - 1)
+            if num_lines > 0:
+                result_text.append(f"   |_ Read lines {start_line}-{end_line} ({size_str})\n", style="dim white")
+            else:
+                result_text.append(f"   |_ Read 0 lines ({size_str})\n", style="dim white")
+
+    if expanded and raw_lines:
         limit = 50
-        visible_lines = lines[:limit]
+        visible_lines = raw_lines[:limit]
         for l in visible_lines:
             clean_l = l if len(l) <= 100 else l[:97] + "..."
             result_text.append(f"       {clean_l}\n", style="dim white")
@@ -343,7 +369,7 @@ def format_tool_result_preview(
         return format_command_result(cmd, str(result), expanded=expanded)
     elif tool_name == "read_file":
         file_path = args.get("file_path", "")
-        return format_read_result(file_path, str(result), expanded=expanded)
+        return format_read_result(file_path, str(result), expanded=expanded, args=args)
     elif tool_name == "find_file":
         file_name = args.get("file_name", "")
         return format_find_result(file_name, str(result), expanded=expanded)

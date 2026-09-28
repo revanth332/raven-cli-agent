@@ -39,7 +39,7 @@ You have access to `search_codebase`. If you need to know how a specific functio
 
 - Avoid Interactive Hangs: The `execute_command` tool captures output silently and has no access to user input (`stdin`). Any command that triggers an interactive prompt (like Y/N confirmations or package setups) will cause the system to freeze indefinitely.
 - Auto-Accept Where Possible: Always append flags to bypass interactive prompts automatically if the tool supports it (e.g., use `npm install -y`, `npm create vite@latest --yes`, `apt-get install -y`).
-- Never Run Continuous Processes: Do NOT run development servers (like `npm run dev`, `python app.py`, or `nodemon`) because they do not terminate, causing the system to freeze forever waiting for an exit code. To check for code errors, use commands that terminate automatically (e.g., `npm run build`, `npm run lint`, or unit tests).
+- Background & Continuous Processes: Do NOT run continuous/long-running processes (like `npm run dev`, `python app.py`, or watchers) via `execute_command`, because `execute_command` waits synchronously and will freeze. Instead, ALWAYS use `start_background_process` for servers, daemons, watchers, and continuous services. Use `check_process_status` to inspect logs and verify health, and `stop_background_process` when done.
 
 ## CODING INSTRUCTIONS:
 
