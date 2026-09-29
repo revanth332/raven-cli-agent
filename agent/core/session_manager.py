@@ -22,12 +22,19 @@ def get_sessions_dir() -> Path:
     return sessions_dir
 
 
-def create_session(model_name: str = "gpt-4o", session_id: Optional[str] = None, title: str = "New Conversation") -> Dict[str, Any]:
+def create_session(model_name: str = "gpt-4o", session_id: Optional[str] = None, title: str = "New Conversation", project_name: Optional[str] = None) -> Dict[str, Any]:
     """
     Creates a new session dictionary in memory without creating an empty file on disk until messages are added.
     """
     if not session_id:
         session_id = str(uuid.uuid4())[:8]
+
+    if not project_name:
+        try:
+            from agent.utils import get_active_project_name
+            project_name = get_active_project_name()
+        except Exception:
+            pass
 
     now_iso = datetime.now(timezone.utc).isoformat()
     session_data = {
@@ -36,6 +43,7 @@ def create_session(model_name: str = "gpt-4o", session_id: Optional[str] = None,
         "created_at": now_iso,
         "updated_at": now_iso,
         "model_name": model_name,
+        "project_name": project_name,
         "messages": []
     }
     set_active_session_id(session_id)
@@ -55,6 +63,13 @@ def save_session(session_data: Dict[str, Any], force: bool = False) -> None:
     if not messages and not force:
         # Do not persist empty waste sessions
         return
+
+    if "project_name" not in session_data:
+        try:
+            from agent.utils import get_active_project_name
+            session_data["project_name"] = get_active_project_name()
+        except Exception:
+            pass
 
     session_data["updated_at"] = datetime.now(timezone.utc).isoformat()
 
@@ -114,6 +129,7 @@ def list_sessions() -> List[Dict[str, Any]]:
                     "created_at": data.get("created_at", ""),
                     "updated_at": data.get("updated_at", ""),
                     "model_name": data.get("model_name", "gpt-4o"),
+                    "project_name": data.get("project_name", ""),
                     "message_count": len(msgs),
                 })
         except Exception:

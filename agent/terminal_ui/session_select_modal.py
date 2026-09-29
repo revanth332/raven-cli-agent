@@ -47,8 +47,12 @@ class SessionSelectModal(ModalScreen[str]):
             sid = sess.get("session_id", "unknown")
             title = sess.get("title", "Untitled")
             msgs = sess.get("message_count", 0)
+            project_name = sess.get("project_name", "")
 
-            label = f"[bold cyan]{title}[/bold cyan] [dim]({sid})[/dim]\n │ Messages: {msgs}"
+            if project_name:
+                label = f"[bold cyan]{title}[/bold cyan] - [dim white]{project_name}[/dim white] [dim]({sid})[/dim]\n │ Messages: {msgs}"
+            else:
+                label = f"[bold cyan]{title}[/bold cyan] [dim]({sid})[/dim]\n │ Messages: {msgs}"
             opt_list.add_option(Option(label, id=sid))
 
         if sessions:
@@ -62,7 +66,7 @@ class SessionSelectModal(ModalScreen[str]):
 
         filtered = [
             s for s in self.all_sessions
-            if query in s.get("title", "").lower() or query in s.get("session_id", "").lower()
+            if query in s.get("title", "").lower() or query in s.get("session_id", "").lower() or query in s.get("project_name", "").lower()
         ]
         self.populate_options(filtered)
 
@@ -108,7 +112,9 @@ class SessionSelectModal(ModalScreen[str]):
             if query:
                 filtered = [
                     s for s in self.all_sessions
-                    if query in s.get("title", "").lower() or query in s.get("session_id", "").lower()
+                    if query in s.get("title", "").lower()
+                    or query in s.get("session_id", "").lower()
+                    or query in s.get("project_name", "").lower()
                 ]
                 self.populate_options(filtered)
             else:
