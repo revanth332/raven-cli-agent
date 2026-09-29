@@ -172,6 +172,19 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.04), 0 1px 2px -1px rgba(0, 0, 0, 0.03);
         }
 
+        .chart-card-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.15rem;
+            flex-wrap: wrap;
+            gap: 0.5rem;
+        }
+
+        .chart-card-header .chart-title {
+            margin-bottom: 0;
+        }
+
         .chart-title {
             font-size: 0.975rem;
             font-weight: 600;
@@ -333,6 +346,11 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             color: #ffffff;
         }
 
+        .btn-group-sm .btn-toggle {
+            padding: 0.25rem 0.65rem;
+            font-size: 0.75rem;
+        }
+
         .section-header {
             font-size: 1.1rem;
             font-weight: 700;
@@ -461,11 +479,19 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 </div>
             </div>
 
-            <!-- Section 3: Consumption & Volume Analytics -->
-            <div class="section-header">📊 Token Consumption & Volume</div>
+            <!-- Section 3: Consumption & Cost Analytics -->
+            <div class="section-header">📊 Token Consumption & Cost</div>
             <div class="charts-grid">
                 <div class="chart-card">
-                    <div class="chart-title">📊 Daily Token Consumption per Model</div>
+                    <div class="chart-card-header">
+                        <div class="chart-title">📊 Daily Token Consumption per Model</div>
+                        <div class="btn-group btn-group-sm">
+                            <button id="btn-tokens-7d" class="btn-toggle active" onclick="setTokenRange('7d')">7D</button>
+                            <button id="btn-tokens-14d" class="btn-toggle" onclick="setTokenRange('14d')">14D</button>
+                            <button id="btn-tokens-30d" class="btn-toggle" onclick="setTokenRange('30d')">30D</button>
+                            <button id="btn-tokens-all" class="btn-toggle" onclick="setTokenRange('all')">All</button>
+                        </div>
+                    </div>
                     <div class="chart-wrapper">
                         <canvas id="tokensChart"></canvas>
                     </div>
@@ -479,9 +505,15 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             </div>
 
             <div class="chart-card" style="margin-bottom: 2rem;">
-                <div class="chart-title">📈 Daily Request Volume</div>
+                <div class="chart-card-header">
+                    <div class="chart-title">💰 Daily Cost Trajectory</div>
+                    <div class="btn-group btn-group-sm">
+                        <button id="btn-cost-usd" class="btn-toggle active" onclick="setCostCurrency('USD')">$ USD</button>
+                        <button id="btn-cost-inr" class="btn-toggle" onclick="setCostCurrency('INR')">₹ INR</button>
+                    </div>
+                </div>
                 <div class="chart-wrapper">
-                    <canvas id="requestsChart"></canvas>
+                    <canvas id="costTrajectoryChart"></canvas>
                 </div>
             </div>
 
@@ -526,6 +558,8 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
 
         let latencyUnit = 'ms'; // 'ms' | 's'
         let activeModelFilter = 'all';
+        let tokenDateRange = '7d'; // '7d' | '14d' | '30d' | 'all'
+        let costCurrency = 'USD'; // 'USD' | 'INR'
         const chartInstances = {};
 
         function destroyChart(id) {
@@ -540,6 +574,26 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             latencyUnit = unit;
             document.getElementById('btn-unit-ms').classList.toggle('active', unit === 'ms');
             document.getElementById('btn-unit-s').classList.toggle('active', unit === 's');
+            renderDashboard();
+        }
+
+        function setTokenRange(range) {
+            if (tokenDateRange === range) return;
+            tokenDateRange = range;
+            ['7d', '14d', '30d', 'all'].forEach(r => {
+                const btn = document.getElementById('btn-tokens-' + r);
+                if (btn) btn.classList.toggle('active', r === range);
+            });
+            renderDashboard();
+        }
+
+        function setCostCurrency(curr) {
+            if (costCurrency === curr) return;
+            costCurrency = curr;
+            const btnUsd = document.getElementById('btn-cost-usd');
+            const btnInr = document.getElementById('btn-cost-inr');
+            if (btnUsd) btnUsd.classList.toggle('active', curr === 'USD');
+            if (btnInr) btnInr.classList.toggle('active', curr === 'INR');
             renderDashboard();
         }
 
@@ -984,7 +1038,13 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
 
             // CHART 5: Daily Token Consumption per Model
             destroyChart('tokensChart');
-            const dailyTotals = dates.map(d => {
+
+            let tokenDates = dates;
+            if (tokenDateRange === '7d') tokenDates = dates.slice(-7);
+            else if (tokenDateRange === '14d') tokenDates = dates.slice(-14);
+            else if (tokenDateRange === '30d') tokenDates = dates.slice(-30);
+
+            const dailyTotals = tokenDates.map(d => {
                 let daySum = 0;
                 activeModels.forEach(m => {
                     if (rawData[d] && rawData[d][m]) {
@@ -995,39 +1055,43 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 return daySum;
             });
 
+            // Elevate line 8% above the bars to prevent visual collision
+            const ELEVATION_FACTOR = 1.08;
+            const elevatedDailyTotals = dailyTotals.map(val => val > 0 ? Math.round(val * ELEVATION_FACTOR) : 0);
+
             const totalLineDataset = {
                 type: 'line',
                 label: 'Total Daily Tokens (Trend)',
-                data: dailyTotals,
+                data: elevatedDailyTotals,
                 borderColor: '#f59e0b',
-                backgroundColor: 'rgba(245, 158, 11, 0.16)',
+                backgroundColor: 'rgba(245, 158, 11, 0.14)',
                 borderWidth: 2.5,
                 fill: true,
                 tension: 0.38,
-                pointRadius: dates.length === 1 ? 5 : 3.5,
+                pointRadius: tokenDates.length === 1 ? 5 : 3.5,
                 pointHoverRadius: 6,
                 pointBackgroundColor: '#f59e0b',
                 pointBorderColor: '#ffffff',
                 pointBorderWidth: 2,
-                order: 0
+                order: 2 // Render line and area fill behind the bars (order: 1)
             };
 
             const barDatasets = activeModels.map(m => {
                 return {
                     type: 'bar',
                     label: m,
-                    data: dates.map(d => (rawData[d][m] ? (rawData[d][m].tokens || (rawData[d][m].prompt_tokens + rawData[d][m].completion_tokens)) : 0)),
+                    data: tokenDates.map(d => (rawData[d][m] ? (rawData[d][m].tokens || (rawData[d][m].prompt_tokens + rawData[d][m].completion_tokens)) : 0)),
                     backgroundColor: modelColorMap[m],
                     borderRadius: 4,
                     stack: 'tokens_stack',
-                    order: 1
+                    order: 1 // Drawn in front of the area fill
                 };
             });
 
             chartInstances['tokensChart'] = new Chart(document.getElementById('tokensChart').getContext('2d'), {
                 type: 'bar',
                 data: {
-                    labels: dates,
+                    labels: tokenDates,
                     datasets: [totalLineDataset, ...barDatasets]
                 },
                 options: {
@@ -1036,7 +1100,12 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     maxBarThickness: 48,
                     interaction: { mode: 'index', intersect: false },
                     scales: {
-                        x: { stacked: true, grid: { display: false }, ticks: { color: '#64748b', font: { size: 12 } } },
+                        x: {
+                            stacked: true,
+                            offset: false, // Edge-to-edge positioning
+                            grid: { display: false, offset: false },
+                            ticks: { color: '#64748b', font: { size: 12 } }
+                        },
                         y: {
                             beginAtZero: true,
                             grid: { color: 'rgba(0, 0, 0, 0.05)' },
@@ -1053,7 +1122,20 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     },
                     plugins: {
                         legend: { labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 12 } } },
-                        tooltip: { backgroundColor: '#0f172a', padding: 10, cornerRadius: 8 }
+                        tooltip: {
+                            backgroundColor: '#0f172a',
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    if (context.dataset.type === 'line') {
+                                        const actualTotal = dailyTotals[context.dataIndex] || 0;
+                                        return `Total Tokens: ${actualTotal.toLocaleString()}`;
+                                    }
+                                    return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
+                                }
+                            }
+                        }
                     }
                 }
             });
@@ -1081,38 +1163,76 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 }
             });
 
-            // CHART 7: Requests Bar Chart
-            destroyChart('requestsChart');
-            const requestDatasets = activeModels.map(m => {
-                return {
-                    label: m,
-                    data: dates.map(d => (rawData[d][m] ? rawData[d][m].requests || 0 : 0)),
-                    backgroundColor: modelColorMap[m],
-                    borderRadius: 4
-                };
+            // CHART 7: Daily Cost Trajectory Chart (replaces requestsChart)
+            destroyChart('costTrajectoryChart');
+            const isINR = (costCurrency === 'INR');
+            const currencySymbol = isINR ? '₹' : '$';
+            const multiplier = isINR ? USD_TO_INR : 1.0;
+
+            const dailyCosts = dates.map(d => {
+                let dayCost = 0.0;
+                activeModels.forEach(m => {
+                    if (rawData[d] && rawData[d][m]) {
+                        dayCost += (rawData[d][m].cost || 0.0);
+                    }
+                });
+                return Number((dayCost * multiplier).toFixed(4));
             });
 
-            chartInstances['requestsChart'] = new Chart(document.getElementById('requestsChart').getContext('2d'), {
-                type: 'bar',
+            chartInstances['costTrajectoryChart'] = new Chart(document.getElementById('costTrajectoryChart').getContext('2d'), {
+                type: 'line',
                 data: {
                     labels: dates,
-                    datasets: requestDatasets
+                    datasets: [{
+                        label: `Daily Total Cost (${currencySymbol})`,
+                        data: dailyCosts,
+                        borderColor: '#10b981',
+                        backgroundColor: 'rgba(16, 185, 129, 0.12)',
+                        borderWidth: 2.5,
+                        fill: true,
+                        tension: 0.35,
+                        pointRadius: dates.length === 1 ? 5 : 3.5,
+                        pointHoverRadius: 6,
+                        pointBackgroundColor: '#10b981',
+                        pointBorderColor: '#ffffff',
+                        pointBorderWidth: 2
+                    }]
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    maxBarThickness: 48,
+                    interaction: { mode: 'index', intersect: false },
                     scales: {
-                        x: { grid: { display: false }, ticks: { color: '#64748b', font: { size: 12 } } },
+                        x: {
+                            offset: false,
+                            grid: { display: false, offset: false },
+                            ticks: { color: '#64748b', font: { size: 12 } }
+                        },
                         y: {
                             beginAtZero: true,
                             grid: { color: 'rgba(0, 0, 0, 0.05)' },
-                            ticks: { color: '#64748b', stepSize: 1, font: { size: 11 } }
+                            ticks: {
+                                color: '#64748b',
+                                font: { size: 11 },
+                                callback: function(value) {
+                                    return currencySymbol + (isINR ? value.toFixed(2) : value.toFixed(3));
+                                }
+                            }
                         }
                     },
                     plugins: {
                         legend: { labels: { color: '#334155', boxWidth: 10, usePointStyle: true, font: { size: 12 } } },
-                        tooltip: { backgroundColor: '#0f172a', padding: 10, cornerRadius: 8 }
+                        tooltip: {
+                            backgroundColor: '#0f172a',
+                            padding: 10,
+                            cornerRadius: 8,
+                            callbacks: {
+                                label: function(context) {
+                                    const val = context.parsed.y;
+                                    return `Total Cost: ${currencySymbol}${isINR ? val.toFixed(2) : val.toFixed(4)}`;
+                                }
+                            }
+                        }
                     }
                 }
             });

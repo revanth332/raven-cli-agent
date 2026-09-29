@@ -1,5 +1,5 @@
 """
-Async pilot tests for TUI Skills Manager Modal and Create Skill Modal.
+Async pilot tests for TUI Skills Manager Modal, Create Skill Modal, and Skill Detail Modal.
 """
 
 import unittest
@@ -10,7 +10,12 @@ from pathlib import Path
 from textual.app import App, ComposeResult
 from textual.widgets import Input, TextArea, OptionList
 
-from agent.terminal_ui.skills_modal import SkillsManagerModal, CreateSkillModal
+from agent.terminal_ui.skills_modal import (
+    SkillsManagerModal,
+    CreateSkillModal,
+    SkillDetailModal,
+    ConfirmDeleteModal,
+)
 from agent.core import skills_manager
 
 
@@ -28,23 +33,31 @@ class TestUISkills(unittest.TestCase):
 
     def setUp(self):
         self.temp_dir = Path(tempfile.mkdtemp())
+        self.global_temp_dir = Path(tempfile.mkdtemp())
         self.orig_get_root = skills_manager.get_project_root
+        self.orig_get_global = skills_manager.get_global_skills_dir
+
         skills_manager.get_project_root = lambda: self.temp_dir
+        skills_manager.get_global_skills_dir = lambda: self.global_temp_dir
 
     def tearDown(self):
         skills_manager.get_project_root = self.orig_get_root
+        skills_manager.get_global_skills_dir = self.orig_get_global
         shutil.rmtree(self.temp_dir, ignore_errors=True)
+        shutil.rmtree(self.global_temp_dir, ignore_errors=True)
 
     def test_skills_manager_modal_listing(self):
         skills_manager.save_skill(
             name="skill-one",
             description="First skill description",
-            content="Content 1"
+            content="Content 1",
+            scope="project",
         )
         skills_manager.save_skill(
             name="skill-two",
             description="Second skill description",
-            content="Content 2"
+            content="Content 2",
+            scope="global",
         )
 
         app = SkillsListTestApp()
@@ -56,11 +69,13 @@ class TestUISkills(unittest.TestCase):
                 opt_list = modal.query_one("#skills_option_list", OptionList)
                 self.assertEqual(opt_list.option_count, 2)
 
-                # Test search filtering
-                search_input = modal.query_one("#skills_search_input", Input)
-                search_input.value = "skill-one"
-                await pilot.pause()
+                # Test search filtering directly
+                modal.filter_and_populate("skill-one")
                 self.assertEqual(opt_list.option_count, 1)
+
+                # Clear filter
+                modal.filter_and_populate("")
+                self.assertEqual(opt_list.option_count, 2)
 
         asyncio.run(run_test())
 

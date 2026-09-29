@@ -54,6 +54,11 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "placeholder": "/skills",
         "system_prompt": "",
     },
+    "/skill": {
+        "description": "Directly invoke an agent skill (/skill <name> [prompt])",
+        "placeholder": "/skill <name> [prompt]",
+        "system_prompt": "",
+    },
     "/add-skill": {
         "description": "Create and install a new agent skill",
         "placeholder": "/add-skill",
@@ -130,3 +135,29 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "system_prompt": EXPLAIN_PROMPT,
     },
 }
+
+
+def get_dynamic_slash_commands() -> Dict[str, Dict[str, Any]]:
+    """Returns static slash commands merged with dynamic skill slash commands."""
+    commands = dict(SLASH_COMMANDS)
+    try:
+        from agent.core.skills_manager import discover_skills
+        for s in discover_skills(include_disabled=False):
+            name = s.get("name")
+            if not name:
+                continue
+            cmd_key = f"/{name}"
+            if cmd_key not in commands:
+                desc = s.get("description", "")
+                short_desc = desc[:70] + ("..." if len(desc) > 70 else "") if desc else f"Execute {name} skill"
+                commands[cmd_key] = {
+                    "description": f"Skill: {short_desc}",
+                    "placeholder": f"/{name} [prompt]",
+                    "system_prompt": "",
+                    "is_skill": True,
+                    "skill_name": name,
+                }
+    except Exception:
+        pass
+    return commands
+

@@ -18,7 +18,8 @@ from agent.utils import (
     encode_image_file, grab_clipboard_image, create_multimodal_content,
     set_terminal_title
 )
-from agent.terminal_ui.slash_commands import SLASH_COMMANDS
+from agent.terminal_ui.slash_commands import SLASH_COMMANDS, get_dynamic_slash_commands
+from agent.core.skills_manager import get_skill
 from agent.core.vision import is_model_vision_capable, transcribe_image_with_vision_model
 from agent.core.settings import settings
 from agent.core.safety import is_command_dangerous
@@ -113,13 +114,14 @@ class RavenTUI(App):
         autocomplete = self.query_one("#autocomplete_list",OptionList)
         chat_input = self.query_one("#chat_input", ChatInput)
         if val.startswith("/") and " " not in val:
-            matches = [(cmd,info) for cmd,info in SLASH_COMMANDS.items() if cmd.startswith(val)]
+            all_commands = get_dynamic_slash_commands()
+            matches = [(cmd,info) for cmd,info in all_commands.items() if cmd.startswith(val)]
             if matches:
                 autocomplete.clear_options()
                 self.active_suggestions = [m[0] for m in matches]
 
                 for cmd,info in matches:
-                    autocomplete.add_option(Option(prompt=f"{cmd:<10} - {info['description']}"))
+                    autocomplete.add_option(Option(prompt=f"{cmd:<14} - {info['description']}"))
                 autocomplete.styles.display = "block"
                 chat_input.styles.margin = (0, 0, 0, 0)
                 return
@@ -1005,12 +1007,81 @@ class RavenTUI(App):
         if user_input.startswith("/"):
             parts = user_input.split(" ",1)
             cmd = parts[0].lower()
-            query = parts[1].lower().strip() if len(parts) > 1 else ""
+            query = parts[1].strip() if len(parts) > 1 else ""
 
-            if cmd == "/report":
+            if cmd == "/exit":
+                self.exit()
+                return
+
+            if cmd == "/connect":
+                self.open_connect_modal()
+                return
+
+            if cmd == "/usage":
+                self.open_usage_dashboard()
+                return
+
+            if cmd in ["/model", "/models"]:
+                self.open_model_select_modal()
+                return
+
+            if cmd in ["/sessions", "/switch"]:
+                self.open_session_select_modal()
+                return
+
+            if cmd == "/skills":
+                self.open_skills_modal()
+                return
+
+            if cmd == "/add-skill":
+                self.open_create_skill_modal()
+                return
+
+            if cmd == "/auto-approve":
+                self.toggle_auto_approve()
+                return
+
+            if cmd == "/new":
+                self.start_new_session()
+                return
+
+            # Direct skill invocation: /skill <name> [prompt]
+            if cmd == "/skill":
+                skill_parts = query.split(" ", 1)
+                target_skill_name = skill_parts[0].strip().lower()
+                skill_prompt = skill_parts[1].strip() if len(skill_parts) > 1 else ""
+                skill_obj = get_skill(target_skill_name)
+                if skill_obj and skill_obj.get("enabled", True):
+                    skill_body = skill_obj.get("content", "")
+                    prompt_label = skill_prompt if skill_prompt else f"Follow the guidelines and instructions for the '{target_skill_name}' skill."
+                    user_input = (
+                        f"[SYSTEM INSTRUCTION: The user has explicitly invoked the '{target_skill_name}' skill.]\n"
+                        f"---\n"
+                        f"{skill_body}\n"
+                        f"---\n"
+                        f"User Request: {prompt_label}"
+                    )
+                else:
+                    self.notify(f"Skill '{target_skill_name}' not found or is disabled.", title="Skill Error", severity="error")
+                    return
+            # Dynamic slash alias: /<skill_name> [prompt]
+            elif cmd not in SLASH_COMMANDS:
+                possible_skill_name = cmd.lstrip("/")
+                skill_obj = get_skill(possible_skill_name)
+                if skill_obj and skill_obj.get("enabled", True):
+                    skill_body = skill_obj.get("content", "")
+                    prompt_label = query if query else f"Follow the guidelines and instructions for the '{possible_skill_name}' skill."
+                    user_input = (
+                        f"[SYSTEM INSTRUCTION: The user has explicitly invoked the '{possible_skill_name}' skill.]\n"
+                        f"---\n"
+                        f"{skill_body}\n"
+                        f"---\n"
+                        f"User Request: {prompt_label}"
+                    )
+            elif cmd == "/report":
                 time_period = query if query else "past 7 days"
                 user_input = SLASH_COMMANDS[cmd]['system_prompt'].replace("<time_period>", time_period)
-            else:
+            elif cmd in SLASH_COMMANDS and SLASH_COMMANDS[cmd].get('system_prompt'):
                 user_input = f"{SLASH_COMMANDS[cmd]['system_prompt']}\n {query}"
 
         # 2. Instantiate Raven response card but do not mount it yet

@@ -1,110 +1,115 @@
-CreateSkillModal {
+CreateSkillModal, SkillsManagerModal, SkillDetailModal, ConfirmDeleteModal {
     align: center middle;
     background: rgba(0, 0, 0, 0.75);
 }
 
-#create_skill_container {
-    width: 80%;
-    max-width: 90;
+#create_skill_container, #skill_detail_container {
+    width: 85%;
+    max-width: 96;
     height: 85%;
     background: #1e1e1e;
-    border: none;
+    border: solid #38BDF8;
     padding: 1 2;
 }
 
-#create_skill_title {
+#skills_modal_container {
+    width: 85%;
+    max-width: 96;
+    height: 80%;
+    background: #1e1e1e;
+    border: solid #06B6D4;
+    padding: 1 2;
+}
+
+#confirm_delete_container {
+    width: 55%;
+    max-width: 60;
+    height: auto;
+    background: #1e1e1e;
+    border: solid #EF4444;
+    padding: 1 2;
+}
+
+#create_skill_title, #skills_modal_title, #skill_detail_title, #confirm_delete_title {
     text-align: center;
     margin-bottom: 1;
     color: #06B6D4;
     text-style: bold;
+}
+
+#confirm_delete_title {
+    color: #EF4444;
+}
+
+#confirm_delete_message {
+    margin: 1 0;
+    text-align: center;
+    color: #F8FAFC;
+}
+
+#skill_detail_path {
+    text-align: center;
+    margin-bottom: 1;
+    color: #94A3B8;
+}
+
+.form_row {
+    height: auto;
+    margin-bottom: 1;
+}
+
+.form_col_flex {
+    width: 1fr;
+    margin-right: 1;
+}
+
+.form_col_fixed {
+    width: 32;
 }
 
 .form_label {
     color: #38BDF8;
     text-style: bold;
     margin-top: 1;
-    margin-bottom: 1;
+    margin-bottom: 0;
 }
 
 #input_skill_name {
     background: #252526;
-    border: none;
+    border: solid #64748B;
     color: #F8FAFC;
-    margin-bottom: 1;
     height: 3;
 }
 
-#input_skill_desc {
+#select_skill_scope {
     background: #252526;
-    border: none;
+    border: solid #64748B;
     color: #F8FAFC;
-    height: 5;
+    height: 3;
+}
+
+#input_skill_desc, #edit_skill_desc {
+    background: #252526;
+    border: solid #64748B;
+    color: #F8FAFC;
+    height: 4;
     margin-bottom: 1;
 }
 
-#input_skill_content {
+#input_skill_content, #edit_skill_content {
     background: #252526;
-    border: none;
+    border: solid #64748B;
     color: #F8FAFC;
     height: 1fr;
     min-height: 8;
     margin-bottom: 1;
 }
 
-#create_skill_actions {
-    height: auto;
-    align: right middle;
-}
-
-Button {
-    margin-left: 1;
-    min-width: 14;
-    height: 3;
-    padding: 0 1;
-}
-
-#btn_cancel_create {
-    background: transparent;
-    color: #E2E8F0;
-    border: round #64748B;
-}
-
-#btn_submit_create {
-    background: transparent;
-    color: #E2E8F0;
-    border: round #64748B;
-}
-
-#btn_submit_create:hover {
-    background: #2d3748;
-    color: #38BDF8;
-}
-
-SkillsManagerModal {
-    align: center middle;
-    background: rgba(0, 0, 0, 0.7);
-}
-
-#skills_modal_container {
-    width: 75%;
-    max-width: 85;
-    height: 70%;
-    background: #1e1e1e;
-    border: none;
-    padding: 1 2;
-}
-
-#skills_modal_title {
-    text-align: center;
-    margin-bottom: 1;
-    color: #06B6D4;
-    text-style: bold;
-}
-
 #skills_search_input {
     margin-bottom: 1;
     background: #252526;
     border: solid #06B6D4;
+    color: #F8FAFC;
 }
 
 #skills_option_list {
@@ -122,24 +127,49 @@ SkillsManagerModal {
     background: #2d3748;
 }
 
-#skills_modal_actions {
+#skills_hotkeys_hint {
+    height: 1;
+    text-align: center;
+    color: #94A3B8;
+    margin-bottom: 1;
+}
+
+#create_skill_actions, #skills_modal_actions, #skill_detail_actions, #confirm_delete_actions {
     height: auto;
     align: right middle;
 }
 
-#btn_close_skills {
+Button {
+    margin-left: 1;
+    min-width: 14;
+    height: 3;
+    padding: 0 1;
     background: transparent;
     color: #E2E8F0;
     border: round #64748B;
 }
 
-#btn_create_skill {
-    background: transparent;
-    color: #E2E8F0;
-    border: round #64748B;
-}
-
-#btn_create_skill:hover {
+Button:hover {
     background: #2d3748;
     color: #38BDF8;
+}
+
+Button.-primary {
+    background: #0284C7;
+    color: #FFFFFF;
+    border: none;
+}
+
+Button.-primary:hover {
+    background: #0369A1;
+}
+
+Button.-error {
+    background: #DC2626;
+    color: #FFFFFF;
+    border: none;
+}
+
+Button.-error:hover {
+    background: #B91C1C;
 }

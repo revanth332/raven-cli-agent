@@ -8,7 +8,8 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList, Button, Static, Input
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal
-from textual import work
+from textual import work, events
+from textual.timer import Timer
 
 from agent.core.settings import settings
 from agent.core.vision import is_model_vision_capable
@@ -28,6 +29,7 @@ class ModelSelectModal(ModalScreen[str]):
         self.all_models: List[Dict[str, Any]] = []
         self.filtered_models: List[Dict[str, Any]] = []
         self._is_fetching = False
+        self._search_timer: Optional[Timer] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
@@ -44,6 +46,7 @@ class ModelSelectModal(ModalScreen[str]):
 
     def on_mount(self) -> None:
         self._load_models_initial()
+        self.query_one("#search_input", Input).focus()
 
     def _load_models_initial(self) -> None:
         """Loads cached models and kicks off background sync if empty."""
@@ -130,7 +133,36 @@ class ModelSelectModal(ModalScreen[str]):
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search_input":
-            self.update_option_list(event.value)
+            if self._search_timer:
+                self._search_timer.stop()
+            self._search_timer = self.set_timer(0.15, lambda: self.update_option_list(event.value))
+
+    def on_key(self, event: events.Key) -> None:
+        search_input = self.query_one("#search_input", Input)
+        custom_input = self.query_one("#custom_input", Input)
+        opt_list = self.query_one("#model_list", OptionList)
+
+        if search_input.has_focus or opt_list.has_focus:
+            if event.key == "down":
+                opt_list.action_cursor_down()
+                event.prevent_default()
+                event.stop()
+            elif event.key == "up":
+                opt_list.action_cursor_up()
+                event.prevent_default()
+                event.stop()
+            elif event.key in ["page_down", "pagedown"]:
+                opt_list.action_page_down()
+                event.prevent_default()
+                event.stop()
+            elif event.key in ["page_up", "pageup"]:
+                opt_list.action_page_up()
+                event.prevent_default()
+                event.stop()
+            elif event.key == "enter" and not custom_input.has_focus:
+                self.confirm_selection()
+                event.prevent_default()
+                event.stop()
 
     @work(exclusive=True, thread=True)
     def action_refresh_models(self) -> None:
