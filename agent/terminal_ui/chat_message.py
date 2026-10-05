@@ -497,34 +497,39 @@ class ResponseTimeline:
             return Group(Text(""))
         return Group(*renderables)
 
-    def to_plain_text(self) -> str:
-        """Produces a clean plain-text transcript suitable for clipboard copying."""
+    def to_plain_text(self, text_only: bool = False) -> str:
+        """Produces a clean plain-text transcript suitable for clipboard copying.
+
+        If text_only is True, extracts only the LLM markdown/prose text blocks, omitting
+        all tool call headers and tool output previews.
+        """
         parts = []
         for block in self.blocks:
             if isinstance(block, TextBlock):
                 clean = block.content.strip()
                 if clean:
                     parts.append(clean)
-            elif isinstance(block, ToolCallBlock):
-                header = format_tool_header(block.display_name, block.display_val, block.tool_name)
-                parts.append(header.plain.strip())
-            elif isinstance(block, ToolResultBlock):
-                if block.raw_result is not None or (block.tool_args and block.renderable is None):
-                    formatted = format_tool_result_preview(
-                        block.tool_name,
-                        block.tool_args,
-                        block.raw_result,
-                        expanded=block.expanded,
-                    )
-                    parts.append(formatted.plain.strip())
-                elif block.plain_text:
-                    parts.append(block.plain_text.strip())
-                elif hasattr(block.renderable, "plain") and block.renderable.plain:
-                    parts.append(block.renderable.plain.strip())
-            elif isinstance(block, StatusBlock):
-                clean = block.message.strip()
-                if clean:
-                    parts.append(clean)
+            elif not text_only:
+                if isinstance(block, ToolCallBlock):
+                    header = format_tool_header(block.display_name, block.display_val, block.tool_name)
+                    parts.append(header.plain.strip())
+                elif isinstance(block, ToolResultBlock):
+                    if block.raw_result is not None or (block.tool_args and block.renderable is None):
+                        formatted = format_tool_result_preview(
+                            block.tool_name,
+                            block.tool_args,
+                            block.raw_result,
+                            expanded=block.expanded,
+                        )
+                        parts.append(formatted.plain.strip())
+                    elif block.plain_text:
+                        parts.append(block.plain_text.strip())
+                    elif hasattr(block.renderable, "plain") and block.renderable.plain:
+                        parts.append(block.renderable.plain.strip())
+                elif isinstance(block, StatusBlock):
+                    clean = block.message.strip()
+                    if clean:
+                        parts.append(clean)
         return "\n\n".join(parts)
 
     def is_empty(self) -> bool:
@@ -626,6 +631,8 @@ class ChatMessageWidget(Vertical):
             else:
                 yield Static("[bold #10B981]RAVEN[/bold #10B981]", classes="msg-role")
             yield Static("Copy", id="copy_btn", classes="copy-btn")
+            if self.role == "assistant":
+                yield Static("Copy Log", id="copy_all_btn", classes="copy-btn copy-all-btn")
         if self.image_badge:
             yield Static(f"[bold #06B6D4]◆ Image: {self.image_badge}[/bold #06B6D4]", id="img_badge", classes="img-badge")
         yield Vertical(id="timeline_container", classes="timeline-container")
@@ -778,13 +785,21 @@ class ChatMessageWidget(Vertical):
     def on_click(self, event) -> None:
         if event.control and event.control.id == "copy_btn":
             event.stop()
-            self.copy_to_clipboard()
+            is_shift = getattr(event, "shift", False)
+            self.copy_to_clipboard(full_log=is_shift)
+            return
+        elif event.control and event.control.id == "copy_all_btn":
+            event.stop()
+            self.copy_to_clipboard(full_log=True)
             return
 
-    def copy_to_clipboard(self) -> None:
-        text_to_copy = self.raw_text
-        if not text_to_copy and self._timeline:
-            text_to_copy = self._timeline.to_plain_text()
+    def copy_to_clipboard(self, full_log: bool = False) -> None:
+        if self._timeline:
+            text_to_copy = self._timeline.to_plain_text(text_only=not full_log)
+            if not text_to_copy and not full_log:
+                text_to_copy = self._timeline.to_plain_text(text_only=False)
+        else:
+            text_to_copy = self.raw_text
 
         if not text_to_copy:
             try:
@@ -814,12 +829,20 @@ class ChatMessageWidget(Vertical):
             pass
 
         try:
-            btn = self.query_one("#copy_btn", Static)
-            btn.update("✓ Copied!")
+            target_id = "#copy_all_btn" if full_log else "#copy_btn"
+            try:
+                btn = self.query_one(target_id, Static)
+            except Exception:
+                btn = self.query_one("#copy_btn", Static)
+
+            btn.update("✓ Copied All!" if full_log else "✓ Copied Text!")
 
             def reset_btn() -> None:
                 try:
-                    btn.update("Copy")
+                    if target_id == "#copy_all_btn":
+                        btn.update("Copy Log")
+                    else:
+                        btn.update("Copy")
                 except Exception:
                     pass
 

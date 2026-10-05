@@ -50,6 +50,10 @@ ChatMessageWidget.raven-msg {
     background: #27272a;
 }
 
+.copy-all-btn {
+    margin-left: 1;
+}
+
 .img-badge {
     color: #06B6D4;
     text-style: bold;

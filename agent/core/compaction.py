@@ -142,10 +142,81 @@ def format_messages_for_compaction(messages: list[dict], max_tool_chars: int = 1
     return "\n".join(lines)
 
 
+def should_auto_compact(current_tokens: int, threshold: int = 60000, message_count: int = 0) -> bool:
+    """
+    Determines if conversation context exceeds the token ceiling for auto-compaction.
+    Requires at least 6 messages to ensure there is meaningful multi-turn history to distill.
+    """
+    if message_count > 0 and message_count < 6:
+        return False
+    return current_tokens >= threshold
+
+
+def prune_message_payload(
+    messages: list[dict],
+    retention_turns: int = 2,
+    stub_char_threshold: int = 150,
+    strip_images: bool = True
+) -> list[dict]:
+    """
+    Performs micro-compaction on an outbound message list without mutating the original list.
+    Preserves raw tool outputs and multimodal payloads for the most recent `retention_turns` user turns.
+    For turns older than the retention horizon:
+      - Bulky tool outputs (> stub_char_threshold chars) are replaced with concise summary stubs.
+      - Exact role, tool_call_id, and tool name are preserved to maintain LLM API pairing invariants.
+      - Base64 image payloads in older user turns are replaced with text placeholders.
+    """
+    if not messages:
+        return []
+
+    # Identify user turn indices by scanning messages
+    user_indices = [i for i, m in enumerate(messages) if m.get("role") == "user"]
+    total_user_turns = len(user_indices)
+
+    # Determine cutoff index: messages before this index are considered outside the retention horizon
+    if total_user_turns <= retention_turns:
+        cutoff_idx = 0
+    else:
+        cutoff_idx = user_indices[total_user_turns - retention_turns]
+
+    pruned = []
+    for idx, msg in enumerate(messages):
+        msg_copy = dict(msg)
+        is_historical = (idx < cutoff_idx)
+
+        role = msg_copy.get("role")
+        if is_historical:
+            if role == "tool":
+                content = msg_copy.get("content", "")
+                tool_name = msg_copy.get("name", "tool")
+                content_str = str(content) if content is not None else ""
+                
+                # If content is already a stub or sufficiently short, leave as is
+                if len(content_str) > stub_char_threshold and not content_str.startswith("[Output of "):
+                    line_count = len(content_str.splitlines())
+                    char_count = len(content_str)
+                    stub = f"[Output of {tool_name} omitted: {line_count:,} lines ({char_count:,} chars). Result previously processed in prior turn.]"
+                    msg_copy["content"] = stub
+            elif role == "user" and strip_images:
+                user_content = msg_copy.get("content")
+                if isinstance(user_content, list):
+                    cleaned_content = []
+                    for item in user_content:
+                        if isinstance(item, dict) and item.get("type") == "image_url":
+                            cleaned_content.append({"type": "text", "text": "[Image attachment previously processed in prior turn]"})
+                        else:
+                            cleaned_content.append(item)
+                    msg_copy["content"] = cleaned_content
+
+        pruned.append(msg_copy)
+
+    return pruned
+
+
 def compact_conversation_history(messages: list[dict], custom_instructions: str = "", model_name: str = None) -> dict:
     """
     Distills earlier conversation messages into a structured summary using LLM.
-    Option B: Summarizes all turns except the last user-assistant turn.
+    Summarizes all prior turns while preserving the entire final user turn.
     
     Returns:
         {
@@ -161,16 +232,19 @@ def compact_conversation_history(messages: list[dict], custom_instructions: str 
     system_msg = messages[0] if messages[0].get("role") == "system" else None
     non_system = [m for m in messages if m.get("role") != "system"]
 
-    if len(non_system) <= 2:
+    user_indices = [i for i, m in enumerate(non_system) if m.get("role") == "user"]
+    if len(user_indices) < 2:
         return {
             "success": False,
             "summary": "",
             "compacted_messages": messages,
-            "error": "Conversation is too short to compact (requires more than 1 completed turn)."
+            "error": "Conversation is too short to compact (requires at least 2 completed user turns)."
         }
 
-    to_compact = non_system[:-2]
-    preserved = non_system[-2:]
+    # Slice at the start of the final user turn so tool/assistant sequence pairing is strictly preserved
+    last_user_idx = user_indices[-1]
+    to_compact = non_system[:last_user_idx]
+    preserved = non_system[last_user_idx:]
 
     transcript = format_messages_for_compaction(to_compact)
     if not transcript.strip():

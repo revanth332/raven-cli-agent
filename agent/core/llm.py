@@ -73,7 +73,13 @@ from agent.core.usage_tracker import UsageTracker
 from agent.core.session_manager import (
     create_session, save_session, load_session, get_active_session_id, set_active_session_id
 )
-from agent.core.compaction import should_compact_content,compact_content,save_compacted_memory
+from agent.core.compaction import (
+    should_compact_content,
+    compact_content,
+    save_compacted_memory,
+    prune_message_payload,
+    should_auto_compact,
+)
 from agent.utils import use_vertex_ai
 load_dotenv()
 
@@ -273,8 +279,30 @@ class AgentChatSession:
             raise e
 
     def send_message_stream(self, query, execution_instruction=None, allow_tools=True):
-        """Send chat history with optional transient loop-control instructions."""
-        request_messages = [self._sanitize_message_for_api(m) for m in self.messages]
+        """Send chat history with optional transient loop-control instructions, applying micro-compaction and auto-compaction guardrails."""
+        # 1. Autonomous compaction threshold check
+        if getattr(settings, "RAVEN_AUTO_COMPACTION_ENABLED", True):
+            threshold = getattr(settings, "RAVEN_AUTO_COMPACTION_TOKEN_THRESHOLD", 60000)
+            current_tokens = count_tokens(self.messages, self.model_name)
+            if should_auto_compact(current_tokens, threshold=threshold, message_count=len(self.messages)):
+                try:
+                    self.compact_history()
+                except Exception as e:
+                    logging.getLogger("raven.llm").warning(f"Autonomous compaction trigger failed: {e}")
+
+        # 2. Apply micro-compaction (payload pruning of older tool returns)
+        if getattr(settings, "RAVEN_CONTEXT_PRUNING_ENABLED", True):
+            retention_turns = getattr(settings, "RAVEN_TOOL_OUTPUT_RETENTION_TURNS", 2)
+            stub_threshold = getattr(settings, "RAVEN_TOOL_OUTPUT_STUB_THRESHOLD", 150)
+            messages_to_send = prune_message_payload(
+                self.messages,
+                retention_turns=retention_turns,
+                stub_char_threshold=stub_threshold
+            )
+        else:
+            messages_to_send = self.messages
+
+        request_messages = [self._sanitize_message_for_api(m) for m in messages_to_send]
         if query is not None:
             request_messages.append(self._sanitize_message_for_api(self._create_message("user", content=query)))
         if execution_instruction:
