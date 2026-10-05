@@ -323,6 +323,129 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             border-color: var(--accent-primary);
         }
 
+        .custom-multi-select {
+            position: relative;
+            display: inline-block;
+        }
+
+        .multi-select-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.6rem;
+            padding: 0.45rem 0.9rem;
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            background: #ffffff;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            min-width: 170px;
+            transition: all 0.15s ease;
+            user-select: none;
+        }
+
+        .multi-select-btn:hover {
+            border-color: var(--text-secondary);
+        }
+
+        .multi-select-btn .chevron {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            transition: transform 0.2s ease;
+        }
+
+        .multi-select-btn.open .chevron {
+            transform: rotate(180deg);
+        }
+
+        .multi-select-dropdown {
+            position: absolute;
+            top: calc(100% + 4px);
+            left: 0;
+            z-index: 100;
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+            min-width: 240px;
+            max-width: 320px;
+            padding: 0.5rem 0;
+            display: none;
+        }
+
+        .multi-select-dropdown.show {
+            display: block;
+        }
+
+        .multi-select-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.35rem 0.75rem 0.5rem;
+            border-bottom: 1px solid var(--border-light);
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .multi-select-header button {
+            background: none;
+            border: none;
+            color: var(--accent-primary);
+            cursor: pointer;
+            font-size: 0.75rem;
+            font-weight: 600;
+            padding: 0.1rem 0.3rem;
+            border-radius: 4px;
+        }
+
+        .multi-select-header button:hover {
+            background: var(--badge-bg);
+        }
+
+        .multi-select-list {
+            max-height: 220px;
+            overflow-y: auto;
+            padding: 0.25rem 0;
+        }
+
+        .multi-select-item {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.4rem 0.75rem;
+            cursor: pointer;
+            font-size: 0.825rem;
+            transition: background 0.12s ease;
+            user-select: none;
+        }
+
+        .multi-select-item:hover {
+            background: #f8fafc;
+        }
+
+        .multi-select-item input[type="checkbox"] {
+            cursor: pointer;
+            width: 14px;
+            height: 14px;
+            accent-color: var(--accent-primary);
+        }
+
+        .multi-select-item .color-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            display: inline-block;
+            flex-shrink: 0;
+        }
+
+        .multi-select-item .model-name {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
         .btn-group {
             display: inline-flex;
             border-radius: 8px;
@@ -431,10 +554,25 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             <!-- Controls Toolbar -->
             <div class="filter-bar">
                 <div class="filter-group">
-                    <span class="filter-label">Filter Model:</span>
-                    <select id="model-filter" class="filter-select" onchange="onFilterChange()">
-                        <option value="all">All Models</option>
-                    </select>
+                    <span class="filter-label">Filter Models:</span>
+                    <div class="custom-multi-select" id="multi-select-container">
+                        <button type="button" class="multi-select-btn" id="multi-select-btn" onclick="toggleMultiSelectDropdown(event)">
+                            <span id="multi-select-label">All Models</span>
+                            <span class="chevron">▼</span>
+                        </button>
+                        <div class="multi-select-dropdown" id="multi-select-dropdown">
+                            <div class="multi-select-header">
+                                <span style="color: var(--text-secondary);">Select Models</span>
+                                <div>
+                                    <button type="button" onclick="selectAllModels(true)">All</button>
+                                    <button type="button" onclick="selectAllModels(false)">None</button>
+                                </div>
+                            </div>
+                            <div class="multi-select-list" id="multi-select-list">
+                                <!-- Populated dynamically -->
+                            </div>
+                        </div>
+                    </div>
                 </div>
                 <div class="filter-group">
                     <span class="filter-label">Latency Unit:</span>
@@ -556,11 +694,183 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             '#ec4899', '#f97316', '#6366f1', '#14b8a6', '#84cc16'
         ];
 
-        let latencyUnit = 'ms'; // 'ms' | 's'
-        let activeModelFilter = 'all';
-        let tokenDateRange = '7d'; // '7d' | '14d' | '30d' | 'all'
-        let costCurrency = 'USD'; // 'USD' | 'INR'
+        function getPref(key, defaultVal) {
+            try {
+                const val = localStorage.getItem('raven_usage_' + key);
+                return val !== null ? val : defaultVal;
+            } catch (e) {
+                return defaultVal;
+            }
+        }
+
+        function setPref(key, val) {
+            try {
+                localStorage.setItem('raven_usage_' + key, val);
+            } catch (e) {}
+        }
+
+        function getPrefJSON(key, defaultVal) {
+            try {
+                const val = localStorage.getItem('raven_usage_' + key);
+                if (val === null) return defaultVal;
+                return JSON.parse(val);
+            } catch (e) {
+                return defaultVal;
+            }
+        }
+
+        function setPrefJSON(key, val) {
+            try {
+                localStorage.setItem('raven_usage_' + key, JSON.stringify(val));
+            } catch (e) {}
+        }
+
+        let latencyUnit = getPref('latency_unit', 'ms'); // 'ms' | 's'
+        // Handle migration from legacy single model filter or load selected_models
+        let selectedModels = getPrefJSON('selected_models', null);
+        if (selectedModels === null) {
+            const legacyFilter = getPref('model_filter', 'all');
+            if (legacyFilter === 'all') {
+                selectedModels = 'all';
+            } else {
+                selectedModels = [legacyFilter];
+            }
+        }
+        let tokenDateRange = getPref('token_range', '7d'); // '7d' | '14d' | '30d' | 'all'
+        let costCurrency = getPref('cost_currency', 'USD'); // 'USD' | 'INR'
         const chartInstances = {};
+
+        function isModelSelected(model) {
+            if (selectedModels === 'all') return true;
+            if (Array.isArray(selectedModels)) {
+                return selectedModels.includes(model);
+            }
+            return true;
+        }
+
+        function toggleMultiSelectDropdown(event) {
+            if (event) event.stopPropagation();
+            const dropdown = document.getElementById('multi-select-dropdown');
+            const btn = document.getElementById('multi-select-btn');
+            if (dropdown && btn) {
+                dropdown.classList.toggle('show');
+                btn.classList.toggle('open');
+            }
+        }
+
+        function closeMultiSelectDropdown() {
+            const dropdown = document.getElementById('multi-select-dropdown');
+            const btn = document.getElementById('multi-select-btn');
+            if (dropdown && dropdown.classList.contains('show')) {
+                dropdown.classList.remove('show');
+            }
+            if (btn && btn.classList.contains('open')) {
+                btn.classList.remove('open');
+            }
+        }
+
+        window.addEventListener('click', function(e) {
+            const container = document.getElementById('multi-select-container');
+            if (container && !container.contains(e.target)) {
+                closeMultiSelectDropdown();
+            }
+        });
+
+        function syncUIPreferences() {
+            const btnMs = document.getElementById('btn-unit-ms');
+            const btnS = document.getElementById('btn-unit-s');
+            if (btnMs) btnMs.classList.toggle('active', latencyUnit === 'ms');
+            if (btnS) btnS.classList.toggle('active', latencyUnit === 's');
+
+            ['7d', '14d', '30d', 'all'].forEach(r => {
+                const btn = document.getElementById('btn-tokens-' + r);
+                if (btn) btn.classList.toggle('active', tokenDateRange === r);
+            });
+
+            const btnUsd = document.getElementById('btn-cost-usd');
+            const btnInr = document.getElementById('btn-cost-inr');
+            if (btnUsd) btnUsd.classList.toggle('active', costCurrency === 'USD');
+            if (btnInr) btnInr.classList.toggle('active', costCurrency === 'INR');
+        }
+
+        function updateMultiSelectUI(allModels, modelColorMap) {
+            const listEl = document.getElementById('multi-select-list');
+            const labelEl = document.getElementById('multi-select-label');
+            if (!listEl || !labelEl) return;
+
+            const activeCount = allModels.filter(m => isModelSelected(m)).length;
+            if (activeCount === allModels.length || selectedModels === 'all') {
+                labelEl.innerText = `All Models (${allModels.length})`;
+            } else if (activeCount === 0) {
+                labelEl.innerText = 'No Models Selected';
+            } else if (activeCount === 1) {
+                const single = allModels.find(m => isModelSelected(m));
+                labelEl.innerText = single || '1 Model Selected';
+            } else {
+                labelEl.innerText = `${activeCount} Models Selected`;
+            }
+
+            listEl.innerHTML = '';
+            allModels.forEach(m => {
+                const item = document.createElement('label');
+                item.className = 'multi-select-item';
+                const checked = isModelSelected(m) ? 'checked' : '';
+                const color = modelColorMap[m] || '#2563eb';
+                item.innerHTML = `
+                    <input type="checkbox" value="${m}" ${checked} onchange="onModelCheckboxToggle('${m}', this.checked)" />
+                    <span class="color-dot" style="background: ${color};"></span>
+                    <span class="model-name" title="${m}">${m}</span>
+                `;
+                listEl.appendChild(item);
+            });
+        }
+
+        function onModelCheckboxToggle(model, isChecked) {
+            const rawData = window.USAGE_DATA || {};
+            const allModelsSet = new Set();
+            Object.keys(rawData).forEach(d => {
+                Object.keys(rawData[d] || {}).forEach(m => allModelsSet.add(m));
+            });
+            const allModels = Array.from(allModelsSet).sort();
+
+            if (selectedModels === 'all') {
+                selectedModels = allModels.slice();
+            } else if (!Array.isArray(selectedModels)) {
+                selectedModels = [];
+            }
+
+            if (isChecked) {
+                if (!selectedModels.includes(model)) {
+                    selectedModels.push(model);
+                }
+            } else {
+                selectedModels = selectedModels.filter(m => m !== model);
+            }
+
+            if (selectedModels.length === allModels.length) {
+                selectedModels = 'all';
+            }
+
+            setPrefJSON('selected_models', selectedModels);
+            renderDashboard();
+        }
+
+        function selectAllModels(selectAll) {
+            const rawData = window.USAGE_DATA || {};
+            const allModelsSet = new Set();
+            Object.keys(rawData).forEach(d => {
+                Object.keys(rawData[d] || {}).forEach(m => allModelsSet.add(m));
+            });
+            const allModels = Array.from(allModelsSet).sort();
+
+            if (selectAll) {
+                selectedModels = 'all';
+            } else {
+                selectedModels = [];
+            }
+            setPrefJSON('selected_models', selectedModels);
+            renderDashboard();
+        }
 
         function destroyChart(id) {
             if (chartInstances[id]) {
@@ -572,33 +882,24 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
         function setLatencyUnit(unit) {
             if (latencyUnit === unit) return;
             latencyUnit = unit;
-            document.getElementById('btn-unit-ms').classList.toggle('active', unit === 'ms');
-            document.getElementById('btn-unit-s').classList.toggle('active', unit === 's');
+            setPref('latency_unit', unit);
+            syncUIPreferences();
             renderDashboard();
         }
 
         function setTokenRange(range) {
             if (tokenDateRange === range) return;
             tokenDateRange = range;
-            ['7d', '14d', '30d', 'all'].forEach(r => {
-                const btn = document.getElementById('btn-tokens-' + r);
-                if (btn) btn.classList.toggle('active', r === range);
-            });
+            setPref('token_range', range);
+            syncUIPreferences();
             renderDashboard();
         }
 
         function setCostCurrency(curr) {
             if (costCurrency === curr) return;
             costCurrency = curr;
-            const btnUsd = document.getElementById('btn-cost-usd');
-            const btnInr = document.getElementById('btn-cost-inr');
-            if (btnUsd) btnUsd.classList.toggle('active', curr === 'USD');
-            if (btnInr) btnInr.classList.toggle('active', curr === 'INR');
-            renderDashboard();
-        }
-
-        function onFilterChange() {
-            activeModelFilter = document.getElementById('model-filter').value;
+            setPref('cost_currency', curr);
+            syncUIPreferences();
             renderDashboard();
         }
 
@@ -619,6 +920,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
         }
 
         function renderDashboard() {
+            syncUIPreferences();
             const rawData = window.USAGE_DATA || {};
             const dates = Object.keys(rawData).sort();
 
@@ -627,6 +929,28 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 document.getElementById('empty-state').style.display = 'block';
                 return;
             }
+
+            const allModelsSet = new Set();
+            dates.forEach(d => {
+                Object.keys(rawData[d] || {}).forEach(m => allModelsSet.add(m));
+            });
+            const models = Array.from(allModelsSet).sort();
+
+            // Validate persisted selection
+            if (selectedModels !== 'all' && Array.isArray(selectedModels)) {
+                selectedModels = selectedModels.filter(m => models.includes(m));
+            } else if (selectedModels !== 'all') {
+                selectedModels = 'all';
+            }
+
+            const modelColorMap = {};
+            models.forEach((m, idx) => {
+                modelColorMap[m] = PALETTE[idx % PALETTE.length];
+            });
+
+            updateMultiSelectUI(models, modelColorMap);
+
+            const activeModels = models.filter(m => isModelSelected(m));
 
             let totalTokens = 0;
             let totalPromptTokens = 0;
@@ -637,7 +961,6 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             let totalFailures = 0;
             const p50Samples = [];
             const modelTokenCounts = {};
-            const allModelsSet = new Set();
             const rows = [];
 
             // Aggregate error categories
@@ -651,9 +974,8 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             };
 
             dates.forEach(date => {
-                const dayData = rawData[date];
+                const dayData = rawData[date] || {};
                 Object.keys(dayData).forEach(model => {
-                    allModelsSet.add(model);
                     const m = dayData[model];
                     const pTokens = m.prompt_tokens || 0;
                     const cTokens = m.completion_tokens || 0;
@@ -672,19 +994,19 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     const p50 = lat.p50_ms || lat.avg_ms || 0;
                     const p95 = lat.p95_ms || 0;
 
-                    totalTokens += tokens;
-                    totalPromptTokens += pTokens;
-                    totalCompletionTokens += cTokens;
-                    totalRequests += reqs;
-                    totalCost += cost;
-                    totalSuccess += successCount;
-                    totalFailures += failureCount;
+                    if (isModelSelected(model)) {
+                        totalTokens += tokens;
+                        totalPromptTokens += pTokens;
+                        totalCompletionTokens += cTokens;
+                        totalRequests += reqs;
+                        totalCost += cost;
+                        totalSuccess += successCount;
+                        totalFailures += failureCount;
 
-                    if (p50 > 0) p50Samples.push(p50);
-                    modelTokenCounts[model] = (modelTokenCounts[model] || 0) + tokens;
+                        if (p50 > 0) p50Samples.push(p50);
+                        modelTokenCounts[model] = (modelTokenCounts[model] || 0) + tokens;
 
-                    // Collect errors for chart
-                    if (activeModelFilter === 'all' || activeModelFilter === model) {
+                        // Collect errors for chart
                         Object.keys(failureReasons).forEach(reason => {
                             const cat = classifyError(reason);
                             const count = failureReasons[reason] || 0;
@@ -694,39 +1016,22 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                                 errorCategoryCounts['Other'] += count;
                             }
                         });
+
+                        rows.push({
+                            date,
+                            model,
+                            requests: reqs,
+                            successCount,
+                            failureCount,
+                            p50,
+                            p95,
+                            promptTokens: pTokens,
+                            completionTokens: cTokens,
+                            tokens,
+                            cost
+                        });
                     }
-
-                    rows.push({
-                        date,
-                        model,
-                        requests: reqs,
-                        successCount,
-                        failureCount,
-                        p50,
-                        p95,
-                        promptTokens: pTokens,
-                        completionTokens: cTokens,
-                        tokens,
-                        cost
-                    });
                 });
-            });
-
-            // Populate Filter dropdown if not already populated
-            const selectEl = document.getElementById('model-filter');
-            const models = Array.from(allModelsSet).sort();
-            if (selectEl && selectEl.options.length <= 1) {
-                models.forEach(m => {
-                    const opt = document.createElement('option');
-                    opt.value = m;
-                    opt.innerText = m;
-                    selectEl.appendChild(opt);
-                });
-            }
-
-            const modelColorMap = {};
-            models.forEach((m, idx) => {
-                modelColorMap[m] = PALETTE[idx % PALETTE.length];
             });
 
             const USD_TO_INR = 86.8;
@@ -768,8 +1073,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             // 2. Populate Table (Reverse Chronological)
             const tbody = document.getElementById('table-body');
             tbody.innerHTML = '';
-            const filteredRows = activeModelFilter === 'all' ? rows : rows.filter(r => r.model === activeModelFilter);
-            filteredRows.slice().reverse().forEach(r => {
+            rows.slice().reverse().forEach(r => {
                 const tr = document.createElement('tr');
                 const rowINR = r.cost * USD_TO_INR;
                 const turnTotal = r.successCount + r.failureCount;
@@ -792,9 +1096,6 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 `;
                 tbody.appendChild(tr);
             });
-
-            // Filter models for charts if a specific model is selected
-            const activeModels = activeModelFilter === 'all' ? models : models.filter(m => m === activeModelFilter);
 
             // CHART 1: Latency Trends Over Time (P50 & P95)
             destroyChart('latencyTrendsChart');
@@ -1145,10 +1446,10 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             chartInstances['modelShareChart'] = new Chart(document.getElementById('modelShareChart').getContext('2d'), {
                 type: 'doughnut',
                 data: {
-                    labels: models,
+                    labels: activeModels,
                     datasets: [{
-                        data: models.map(m => modelTokenCounts[m] || 0),
-                        backgroundColor: models.map(m => modelColorMap[m]),
+                        data: activeModels.map(m => modelTokenCounts[m] || 0),
+                        backgroundColor: activeModels.map(m => modelColorMap[m]),
                         borderWidth: 2,
                         borderColor: '#ffffff'
                     }]
