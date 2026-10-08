@@ -290,6 +290,39 @@ class RavenTUI(App):
             raven_card.update(content)
         self.scroll_to_bottom()
 
+    def show_thinking_loader(self, text: str = "Thinking...") -> ThinkingMessage:
+        """Mounts or dynamically updates the ThinkingMessage widget in the thinking container."""
+        try:
+            thinking_container = self.query_one("#thinking_container")
+            for child in list(thinking_container.children):
+                if isinstance(child, ThinkingMessage):
+                    child.set_text(text)
+                    child.reset_thinking()
+                    return child
+                else:
+                    child.remove()
+            loader = ThinkingMessage(text)
+            thinking_container.mount(loader)
+            return loader
+        except Exception:
+            return None
+
+    def remove_thinking_loader(self) -> None:
+        """Safely removes any ThinkingMessage widget from the thinking container."""
+        try:
+            thinking_container = self.query_one("#thinking_container")
+            for child in list(thinking_container.children):
+                child.remove()
+        except Exception:
+            pass
+
+    def _async_auto_checkpoint(self) -> None:
+        """Fire-and-forget background checkpoint worker to avoid blocking the main UI stream."""
+        try:
+            create_checkpoint("latest-checkpoint")
+        except Exception:
+            pass
+
     def scroll_to_bottom(self):
         """Scrolls the chat history container to the very bottom."""
         try:
@@ -655,13 +688,19 @@ class RavenTUI(App):
                 main_container.remove_class("centered")
 
             summary = tracker.get_summary(settings.RAVEN_MODEL)
-            total_tokens = summary.get("session_prompt_tokens", 0) + summary.get("session_completion_tokens", 0)
+            session_tokens = summary.get("session_tokens", summary.get("session_prompt_tokens", 0) + summary.get("session_completion_tokens", 0))
+            lifetime_tokens = summary.get("lifetime_tokens", summary.get("lifetime_prompt_tokens", 0) + summary.get("lifetime_completion_tokens", 0))
             msg = (
                 f"📊 **Usage Analytics Dashboard Launched**\n\n"
                 f"Opened `{dashboard_path}` in your browser.\n\n"
-                f"- **Session Requests:** `{summary.get('total_requests', 0)}`\n"
-                f"- **Session Tokens:** `{total_tokens:,}`\n"
-                f"- **Estimated Cost:** `${summary.get('session_cost', 0.0):.4f}`\n\n"
+                f"**Current Session:**\n"
+                f"- **Requests:** `{summary.get('session_requests', 0)}`\n"
+                f"- **Tokens:** `{session_tokens:,}`\n"
+                f"- **Cost:** `${summary.get('session_cost', 0.0):.4f}`\n\n"
+                f"**All-Time Totals:**\n"
+                f"- **Requests:** `{summary.get('lifetime_requests', summary.get('total_requests', 0))}`\n"
+                f"- **Tokens:** `{lifetime_tokens:,}`\n"
+                f"- **Cost:** `${summary.get('lifetime_cost', summary.get('session_cost', 0.0)):.4f}`\n\n"
                 f"_Refresh the browser page anytime to see live daily updates!_"
             )
             card = ChatMessageWidget(role="assistant", raw_text=msg, classes="raven-msg")
@@ -879,6 +918,7 @@ class RavenTUI(App):
             active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
             raven_card = ChatMessageWidget(role="assistant", raw_text="", model_name=active_model, classes="raven-msg")
             self.scroll_to_bottom()
+            self.show_thinking_loader("Thinking...")
             self.is_generating = True
 
             if is_model_vision_capable(active_model):
@@ -915,6 +955,7 @@ class RavenTUI(App):
             active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
             raven_card = ChatMessageWidget(role="assistant", raw_text="", model_name=active_model, classes="raven-msg")
             self.scroll_to_bottom()
+            self.show_thinking_loader("Thinking...")
             self.is_generating = True
 
             if is_model_vision_capable(active_model):
@@ -1089,6 +1130,7 @@ class RavenTUI(App):
         raven_card = ChatMessageWidget(role="assistant", raw_text="", model_name=active_model, classes="raven-msg")
         self.scroll_to_bottom()
 
+        self.show_thinking_loader("Thinking...")
         self.is_generating = True
         self.stream_response(user_input, raven_card)
         
@@ -1114,15 +1156,14 @@ class RavenTUI(App):
     @work(thread=True)
     def stream_image_with_vision_bridge(self, data_uri: str, image_query: str, raven_card: ChatMessageWidget):
         """Processes an image through the Vision Bridge and pipes transcribed text to the active model."""
-        thinking_container = self.query_one("#thinking_container")
-        bridge_loader = ThinkingMessage("Transcribing image via Vision Bridge...")
+        self.call_from_thread(self.show_thinking_loader, "Transcribing image via Vision Bridge...")
         try:
-            self.call_from_thread(thinking_container.mount, bridge_loader)
             bridge_result = transcribe_image_with_vision_model(data_uri, query=image_query)
-        finally:
-            self.call_from_thread(bridge_loader.remove)
+        except Exception as e:
+            bridge_result = {"success": False, "error": str(e)}
 
         if not bridge_result.get("success"):
+            self.call_from_thread(self.remove_thinking_loader)
             err = bridge_result.get("error", "Failed to transcribe image.")
             self.call_from_thread(
                 self.safe_update_raven_card,
@@ -1140,20 +1181,19 @@ class RavenTUI(App):
             f"{transcription}\n\n"
             f"User Question:\n{image_query}"
         )
+        self.call_from_thread(self.show_thinking_loader, "Thinking...")
         self.stream_response(enriched_prompt, raven_card)
 
     @work(thread=True)
     def stream_response(self, query: str | list = None, raven_card: ChatMessageWidget = None):
         """Background thread that streams the AI response with chronological interleaved timeline."""
         if not self.chat_session:
+            self.call_from_thread(self.remove_thinking_loader)
             self.call_from_thread(self.safe_update_raven_card, raven_card, "[red]AI is still initializing. Please try again.[/red]")
             return
 
-        # Deterministic auto-checkpoint before AI turn starts
-        try:
-            create_checkpoint("latest-checkpoint")
-        except Exception:
-            pass
+        # Fire-and-forget background auto-checkpoint to avoid UI blocking
+        threading.Thread(target=self._async_auto_checkpoint, daemon=True, name="AutoCheckpointWorker").start()
 
         start_time = time.time()
         self.cancel_event.clear()
@@ -1165,7 +1205,6 @@ class RavenTUI(App):
             grace_turns=settings.RAVEN_AGENT_GRACE_TURNS,
         )
         try:
-            thinking_container = self.query_one("#thinking_container")
             timeline = ResponseTimeline()
             total_text_response = ""
 
@@ -1223,15 +1262,17 @@ class RavenTUI(App):
                 function_calls = {}
                 round_text = ""
                 max_retries = 5
-                thinking_message = ThinkingMessage()
                 user_message_committed = query is None
+                token_received = False
+                self.call_from_thread(self.show_thinking_loader, "Thinking...")
+
                 for attempt in range(max_retries):
                     try:
-                        self.call_from_thread(thinking_container.mount, thinking_message)
                         generator = self.chat_session.send_message_stream(
                             query,
                             execution_instruction=execution_instruction,
                             allow_tools=allow_tools,
+                            status_callback=lambda st: self.call_from_thread(self.show_thinking_loader, st),
                         )
                         if query is not None and not user_message_committed:
                             self.chat_session.commit_user_message(query)
@@ -1243,6 +1284,8 @@ class RavenTUI(App):
                                 continue
                             delta = chunk.choices[0].delta
                             if hasattr(delta, "tool_calls") and delta.tool_calls:
+                                if not token_received:
+                                    token_received = True
                                 for tool_call in delta.tool_calls:
                                     tool_idx = tool_call.index
                                     if tool_idx not in function_calls:
@@ -1260,13 +1303,13 @@ class RavenTUI(App):
                                             function_calls[tool_idx]["extra_content"] = tool_call.extra_content
 
                             if hasattr(delta, "content") and delta.content:
+                                if not token_received:
+                                    token_received = True
                                 round_text += delta.content
                                 timeline.append_text(delta.content)
                                 self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                         break
                     except Exception as api_error:
-                        if thinking_message:
-                            self.call_from_thread(thinking_message.remove)
                         error_str = str(api_error).lower()
                         if "image_url" in error_str or "multimodal" in error_str:
                             msg = f"**Model Incompatibility:** Model `{settings.RAVEN_MODEL}` does not support image input. Please switch to a vision model with `/model`."
@@ -1281,8 +1324,6 @@ class RavenTUI(App):
                                 time.sleep(sleep_time)
                                 continue
                         raise api_error
-                if thinking_message:
-                    self.call_from_thread(thinking_message.remove)
 
                 if self.cancel_event.is_set():
                     timeline.add_status("Generation stopped by user.", style="bold yellow")
@@ -1416,15 +1457,11 @@ class RavenTUI(App):
                         timeline.add_tool_call(tool_name, display_name, display_val, status="running")
                         self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
 
-                        tool_status = ThinkingMessage(f"Executing {display_name}...")
                         try:
-                            self.call_from_thread(thinking_container.mount, tool_status)
+                            self.call_from_thread(self.show_thinking_loader, f"Executing {display_name}...")
                             result = tool_meta["fn"](**tool_args)
                         except Exception as e:
                             result = f"Error: {e}"
-                        finally:
-                            if tool_status:
-                                self.call_from_thread(tool_status.remove)
 
                         preview_renderable = format_tool_result_preview(tool_name, tool_args, result)
                         timeline.add_tool_result(
@@ -1495,6 +1532,7 @@ class RavenTUI(App):
         except Exception as e:
             self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(f"**Error:** {e}"), f"Error: {e}")
         finally:
+            self.call_from_thread(self.remove_thinking_loader)
             self.is_generating = False
 
 

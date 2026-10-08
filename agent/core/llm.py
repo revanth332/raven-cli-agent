@@ -158,6 +158,7 @@ class AgentChatSession:
         self.tracker = UsageTracker()
         self._last_duration_ms = 0.0
         self._last_ttft_ms = None
+        self._last_usage = None
         self.get_context_usage()
 
     def save_session_state(self):
@@ -174,7 +175,10 @@ class AgentChatSession:
 
     def get_context_usage(self):
         context_tokens = count_tokens(self.messages, self.model_name)
-        self.tracker.update_context(context_tokens, self.model_name)
+        from agent.core.token_counter import get_tools_token_count
+        from agent.tools.tool_registry import raven_tools
+        tool_tokens = get_tools_token_count(raven_tools, self.model_name)
+        self.tracker.update_context(context_tokens + tool_tokens, self.model_name)
         return self.tracker.get_summary(self.model_name)
 
     def compact_history(self, custom_instructions: str = "") -> dict:
@@ -210,6 +214,14 @@ class AgentChatSession:
         return result
 
     def record_turn_usage(self, prompt_tokens=None, completion_tokens=None, assistant_response=None, duration_ms=None, ttft_ms=None):
+        server_usage = getattr(self, "_last_usage", None)
+        if server_usage:
+            if prompt_tokens is None and server_usage.get("prompt_tokens") is not None:
+                prompt_tokens = server_usage["prompt_tokens"]
+            if completion_tokens is None and server_usage.get("completion_tokens") is not None:
+                completion_tokens = server_usage["completion_tokens"]
+            self._last_usage = None
+
         if prompt_tokens is None:
             prompt_tokens = count_tokens(self.messages, self.model_name)
         if completion_tokens is None and assistant_response is not None:
@@ -247,16 +259,35 @@ class AgentChatSession:
 
     def _wrap_stream(self, response, start_time: float):
         """
-        Wraps LLM response stream to capture time-to-first-token (TTFT)
-        and total stream duration, recording errors if stream breaks.
+        Wraps LLM response stream to capture time-to-first-token (TTFT),
+        total stream duration, and exact server-reported token usage (chunk.usage).
         """
         ttft_recorded = False
         ttft_ms = None
+        self._last_usage = None
         try:
             for chunk in response:
                 if not ttft_recorded:
                     ttft_ms = (time.perf_counter() - start_time) * 1000.0
                     ttft_recorded = True
+
+                # Inspect chunk for server-reported usage metadata
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    p_tok = getattr(usage, "prompt_tokens", None)
+                    c_tok = getattr(usage, "completion_tokens", None)
+                    t_tok = getattr(usage, "total_tokens", None)
+                    if isinstance(usage, dict):
+                        p_tok = usage.get("prompt_tokens")
+                        c_tok = usage.get("completion_tokens")
+                        t_tok = usage.get("total_tokens")
+                    if p_tok is not None or c_tok is not None:
+                        self._last_usage = {
+                            "prompt_tokens": p_tok,
+                            "completion_tokens": c_tok,
+                            "total_tokens": t_tok,
+                        }
+
                 yield chunk
             total_duration_ms = (time.perf_counter() - start_time) * 1000.0
             self._last_duration_ms = total_duration_ms
@@ -278,17 +309,28 @@ class AgentChatSession:
                 pass
             raise e
 
-    def send_message_stream(self, query, execution_instruction=None, allow_tools=True):
+    def send_message_stream(self, query, execution_instruction=None, allow_tools=True, status_callback=None):
         """Send chat history with optional transient loop-control instructions, applying micro-compaction and auto-compaction guardrails."""
         # 1. Autonomous compaction threshold check
         if getattr(settings, "RAVEN_AUTO_COMPACTION_ENABLED", True):
             threshold = getattr(settings, "RAVEN_AUTO_COMPACTION_TOKEN_THRESHOLD", 60000)
             current_tokens = count_tokens(self.messages, self.model_name)
             if should_auto_compact(current_tokens, threshold=threshold, message_count=len(self.messages)):
+                if status_callback:
+                    try:
+                        status_callback("Compacting conversation history...")
+                    except Exception:
+                        pass
                 try:
                     self.compact_history()
                 except Exception as e:
                     logging.getLogger("raven.llm").warning(f"Autonomous compaction trigger failed: {e}")
+                finally:
+                    if status_callback:
+                        try:
+                            status_callback("Thinking...")
+                        except Exception:
+                            pass
 
         # 2. Apply micro-compaction (payload pruning of older tool returns)
         if getattr(settings, "RAVEN_CONTEXT_PRUNING_ENABLED", True):
@@ -312,13 +354,22 @@ class AgentChatSession:
             "model": self.model_name,
             "messages": request_messages,
             "stream": True,
+            "stream_options": {"include_usage": True},
         }
         if allow_tools:
             request_args["tools"] = raven_tools
 
         start_time = time.perf_counter()
         try:
-            response = get_genai_client().chat.completions.create(**request_args)
+            try:
+                response = get_genai_client().chat.completions.create(**request_args)
+            except Exception as e:
+                # Fallback if upstream proxy or custom provider rejects stream_options
+                if "stream_options" in str(e).lower():
+                    request_args.pop("stream_options", None)
+                    response = get_genai_client().chat.completions.create(**request_args)
+                else:
+                    raise e
         except Exception as e:
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             error_code = extract_error_code(e)

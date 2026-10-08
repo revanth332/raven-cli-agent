@@ -46,6 +46,13 @@ class UsageTracker:
         self.session_prompt_tokens = 0
         self.session_completion_tokens = 0
         self.session_cost = 0.0
+        self.session_requests = 0
+
+        # Persistent lifetime metrics (across all sessions)
+        self.lifetime_prompt_tokens = 0
+        self.lifetime_completion_tokens = 0
+        self.lifetime_cost = 0.0
+        self.lifetime_requests = 0
         self.total_requests = 0
         
         # Daily usage analytics: { "YYYY-MM-DD": { "<model_name>": { "prompt_tokens": int, "completion_tokens": int, "tokens": int, "requests": int, "cost": float } } }
@@ -94,10 +101,18 @@ class UsageTracker:
             self.last_duration_ms = duration_ms
             self.last_ttft_ms = ttft_ms
             
+            # Update current session totals
             self.session_prompt_tokens += prompt_tokens
             self.session_completion_tokens += completion_tokens
             self.session_cost += turn_cost
-            self.total_requests += 1
+            self.session_requests += 1
+
+            # Update lifetime persistent totals
+            self.lifetime_prompt_tokens += prompt_tokens
+            self.lifetime_completion_tokens += completion_tokens
+            self.lifetime_cost += turn_cost
+            self.lifetime_requests += 1
+            self.total_requests = self.lifetime_requests
 
             # Daily model aggregation
             if today not in self.daily_usage:
@@ -194,9 +209,26 @@ class UsageTracker:
             self.current_context_tokens = context_tokens
             self.max_context_limit = pricing.get("context_limit", 128000)
 
+    def reset_session(self):
+        """
+        Resets active session metrics to 0 without affecting persistent lifetime history.
+        """
+        with self._lock:
+            self.session_prompt_tokens = 0
+            self.session_completion_tokens = 0
+            self.session_cost = 0.0
+            self.session_requests = 0
+            self.last_prompt_tokens = 0
+            self.last_completion_tokens = 0
+            self.last_cost = 0.0
+            self.last_duration_ms = 0.0
+            self.last_ttft_ms = None
+            self.current_context_tokens = 0
+
     def get_summary(self, model_name: str = "gpt-4o") -> Dict[str, Any]:
         """
-        Returns snapshot of current usage, costs, context fill ratio, and turn latency.
+        Returns snapshot of current turn usage, active session totals, lifetime totals,
+        context fill ratio, and latency metrics.
         """
         pricing = get_model_pricing(model_name)
         limit = pricing.get("context_limit", 128000)
@@ -204,15 +236,29 @@ class UsageTracker:
         with self._lock:
             context_pct = min(100.0, (self.current_context_tokens / max(1, limit)) * 100.0)
             return {
+                # Last Turn
                 "last_prompt_tokens": self.last_prompt_tokens,
                 "last_completion_tokens": self.last_completion_tokens,
                 "last_cost": round(self.last_cost, 6),
                 "last_duration_ms": round(self.last_duration_ms, 2),
                 "last_ttft_ms": round(self.last_ttft_ms, 2) if self.last_ttft_ms is not None else None,
+                
+                # Active Session Totals
                 "session_prompt_tokens": self.session_prompt_tokens,
                 "session_completion_tokens": self.session_completion_tokens,
+                "session_tokens": self.session_prompt_tokens + self.session_completion_tokens,
                 "session_cost": round(self.session_cost, 6),
-                "total_requests": self.total_requests,
+                "session_requests": self.session_requests,
+
+                # Persistent Lifetime Totals
+                "lifetime_prompt_tokens": self.lifetime_prompt_tokens,
+                "lifetime_completion_tokens": self.lifetime_completion_tokens,
+                "lifetime_tokens": self.lifetime_prompt_tokens + self.lifetime_completion_tokens,
+                "lifetime_cost": round(self.lifetime_cost, 6),
+                "lifetime_requests": self.lifetime_requests,
+                "total_requests": self.lifetime_requests,
+
+                # Context Window
                 "current_context_tokens": self.current_context_tokens,
                 "max_context_limit": limit,
                 "context_percent": round(context_pct, 1),
@@ -236,14 +282,19 @@ class UsageTracker:
 
     def save_history(self):
         """
-        Persists cumulative metrics and daily usage to disk, and updates usage_data.js.
+        Persists cumulative lifetime metrics and daily usage to disk, and updates usage_data.js.
         """
         with self._lock:
             data = {
-                "session_prompt_tokens": self.session_prompt_tokens,
-                "session_completion_tokens": self.session_completion_tokens,
-                "session_cost": round(self.session_cost, 6),
-                "total_requests": self.total_requests,
+                "lifetime_prompt_tokens": self.lifetime_prompt_tokens,
+                "lifetime_completion_tokens": self.lifetime_completion_tokens,
+                "lifetime_cost": round(self.lifetime_cost, 6),
+                "lifetime_requests": self.lifetime_requests,
+                # Backwards-compatible legacy aliases
+                "session_prompt_tokens": self.lifetime_prompt_tokens,
+                "session_completion_tokens": self.lifetime_completion_tokens,
+                "session_cost": round(self.lifetime_cost, 6),
+                "total_requests": self.lifetime_requests,
                 "daily_usage": self.daily_usage,
             }
             daily_snapshot = dict(self.daily_usage)
@@ -272,10 +323,11 @@ class UsageTracker:
             with open(self.persistence_file, "r", encoding="utf-8") as f:
                 data = json.load(f)
                 with self._lock:
-                    self.session_prompt_tokens = data.get("session_prompt_tokens", 0)
-                    self.session_completion_tokens = data.get("session_completion_tokens", 0)
-                    self.session_cost = data.get("session_cost", 0.0)
-                    self.total_requests = data.get("total_requests", 0)
+                    self.lifetime_prompt_tokens = data.get("lifetime_prompt_tokens", data.get("session_prompt_tokens", 0))
+                    self.lifetime_completion_tokens = data.get("lifetime_completion_tokens", data.get("session_completion_tokens", 0))
+                    self.lifetime_cost = data.get("lifetime_cost", data.get("session_cost", 0.0))
+                    self.lifetime_requests = data.get("lifetime_requests", data.get("total_requests", 0))
+                    self.total_requests = self.lifetime_requests
                     self.daily_usage = data.get("daily_usage", {})
 
                     # Ensure backward compatibility for legacy records missing latency/reliability

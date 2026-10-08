@@ -525,5 +525,18 @@ def tui():
         raise typer.Exit(1)
 
 
+@app.command()
+def load():
+    """
+    Launch the interactive TUI Spinner & Loader Gallery to preview all animations live.
+    """
+    from agent.terminal_ui.loader_gallery import run_loader_gallery
+    try:
+        run_loader_gallery()
+    except Exception as e:
+        console.print(f"[red]Error launching Loader Gallery: {e}[/red]")
+        raise typer.Exit(1)
+
+
 if __name__ == "__main__":
     app()

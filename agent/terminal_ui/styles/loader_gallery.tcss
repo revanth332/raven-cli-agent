@@ -1,0 +1,123 @@
+Screen {
+    background: #0B0F17;
+    layout: vertical;
+}
+
+#header_bar {
+    dock: top;
+    height: 4;
+    background: #111827;
+    border-bottom: heavy #06B6D4;
+    padding: 0 2;
+    layout: horizontal;
+    align: left middle;
+}
+
+#header_title {
+    color: #38BDF8;
+    text-style: bold;
+    content-align: left middle;
+    height: 100%;
+    width: 1fr;
+}
+
+#header_hint {
+    color: #94A3B8;
+    content-align: right middle;
+    height: 100%;
+    width: auto;
+}
+
+#search_container {
+    dock: top;
+    height: 3;
+    padding: 0 2;
+    margin: 1 0;
+}
+
+#search_input {
+    width: 100%;
+    background: #1E293B;
+    border: round #334155;
+    color: #F8FAFC;
+}
+
+#search_input:focus {
+    border: round #06B6D4;
+}
+
+#gallery_container {
+    width: 100%;
+    height: 1fr;
+    padding: 1 2;
+    overflow-y: auto;
+}
+
+#spinner_grid {
+    layout: grid;
+    grid-size: 3;
+    grid-gutter: 1 2;
+    grid-rows: auto;
+}
+
+.spinner_card {
+    background: #161F30;
+    border: round #334155;
+    padding: 1;
+    height: 9;
+    layout: vertical;
+}
+
+.spinner_card:hover {
+    border: round #06B6D4;
+    background: #1E293B;
+}
+
+.card_header {
+    height: 1;
+    layout: horizontal;
+    align: left middle;
+    margin-bottom: 1;
+}
+
+.spinner_name {
+    color: #38BDF8;
+    text-style: bold;
+    width: 1fr;
+}
+
+.spinner_interval {
+    color: #64748B;
+    text-align: right;
+    width: auto;
+}
+
+.spinner_preview_box {
+    height: 3;
+    background: #0F172A;
+    border: solid #1E293B;
+    content-align: center middle;
+    align: center middle;
+    margin-bottom: 1;
+}
+
+.spinner_live_text {
+    content-align: center middle;
+    text-align: center;
+    color: #22D3EE;
+    text-style: bold;
+}
+
+.spinner_meta {
+    color: #64748B;
+    content-align: center middle;
+    text-align: center;
+}
+
+#footer_bar {
+    dock: bottom;
+    height: 1;
+    background: #111827;
+    color: #64748B;
+    text-align: center;
+}

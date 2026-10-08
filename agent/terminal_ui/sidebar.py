@@ -72,7 +72,7 @@ class ConsumptionSidebar(Vertical):
         session_completion = metrics.get("session_completion_tokens", 0)
         session_tokens = session_prompt + session_completion
         session_cost = metrics.get("session_cost", 0.0)
-        total_reqs = metrics.get("total_requests", 0)
+        session_reqs = metrics.get("session_requests", metrics.get("total_requests", 0))
 
         curr_context = metrics.get("current_context_tokens", 0)
         max_context = metrics.get("max_context_limit", 128000)
@@ -111,7 +111,7 @@ class ConsumptionSidebar(Vertical):
             f"  [dim #94A3B8]Completion:[/dim #94A3B8] {last_completion:,}\n"
             f"  [dim #94A3B8]Cost:[/dim #94A3B8] [bold #10B981]${last_cost:.4f}[/bold #10B981]\n\n"
             f"[bold #F8FAFC]Session Totals:[/bold #F8FAFC]\n"
-            f"  [dim #94A3B8]Requests:[/dim #94A3B8] {total_reqs}\n"
+            f"  [dim #94A3B8]Requests:[/dim #94A3B8] {session_reqs}\n"
             f"  [dim #94A3B8]Total Tokens:[/dim #94A3B8] {session_tokens:,}\n"
             f"  [dim #94A3B8]Total Cost:[/dim #94A3B8] [bold #10B981]${session_cost:.4f}[/bold #10B981]\n"
         )

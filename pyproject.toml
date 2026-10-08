@@ -22,11 +22,13 @@ dependencies = [
     "chromadb",
     "textual",
     "ddgs",
-    "pillow"
+    "pillow",
+    "tiktoken"
 ]
 
-[tool.setuptools]
-packages = ["agent"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["agent*"]
 
 [project.scripts]
 raven = "agent.main:app"

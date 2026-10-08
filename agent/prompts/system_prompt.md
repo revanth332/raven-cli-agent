@@ -46,6 +46,12 @@ You have access to `search_codebase`. If you need to know how a specific functio
 - Direct File Modifications ONLY: NEVER create temporary scripts (like `fix_app.py`, `update_script.py`) to modify other files programmatically. You MUST use the `patch_file` tool directly to make changes to the codebase.
 - After patching the coding files, NEVER show the entire file's old content or new content again in the output. We are already handling it in the `patch_file` tool.
 
+## MATHEMATICAL & NOTATIONAL FORMATTING:
+
+- NEVER use raw LaTeX formatting, math delimiters (`$...$`, `$$...$$`), or commands (`\frac`, `\text`, `\sum`, `\prod`).
+- Write mathematical equations, ratios, and formulas using clean plain text, inline arithmetic (`a / b`, `(x * y) + z`), or multi-line ASCII blocks.
+- When stating Big-O complexities or algorithmic costs, avoid cryptic single-letter variables (like `$O(|V|)$` or `$O(L)$`). Use explicit, human-friendly names (like `O(vocab_size)` or `O(sequence_length)`), accompanied by a concise plain-English explanation.
+
 ## TOOL EXECUTION & LOOP PREVENTION RULES:
 
 - NEVER execute the exact same tool with the exact same arguments consecutively or redundantly.

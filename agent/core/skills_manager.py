@@ -111,9 +111,51 @@ def dump_frontmatter(metadata: Dict[str, Any], content: str) -> str:
     return "\n".join(lines) + "\n"
 
 
-def parse_skill_file(path: Path, scope: str = "project") -> Optional[Dict[str, Any]]:
+def find_folder_skill_entrypoint(folder_path: Path) -> Optional[Path]:
+    """
+    Resolves the primary entrypoint markdown file inside a skill directory.
+    Priority order:
+    1. SKILL.md
+    2. skill.md
+    3. index.md
+    4. <folder_name>.md
+    """
+    if not folder_path.is_dir():
+        return None
+
+    candidate_names = [
+        "SKILL.md",
+        "skill.md",
+        "index.md",
+        f"{folder_path.name}.md",
+    ]
+
+    for cand_name in candidate_names:
+        cand_path = folder_path / cand_name
+        if cand_path.is_file():
+            return cand_path
+
+    # Case-insensitive fallback
+    try:
+        for child in folder_path.iterdir():
+            if child.is_file() and child.suffix.lower() == ".md":
+                if child.name.lower() in ("skill.md", "index.md", f"{folder_path.name.lower()}.md"):
+                    return child
+    except Exception:
+        pass
+
+    return None
+
+
+def parse_skill_file(
+    path: Path,
+    scope: str = "project",
+    skill_type: str = "file",
+    root_dir: Optional[Path] = None,
+) -> Optional[Dict[str, Any]]:
     """
     Parses a single skill markdown file with frontmatter.
+    Supports standalone files and folder-based skill entrypoints.
     Returns metadata dictionary or None if invalid.
     """
     if not path.is_file() or path.suffix.lower() != ".md":
@@ -126,7 +168,9 @@ def parse_skill_file(path: Path, scope: str = "project") -> Optional[Dict[str, A
 
     meta, body = parse_frontmatter(raw_text)
 
-    name = meta.get("name") or path.stem.lower()
+    # If name not explicitly declared, use folder name if folder skill, else file stem
+    fallback_name = root_dir.name.lower() if (skill_type == "folder" and root_dir) else path.stem.lower()
+    name = meta.get("name") or fallback_name
     name = sanitize_skill_name(name)
     description = meta.get("description", "")
     triggers = meta.get("triggers", [])
@@ -145,14 +189,30 @@ def parse_skill_file(path: Path, scope: str = "project") -> Optional[Dict[str, A
     except Exception:
         rel_path = str(path).replace("\\", "/")
 
+    rel_root_dir = None
+    full_root_dir = None
+    if skill_type == "folder" and root_dir:
+        full_root_dir = str(root_dir.resolve())
+        try:
+            project_root = get_project_root()
+            if scope == "project" or root_dir.is_relative_to(project_root):
+                rel_root_dir = str(root_dir.relative_to(project_root)).replace("\\", "/")
+            else:
+                rel_root_dir = str(root_dir).replace("\\", "/")
+        except Exception:
+            rel_root_dir = str(root_dir).replace("\\", "/")
+
     return {
         "name": name,
         "description": description,
         "triggers": triggers,
         "enabled": enabled,
         "scope": scope,
+        "skill_type": skill_type,
         "skill_file_path": rel_path,
+        "root_dir": rel_root_dir,
         "full_path": str(path.resolve()),
+        "full_root_dir": full_root_dir,
         "content": body.strip(),
         "raw_markdown": raw_text,
     }
@@ -225,31 +285,41 @@ def migrate_legacy_skills_json() -> None:
 def discover_skills(include_disabled: bool = True) -> List[Dict[str, Any]]:
     """
     Scans both user global (~/.raven/skills/) and project-local (./skills/) directories.
+    Supports both standalone .md files and folder-based skills (containing SKILL.md/index.md).
     Project-local skills override global skills with the same name.
     """
     migrate_legacy_skills_json()
 
     skills_map: Dict[str, Dict[str, Any]] = {}
 
-    # 1. Scan User Global Scope
-    try:
-        global_dir = get_global_skills_dir()
-        if global_dir.exists():
-            for file in sorted(global_dir.glob("*.md")):
-                skill = parse_skill_file(file, scope="global")
+    def _scan_directory(target_dir: Path, scope: str) -> None:
+        if not target_dir.exists():
+            return
+
+        for item in sorted(target_dir.iterdir()):
+            if item.name.startswith((".", "_")):
+                continue
+
+            if item.is_file() and item.suffix.lower() == ".md":
+                skill = parse_skill_file(item, scope=scope, skill_type="file")
                 if skill and skill.get("name"):
                     skills_map[skill["name"]] = skill
+            elif item.is_dir():
+                entrypoint = find_folder_skill_entrypoint(item)
+                if entrypoint:
+                    skill = parse_skill_file(entrypoint, scope=scope, skill_type="folder", root_dir=item)
+                    if skill and skill.get("name"):
+                        skills_map[skill["name"]] = skill
+
+    # 1. Scan User Global Scope
+    try:
+        _scan_directory(get_global_skills_dir(), scope="global")
     except Exception:
         pass
 
     # 2. Scan Project Local Scope (takes precedence)
     try:
-        project_dir = get_project_skills_dir()
-        if project_dir.exists():
-            for file in sorted(project_dir.glob("*.md")):
-                skill = parse_skill_file(file, scope="project")
-                if skill and skill.get("name"):
-                    skills_map[skill["name"]] = skill
+        _scan_directory(get_project_skills_dir(), scope="project")
     except Exception:
         pass
 
@@ -284,9 +354,11 @@ def save_skill(
     scope: str = "project",
     enabled: bool = True,
     triggers: Optional[List[str]] = None,
+    as_folder: bool = False,
 ) -> Dict[str, Any]:
     """
     Saves a skill into the target scope directory (global or project).
+    Supports single file skills and folder-based skills.
     Generates standard YAML frontmatter in Markdown.
     """
     clean_name = sanitize_skill_name(name)
@@ -296,7 +368,21 @@ def save_skill(
     target_dir = get_project_skills_dir() if scope.lower() == "project" else get_global_skills_dir()
     target_dir.mkdir(parents=True, exist_ok=True)
 
-    file_path = (target_dir / f"{clean_name}.md").resolve()
+    existing = get_skill(clean_name)
+    skill_type = "file"
+    root_dir: Optional[Path] = None
+
+    if as_folder:
+        skill_type = "folder"
+        root_dir = (target_dir / clean_name).resolve()
+        root_dir.mkdir(parents=True, exist_ok=True)
+        file_path = (root_dir / "SKILL.md").resolve()
+    elif existing and existing.get("skill_type") == "folder" and existing.get("scope") == scope.lower():
+        skill_type = "folder"
+        file_path = Path(existing["full_path"]).resolve()
+        root_dir = Path(existing["full_root_dir"]).resolve() if existing.get("full_root_dir") else file_path.parent
+    else:
+        file_path = (target_dir / f"{clean_name}.md").resolve()
 
     # Path traversal validation
     if not str(file_path).startswith(str(target_dir.resolve())):
@@ -311,9 +397,10 @@ def save_skill(
         metadata["triggers"] = triggers
 
     full_md = dump_frontmatter(metadata, content)
+    file_path.parent.mkdir(parents=True, exist_ok=True)
     file_path.write_text(full_md, encoding="utf-8")
 
-    parsed = parse_skill_file(file_path, scope=scope.lower())
+    parsed = parse_skill_file(file_path, scope=scope.lower(), skill_type=skill_type, root_dir=root_dir)
     if not parsed:
         raise RuntimeError(f"Failed to parse written skill file at {file_path}")
     return parsed
@@ -321,7 +408,7 @@ def save_skill(
 
 def delete_skill(name: str, scope: Optional[str] = None) -> bool:
     """
-    Deletes a skill markdown file from the target scope or wherever it exists.
+    Deletes a skill (single markdown file or entire skill directory) from the target scope.
     """
     clean_name = sanitize_skill_name(name)
     if not clean_name:
@@ -332,8 +419,22 @@ def delete_skill(name: str, scope: Optional[str] = None) -> bool:
 
     for sc in scopes_to_check:
         target_dir = get_project_skills_dir() if sc == "project" else get_global_skills_dir()
+        target_dir_resolved = str(target_dir.resolve())
+
+        # Check for directory skill
+        folder_path = (target_dir / clean_name).resolve()
+        if folder_path.is_dir() and str(folder_path).startswith(target_dir_resolved) and folder_path != target_dir.resolve():
+            try:
+                shutil.rmtree(folder_path)
+                deleted = True
+            except Exception:
+                pass
+            if deleted:
+                break
+
+        # Check for file skill
         file_path = (target_dir / f"{clean_name}.md").resolve()
-        if str(file_path).startswith(str(target_dir.resolve())) and file_path.exists():
+        if str(file_path).startswith(target_dir_resolved) and file_path.is_file():
             try:
                 file_path.unlink()
                 deleted = True
@@ -384,18 +485,24 @@ def build_skills_prompt_section() -> str:
     lines = [
         "SKILLS:",
         "- Skills are predefined instructions to complete a specific task. Below are the skills available for you. you just need to read the respective skill file based on the requirement using `read_file` tool.",
+        "- For folder-based skills, reference files or examples relative to the skill's base directory.",
         "**NOTE:** Utilize 'work/' folder to execute any commands or install any packages as part of the procedure while performing the skills. Basically you need to use 'work/' as your working directory/sandbox."
     ]
 
     for s in skills:
         name = s.get("name", "")
         scope = s.get("scope", "project")
+        skill_type = s.get("skill_type", "file")
         path = s.get("skill_file_path", f"skills/{name}.md")
+        root_dir = s.get("root_dir")
         desc = s.get("description", "")
         lines.append("---")
         lines.append(f"name: {name}")
         lines.append(f"scope: {scope}")
+        lines.append(f"type: {skill_type}")
         lines.append(f"skill_file_path: {path}")
+        if root_dir:
+            lines.append(f"root_dir: {root_dir}")
         lines.append(f'description: "{desc}"')
 
     return "\n".join(lines)

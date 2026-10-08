@@ -71,3 +71,17 @@ def count_tokens(text_or_messages: Union[str, List[Dict[str, Any]], Dict[str, An
 
     # Heuristic fallback: standard estimate of ~4 characters per token for English/code text
     return max(1, len(text) // 4)
+
+
+def get_tools_token_count(tools: Union[List[Dict[str, Any]], None], model_name: str = "gpt-4o") -> int:
+    """
+    Counts estimated tokens for tool definition schemas attached to the request payload.
+    """
+    if not tools:
+        return 0
+    try:
+        tools_str = json.dumps(tools)
+        return count_tokens(tools_str, model_name)
+    except Exception:
+        return 0
+

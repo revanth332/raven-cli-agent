@@ -30,18 +30,20 @@ class ConfirmDeleteModal(ModalScreen[bool]):
         Binding("escape", "cancel", "Cancel", priority=True),
     ]
 
-    def __init__(self, skill_name: str, scope: str = "project") -> None:
+    def __init__(self, skill_name: str, scope: str = "project", skill_type: str = "file") -> None:
         super().__init__()
         self.skill_name = skill_name
         self.scope = scope
+        self.skill_type = skill_type
 
     def compose(self) -> ComposeResult:
+        type_desc = "skill folder and all contained files" if self.skill_type == "folder" else "markdown file"
         with Vertical(id="confirm_delete_container"):
             yield Static("⚠️ CONFIRM DELETION", id="confirm_delete_title")
             yield Static(
                 f"Are you sure you want to delete skill [bold cyan]'{self.skill_name}'[/bold cyan] "
                 f"from [bold #38BDF8]{self.scope}[/bold #38BDF8] scope?\n\n"
-                f"[dim]This action permanently removes the markdown file and cannot be undone.[/dim]",
+                f"[dim]This action permanently removes the {type_desc} and cannot be undone.[/dim]",
                 id="confirm_delete_message",
             )
             with Horizontal(id="confirm_delete_actions"):
@@ -79,17 +81,24 @@ class CreateSkillModal(ModalScreen[dict | None]):
             ("Project Local (./skills)", "project"),
             ("User Global (~/.raven/skills)", "global"),
         ]
+        format_options = [
+            ("Single File (.md)", "file"),
+            ("Multi-File Folder (SKILL.md)", "folder"),
+        ]
 
         with Vertical(id="create_skill_container"):
             yield Static("✨ CREATE NEW SKILL", id="create_skill_title")
 
             with Horizontal(classes="form_row"):
                 with Vertical(classes="form_col_flex"):
-                    yield Label("Skill Name (e.g., fastapi-expert, tailwind-v4):", classes="form_label")
+                    yield Label("Skill Name (e.g., fastapi-expert, animate):", classes="form_label")
                     yield Input(placeholder="Skill identifier name...", id="input_skill_name")
                 with Vertical(classes="form_col_fixed"):
                     yield Label("Target Scope:", classes="form_label")
                     yield Select(scope_options, value="project", id="select_skill_scope", allow_blank=False)
+                with Vertical(classes="form_col_fixed"):
+                    yield Label("Format:", classes="form_label")
+                    yield Select(format_options, value="file", id="select_skill_format", allow_blank=False)
 
             yield Label("Trigger Description (When to use this skill):", classes="form_label")
             yield TextArea(id="input_skill_desc", show_line_numbers=False)
@@ -120,6 +129,8 @@ class CreateSkillModal(ModalScreen[dict | None]):
         name_input = self.query_one("#input_skill_name", Input).value.strip()
         scope_select = self.query_one("#select_skill_scope", Select)
         scope = scope_select.value if scope_select.value != Select.BLANK else "project"
+        format_select = self.query_one("#select_skill_format", Select)
+        is_folder = (format_select.value == "folder") if format_select.value != Select.BLANK else False
         desc_input = self.query_one("#input_skill_desc", TextArea).text.strip()
         content_input = self.query_one("#input_skill_content", TextArea).text.strip()
 
@@ -139,7 +150,13 @@ class CreateSkillModal(ModalScreen[dict | None]):
             return
 
         try:
-            entry = save_skill(name=name_input, description=desc_input, content=content_input, scope=scope)
+            entry = save_skill(
+                name=name_input,
+                description=desc_input,
+                content=content_input,
+                scope=scope,
+                as_folder=is_folder,
+            )
             self.dismiss(entry)
         except Exception as e:
             self.notify(f"Failed to save skill: {e}", title="Error", severity="error")
@@ -166,14 +183,20 @@ class SkillDetailModal(ModalScreen[dict | None]):
 
     def compose(self) -> ComposeResult:
         scope_badge = f"[#38BDF8][{self.scope.upper()}][/#38BDF8]" if self.scope == "project" else f"[#A855F7][{self.scope.upper()}][/#A855F7]"
+        skill_type = self.skill.get("skill_type", "file")
+        type_badge = "[#F59E0B][FOLDER][/#F59E0B]" if skill_type == "folder" else "[#6EE7B7][FILE][/#6EE7B7]"
         status_badge = "[#22C55E][ENABLED][/#22C55E]" if self.is_enabled else "[#64748B][DISABLED][/#64748B]"
+
+        path_info = f"File: {self.skill.get('skill_file_path', '')}"
+        if skill_type == "folder" and self.skill.get("root_dir"):
+            path_info += f"  |  Dir: {self.skill.get('root_dir')}"
 
         with Vertical(id="skill_detail_container"):
             yield Static(
-                f"📝 SKILL: [bold cyan]{self.skill_name}[/bold cyan]  {scope_badge}  {status_badge}",
+                f"📝 SKILL: [bold cyan]{self.skill_name}[/bold cyan]  {scope_badge}  {type_badge}  {status_badge}",
                 id="skill_detail_title",
             )
-            yield Static(f"[dim]File: {self.skill.get('skill_file_path', '')}[/dim]", id="skill_detail_path")
+            yield Static(f"[dim]{path_info}[/dim]", id="skill_detail_path")
 
             yield Label("Trigger Description:", classes="form_label")
             yield TextArea(self.skill.get("description", ""), id="edit_skill_desc", show_line_numbers=False)
@@ -228,7 +251,8 @@ class SkillDetailModal(ModalScreen[dict | None]):
                 else:
                     self.notify(f"Failed to delete skill '{self.skill_name}'.", severity="error")
 
-        self.app.push_screen(ConfirmDeleteModal(self.skill_name, self.scope), on_confirmed)
+        skill_type = self.skill.get("skill_type", "file")
+        self.app.push_screen(ConfirmDeleteModal(self.skill_name, self.scope, skill_type=skill_type), on_confirmed)
 
     def save_changes(self) -> None:
         desc_input = self.query_one("#edit_skill_desc", TextArea).text.strip()
@@ -340,16 +364,18 @@ class SkillsManagerModal(ModalScreen[str | None]):
         for skill in skills:
             name = skill.get("name", "unnamed")
             scope = skill.get("scope", "project")
+            skill_type = skill.get("skill_type", "file")
             enabled = skill.get("enabled", True)
             path = skill.get("skill_file_path", f"skills/{name}.md")
             desc = skill.get("description", "No description provided.")
-            short_desc = desc[:85] + ("..." if len(desc) > 85 else "")
+            short_desc = desc[:80] + ("..." if len(desc) > 80 else "")
 
             scope_badge = "[#38BDF8][Project][/#38BDF8]" if scope == "project" else "[#A855F7][Global][/#A855F7]"
+            type_badge = "[#F59E0B][Folder][/#F59E0B]" if skill_type == "folder" else "[#6EE7B7][File][/#6EE7B7]"
             status_badge = "[#22C55E][Enabled][/#22C55E]" if enabled else "[#64748B][Disabled][/#64748B]"
 
             label = (
-                f"[bold cyan]{name:<20}[/bold cyan]  {scope_badge}  {status_badge}  [dim]({path})[/dim]\n"
+                f"[bold cyan]{name:<20}[/bold cyan]  {scope_badge}  {type_badge}  {status_badge}  [dim]({path})[/dim]\n"
                 f"   [dim white]{short_desc}[/dim white]"
             )
             opt_list.add_option(Option(label, id=name))
@@ -440,6 +466,7 @@ class SkillsManagerModal(ModalScreen[str | None]):
 
         name = skill.get("name", "")
         scope = skill.get("scope", "project")
+        skill_type = skill.get("skill_type", "file")
 
         def on_confirmed(confirmed: bool) -> None:
             if confirmed:
@@ -449,7 +476,7 @@ class SkillsManagerModal(ModalScreen[str | None]):
                 else:
                     self.notify(f"Failed to delete skill '{name}'.", severity="error")
 
-        self.app.push_screen(ConfirmDeleteModal(name, scope), on_confirmed)
+        self.app.push_screen(ConfirmDeleteModal(name, scope, skill_type=skill_type), on_confirmed)
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option_id and event.option_id != "none":
