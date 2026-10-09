@@ -820,6 +820,20 @@ class RavenTUI(App):
         finally:
             self.call_from_thread(self.set_input_ready, True)
 
+    @work(thread=True)
+    def execute_imagine_worker(self, prompt: str, raven_card: ChatMessageWidget) -> None:
+        """Background worker to generate image directly via /imagine command."""
+        try:
+            from agent.tools.image_generation_tools import generate_image
+            result_str = generate_image(prompt=prompt)
+            self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(result_str), result_str)
+        except Exception as e:
+            err_msg = f"**Image Generation Error:** {e}"
+            self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(err_msg), err_msg)
+        finally:
+            self.call_from_thread(self.remove_thinking_loader)
+            self.is_generating = False
+
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         """Triggers when the user presses 'Enter' in the input box."""
         if self.pending_permission:
@@ -1005,6 +1019,62 @@ class RavenTUI(App):
                 self.stream_response(multimodal_content, raven_card)
             else:
                 self.stream_image_with_vision_bridge(encoded["data_uri"], image_query, raven_card)
+            return
+
+        if user_input.lower() == "/image-model" or user_input.lower().startswith("/image-model"):
+            parts = user_input.split(" ", 1)
+            target_model = parts[1].strip() if len(parts) > 1 else ""
+
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+
+            history_container = self.query_one("#history")
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            if target_model:
+                settings.set_config({"IMAGE_MODEL": target_model})
+                msg = f"**System:** Image generation model updated to `{target_model}`."
+            else:
+                current_img_model = getattr(settings, "IMAGE_MODEL", None) or "black-forest-labs/flux-1-schnell"
+                msg = f"**System:** Current Image Generation Model: `{current_img_model}`\n\nTo switch models, use `/image-model <model_name>` (e.g. `/image-model black-forest-labs/flux-1-dev` or `dall-e-3`)."
+
+            info_card = ChatMessageWidget(role="assistant", raw_text=msg, classes="raven-msg")
+            history_container.mount(info_card)
+            self.scroll_to_bottom()
+            return
+
+        if user_input.lower().startswith("/imagine") and (len(user_input) == 8 or user_input[8] in (" ", "\t")):
+            parts = user_input.split(" ", 1)
+            prompt = parts[1].strip() if len(parts) > 1 else ""
+            if not prompt:
+                self.notify("Usage: /imagine <prompt>", title="Missing Argument", severity="warning")
+                input_widget = event.text_area
+                input_widget.text = ""
+                return
+
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+
+            history_container = self.query_one("#history")
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            user_card = ChatMessageWidget(role="user", raw_text=f"/imagine {prompt}", classes="user-msg")
+            history_container.mount(user_card)
+
+            img_model = getattr(settings, "IMAGE_MODEL", None) or "black-forest-labs/flux-1-schnell"
+            raven_card = ChatMessageWidget(role="assistant", raw_text="", model_name=img_model, classes="raven-msg")
+            history_container.mount(raven_card)
+            self.scroll_to_bottom()
+            self.show_thinking_loader("Generating image...")
+            self.is_generating = True
+
+            self.execute_imagine_worker(prompt, raven_card)
             return
 
         if user_input.lower() == "/compact" or user_input.lower().startswith("/compact"):

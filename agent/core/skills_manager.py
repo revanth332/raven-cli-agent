@@ -28,6 +28,13 @@ def get_global_skills_dir() -> Path:
     return skills_dir
 
 
+def get_global_sandbox_dir() -> Path:
+    """Returns the path to the user's global central sandbox directory in ~/.raven/sandbox."""
+    sandbox_dir = Path.home() / ".raven" / "sandbox"
+    sandbox_dir.mkdir(parents=True, exist_ok=True)
+    return sandbox_dir
+
+
 def get_skills_dir() -> Path:
     """Backward compatibility alias for project skills directory."""
     return get_project_skills_dir()
@@ -486,7 +493,7 @@ def build_skills_prompt_section() -> str:
         "SKILLS:",
         "- Skills are predefined instructions to complete a specific task. Below are the skills available for you. you just need to read the respective skill file based on the requirement using `read_file` tool.",
         "- For folder-based skills, reference files or examples relative to the skill's base directory.",
-        "**NOTE:** Utilize 'work/' folder to execute any commands or install any packages as part of the procedure while performing the skills. Basically you need to use 'work/' as your working directory/sandbox."
+        f"**NOTE:** Utilize the central sandbox folder '{get_global_sandbox_dir().as_posix()}' to execute scratchpad scripts, install temporary packages/dependencies, and stage document/presentation artifacts while performing skills. Do NOT pollute the user's active project workspace with scratchpad files.",
     ]
 
     for s in skills:

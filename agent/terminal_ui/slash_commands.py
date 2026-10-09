@@ -84,6 +84,16 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "placeholder": "/paste-image [query]",
         "system_prompt": "",
     },
+    "/imagine": {
+        "description": "Generate an image from prompt (/imagine <prompt>)",
+        "placeholder": "/imagine <prompt>",
+        "system_prompt": "",
+    },
+    "/image-model": {
+        "description": "View or switch default image generation model (/image-model [model_name])",
+        "placeholder": "/image-model [model_name]",
+        "system_prompt": "",
+    },
     "/compact": {
         "description": "Summarize and compact conversation history",
         "placeholder": "/compact [optional instructions]",

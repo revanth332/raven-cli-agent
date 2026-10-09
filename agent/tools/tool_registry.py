@@ -10,6 +10,7 @@ from agent.tools.process_tools import (
     list_background_processes,
 )
 from agent.tools.web_tools import web_search,extract_content_from_web_links
+from agent.tools.image_generation_tools import generate_image
 from agent.core.indexer import search_codebase
 
 raven_tools = [
@@ -573,10 +574,52 @@ raven_tools = [
                 ]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "generate_image",
+            "description": "Generates an image from a detailed text prompt using the configured image generation model. Saves the output file locally in 'artifacts/images/' and opens it in the default viewer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Detailed description of the image to generate."
+                    },
+                    "filename": {
+                        "type": "string",
+                        "description": "Optional descriptive base filename (e.g. 'auth_flow_diagram')."
+                    },
+                    "aspect_ratio": {
+                        "type": "string",
+                        "enum": ["1:1", "16:9", "9:16", "4:3", "3:4"],
+                        "description": "Aspect ratio ('1:1', '16:9', '9:16', '4:3', '3:4'). Defaults to '1:1'."
+                    },
+                    "model": {
+                        "type": "string",
+                        "description": "Specific image model to override default IMAGE_MODEL setting."
+                    },
+                    "negative_prompt": {
+                        "type": "string",
+                        "description": "Elements or styles to exclude (if supported by engine)."
+                    }
+                },
+                "required": [
+                    "prompt"
+                ]
+            }
+        }
     }
 ]
 
 TOOL_REGISTRY = {
+    "generate_image": {
+        "fn": generate_image,
+        "display_name": "Generate Image",
+        "display_arg": "prompt",
+        "ignore_display": False
+    },
     "create_checkpoint": {
         "fn": create_checkpoint,
         "display_name": "Checkpoint",

@@ -29,3 +29,4 @@ testing.py
 node_modules/
 work/
 .raven/
+artifacts/

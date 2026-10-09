@@ -349,6 +349,25 @@ def format_checkpoint_result(tool_name: str, result_str: str, expanded: bool = F
     return result_text
 
 
+def format_image_generation_result(prompt: str, result_str: str, expanded: bool = False) -> Text:
+    """Formats image generation result."""
+    result_text = Text()
+    clean = str(result_str).strip()
+    if clean.startswith("Error"):
+        result_text.append(f"   |_ {clean}\n", style="bold red")
+        return result_text
+
+    lines = clean.splitlines()
+    first_line = lines[0] if lines else "Image generated successfully."
+    result_text.append(f"   |_ {first_line}\n", style="bold green")
+    
+    if len(lines) > 1:
+        for line in lines[1:]:
+            result_text.append(f"       {line.strip()}\n", style="dim white")
+            
+    return result_text
+
+
 def format_tool_result_preview(
     tool_name: str,
     tool_args: dict,
@@ -378,6 +397,9 @@ def format_tool_result_preview(
         return format_search_content_result(query, str(result), expanded=expanded)
     elif tool_name in ("create_checkpoint", "rollback_checkpoint", "list_checkpoints"):
         return format_checkpoint_result(tool_name, str(result), expanded=expanded)
+    elif tool_name == "generate_image":
+        prompt = args.get("prompt", "")
+        return format_image_generation_result(prompt, str(result), expanded=expanded)
     else:
         return format_generic_tool_result(tool_name, result, expanded=expanded)
 
