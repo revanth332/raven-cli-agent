@@ -1,25 +1,25 @@
 Project architecture:
 
- Updated architecture map to include agent/terminal_ui/chat_message.py ChatMessageWidget component. 
+ Added /fork command and session branching logic into session_manager and app.py 
 
  ```mermaid
 graph TD
-    UI[agent/terminal_ui/app.py] -->|renders| Input[agent/terminal_ui/chat_input.py]
-    UI -->|renders| Sidebar[agent/terminal_ui/sidebar.py]
-    UI -->|renders| Msg[agent/terminal_ui/chat_message.py]
-    UI -->|mounts| PermBar[agent/terminal_ui/permission_box.py]
-    UI -->|mounts| Modals[Modal Dialogs]
-    Modals --> ModelModal[model_select_modal.py]
-    Modals --> SessionModal[session_select_modal.py]
-
-    UI -->|triggers| LLM[agent/core/llm.py]
-    LLM -->|invokes| Registry[agent/tools/tool_registry.py]
-    Registry --> FileTools[agent/tools/file_tools.py]
-    Registry --> GitTools[agent/tools/git_tools.py]
-    Registry --> WebTools[agent/tools/web_tools.py]
-    Registry --> MemTools[agent/tools/memory_tools.py]
+    subgraph Core Agent
+        LLM[agent/core/llm.py]
+        SessionManager[agent/core/session_manager.py]
+        UsageTracker[agent/core/usage_tracker.py]
+    end
+    subgraph Terminal UI
+        App[agent/terminal_ui/app.py]
+        SlashCommands[agent/terminal_ui/slash_commands.py]
+        SessionModal[agent/terminal_ui/session_select_modal.py]
+    end
     
-    LLM -->|evaluates| Safety[agent/core/safety.py]
-    LLM -->|persists| SessMgr[agent/core/session_manager.py]
-    LLM -->|tracks| Usage[agent/core/usage_tracker.py]
+    User((User)) -->|Types /fork| SlashCommands
+    SlashCommands -->|Triggers action| App
+    App -->|Requests branch| SessionManager
+    SessionManager -->|Creates isolated branch| SessionManager
+    SessionManager -.->|Prevents cost inheritance| UsageTracker
+    App -->|Updates UI| SessionModal
+    SessionModal -->|Displays [Fork] badge| User
 ```
