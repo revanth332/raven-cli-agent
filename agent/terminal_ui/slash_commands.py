@@ -34,6 +34,11 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "placeholder": "/new",
         "system_prompt": "",
     },
+    "/fork": {
+        "description": "Fork current session state into a new conversation",
+        "placeholder": "/fork [optional_title]",
+        "system_prompt": "",
+    },
     "/sessions": {
         "description": "List and switch chat sessions",
         "placeholder": "/sessions",

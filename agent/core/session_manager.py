@@ -11,6 +11,7 @@ from typing import Dict, Any, List, Optional
 from threading import Lock
 
 _session_lock = Lock()
+_pending_sessions: Dict[str, Dict[str, Any]] = {}
 
 
 def get_sessions_dir() -> Path:
@@ -46,6 +47,7 @@ def create_session(model_name: str = "gpt-4o", session_id: Optional[str] = None,
         "project_name": project_name,
         "messages": []
     }
+    _pending_sessions[session_id] = session_data
     set_active_session_id(session_id)
     return session_data
 
@@ -82,6 +84,9 @@ def save_session(session_data: Dict[str, Any], force: bool = False) -> None:
             with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(session_data, f, indent=2, ensure_ascii=False)
             temp_path.replace(file_path)
+            # Remove from pending since it's now firmly on disk
+            if session_id in _pending_sessions:
+                del _pending_sessions[session_id]
         except Exception:
             if temp_path.exists():
                 temp_path.unlink(missing_ok=True)
@@ -90,9 +95,13 @@ def save_session(session_data: Dict[str, Any], force: bool = False) -> None:
 def load_session(session_id: str) -> Optional[Dict[str, Any]]:
     """
     Loads session data dictionary for the given session_id.
+    Checks memory cache first for unpersisted sessions.
     """
     if not session_id:
         return None
+
+    if session_id in _pending_sessions:
+        return _pending_sessions[session_id]
 
     file_path = get_sessions_dir() / f"{session_id}.json"
     if not file_path.exists():
@@ -131,6 +140,7 @@ def list_sessions() -> List[Dict[str, Any]]:
                     "model_name": data.get("model_name", "gpt-4o"),
                     "project_name": data.get("project_name", ""),
                     "message_count": len(msgs),
+                    "parent_session_id": data.get("parent_session_id")
                 })
         except Exception:
             continue
@@ -176,3 +186,40 @@ def set_active_session_id(session_id: str) -> None:
         active_file.write_text(session_id, encoding="utf-8")
     except Exception:
         pass
+
+def fork_session(source_session_data: Dict[str, Any], new_title: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Creates a new session in memory branching from an existing session's state.
+    
+    Args:
+        source_session_data: The active session dictionary to fork.
+        new_title: Optional custom title for the forked session.
+        
+    Returns:
+        Dict[str, Any]: A new session dictionary with cloned messages and clean analytics.
+    """
+    import copy
+    
+    session_id = str(uuid.uuid4())[:8]
+    source_title = source_session_data.get("title", "Untitled Conversation")
+    title = new_title if new_title else f"Fork of {source_title}"
+    
+    now_iso = datetime.now(timezone.utc).isoformat()
+    
+    # Deep copy the messages up to current state
+    cloned_messages = copy.deepcopy(source_session_data.get("messages", []))
+    
+    session_data = {
+        "session_id": session_id,
+        "title": title,
+        "created_at": now_iso,
+        "updated_at": now_iso,
+        "model_name": source_session_data.get("model_name", "gpt-4o"),
+        "project_name": source_session_data.get("project_name", ""),
+        "messages": cloned_messages,
+        "parent_session_id": source_session_data.get("session_id")
+    }
+    _pending_sessions[session_id] = session_data
+    set_active_session_id(session_id)
+    return session_data
+

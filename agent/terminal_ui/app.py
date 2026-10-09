@@ -186,6 +186,12 @@ class RavenTUI(App):
                 self.start_new_session()
                 return
 
+            if cmd == "/fork":
+                chat_input.text = "/fork "
+                chat_input.focus()
+                chat_input.cursor_location = (0, len(chat_input.text))
+                return
+
             chat_input.text = cmd + " "
             chat_input.action_cursor_line_end()
 
@@ -452,6 +458,34 @@ class RavenTUI(App):
         self.reload_history_ui()
         self.update_status_bar()
         self.notify("Started a fresh chat session!", title="Session Created", severity="information")
+
+    def action_fork_session(self, title: str | None = None) -> None:
+        """Forks the current conversation into a new session context."""
+        if not self.chat_session:
+            self.notify("No active session to fork.", severity="warning")
+            return
+            
+        current_data = {
+            "session_id": getattr(self.chat_session, "session_id", None),
+            "title": getattr(self.chat_session, "session_title", "Untitled Conversation"),
+            "messages": self.chat_session.get_messages(),
+            "model_name": getattr(self.chat_session, "model", settings.RAVEN_MODEL),
+            "project_name": getattr(self.chat_session, "project_name", "")
+        }
+        
+        from agent.core.session_manager import fork_session
+        new_sess = fork_session(current_data, title)
+        
+        from agent.core.llm import get_chat_session
+        self.chat_session = get_chat_session(session_id=new_sess["session_id"])
+        
+        self.reload_history_ui()
+        self.update_status_bar()
+        self.notify(
+            f"Forked session: '{new_sess['title']}'. Note: Files on disk remain unchanged.", 
+            title="Session Forked", 
+            severity="information"
+        )
 
     def open_session_select_modal(self) -> None:
         def on_session_dismiss(selected_session_id: str | None) -> None:
@@ -843,6 +877,14 @@ class RavenTUI(App):
             self.start_new_session()
             return
 
+        if user_input.lower() == "/fork" or user_input.lower().startswith("/fork "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            title_arg = user_input[5:].strip() or None
+            self.action_fork_session(title_arg)
+            return
+
         if user_input.lower() in ["/model", "/models"] or user_input.lower().startswith(("/model ", "/models ")):
             input_widget = event.text_area
             input_widget.text = ""
@@ -1084,6 +1126,14 @@ class RavenTUI(App):
 
             if cmd == "/new":
                 self.start_new_session()
+                return
+
+            if cmd == "/fork":
+                # We can't immediately fork because we might want to type a title. Just update input text.
+                chat_input = self.query_one(ChatInput)
+                chat_input.text = "/fork "
+                chat_input.focus()
+                chat_input.cursor_location = (0, len(chat_input.text))
                 return
 
             # Direct skill invocation: /skill <name> [prompt]

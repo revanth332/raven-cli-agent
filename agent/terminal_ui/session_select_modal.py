@@ -48,11 +48,14 @@ class SessionSelectModal(ModalScreen[str]):
             title = sess.get("title", "Untitled")
             msgs = sess.get("message_count", 0)
             project_name = sess.get("project_name", "")
+            parent_id = sess.get("parent_session_id")
+            
+            fork_badge = "[#a3e635][Fork][/#a3e635] " if parent_id else ""
 
             if project_name:
-                label = f"[bold cyan]{title}[/bold cyan] - [dim white]{project_name}[/dim white] [dim]({sid})[/dim]\n │ Messages: {msgs}"
+                label = f"{fork_badge}[bold cyan]{title}[/bold cyan] - [dim white]{project_name}[/dim white] [dim]({sid})[/dim]\n │ Messages: {msgs}"
             else:
-                label = f"[bold cyan]{title}[/bold cyan] [dim]({sid})[/dim]\n │ Messages: {msgs}"
+                label = f"{fork_badge}[bold cyan]{title}[/bold cyan] [dim]({sid})[/dim]\n │ Messages: {msgs}"
             opt_list.add_option(Option(label, id=sid))
 
         if sessions:
