@@ -23,7 +23,7 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="checkpoint_modal_container"):
-            yield Static("📌 PROJECT CHECKPOINTS", id="checkpoint_modal_title")
+            yield Static("PROJECT CHECKPOINTS", id="checkpoint_modal_title")
             yield Input(placeholder="Search checkpoints... (↑/↓ to navigate, Enter to restore, Del to delete)", id="checkpoint_search_input")
             yield OptionList(id="checkpoint_option_list")
             with Horizontal(id="checkpoint_modal_actions"):
@@ -39,7 +39,7 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
     def action_dismiss_modal(self) -> None:
         self.dismiss(None)
 
-    def populate_options(self, checkpoints) -> None:
+    def populate_options(self, checkpoints, target_highlight: int = 0) -> None:
         opt_list = self.query_one("#checkpoint_option_list", OptionList)
         opt_list.clear_options()
 
@@ -61,7 +61,8 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
             opt_list.add_option(Option(label, id=cid))
 
         if checkpoints:
-            opt_list.highlighted = 0
+            safe_index = max(0, min(target_highlight, len(checkpoints) - 1))
+            opt_list.highlighted = safe_index
 
     def on_input_changed(self, event: Input.Changed) -> None:
         query = event.value.strip().lower()
@@ -81,27 +82,38 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
         search_input = self.query_one("#checkpoint_search_input", Input)
         opt_list = self.query_one("#checkpoint_option_list", OptionList)
 
-        if search_input.has_focus or opt_list.has_focus:
-            if event.key == "down":
-                opt_list.action_cursor_down()
-                event.prevent_default()
-                event.stop()
-            elif event.key == "up":
-                opt_list.action_cursor_up()
-                event.prevent_default()
-                event.stop()
-            elif event.key == "enter":
+        if event.key == "down":
+            opt_list.action_cursor_down()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "up":
+            opt_list.action_cursor_up()
+            event.prevent_default()
+            event.stop()
+        elif event.key in ["page_down", "pagedown"]:
+            opt_list.action_page_down()
+            event.prevent_default()
+            event.stop()
+        elif event.key in ["page_up", "pageup"]:
+            opt_list.action_page_up()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "enter":
+            btn_delete = self.query_one("#btn_delete", Button)
+            btn_cancel = self.query_one("#btn_cancel", Button)
+            btn_restore = self.query_one("#btn_restore", Button)
+            if not btn_cancel.has_focus and not btn_delete.has_focus and not btn_restore.has_focus:
                 self.restore_highlighted_checkpoint()
                 event.prevent_default()
                 event.stop()
-            elif event.key in ["delete", "ctrl+d"]:
-                self.delete_highlighted_checkpoint()
-                event.prevent_default()
-                event.stop()
-            elif event.key == "escape":
-                self.dismiss(None)
-                event.prevent_default()
-                event.stop()
+        elif event.key in ["delete", "ctrl+d"]:
+            self.delete_highlighted_checkpoint()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "escape":
+            self.dismiss(None)
+            event.prevent_default()
+            event.stop()
 
     def restore_highlighted_checkpoint(self) -> None:
         opt_list = self.query_one("#checkpoint_option_list", OptionList)
@@ -123,6 +135,7 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
         if not opt or not opt.id or opt.id == "none":
             return
 
+        current_idx = opt_list.highlighted
         checkpoint_id = str(opt.id)
         if delete_checkpoint(checkpoint_id):
             self.all_checkpoints = get_project_checkpoints()
@@ -135,9 +148,12 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
                     or query in c.get("checkpoint_id", "").lower()
                     or query in c.get("timestamp", "").lower()
                 ]
-                self.populate_options(filtered)
+                self.populate_options(filtered, target_highlight=current_idx)
             else:
-                self.populate_options(self.all_checkpoints)
+                self.populate_options(self.all_checkpoints, target_highlight=current_idx)
+
+        # Restore focus back to search input
+        self.query_one("#checkpoint_search_input", Input).focus()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         if event.option.id and event.option.id != "none":

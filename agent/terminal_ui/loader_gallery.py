@@ -127,7 +127,7 @@ class LoaderGalleryApp(App):
     def compose(self) -> ComposeResult:
         total_count = len(ALL_SPINNERS)
         with Horizontal(id="header_bar"):
-            yield Static(f"⚡ Raven Spinner Gallery ({total_count} Styles)", id="header_title")
+            yield Static(f"Raven Spinner Gallery ({total_count} Styles)", id="header_title")
             yield Static(Text("/ Search  •  q/ESC Exit", style="#94A3B8"), id="header_hint")
 
         with Container(id="search_container"):

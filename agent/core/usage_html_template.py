@@ -505,7 +505,6 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
     <div class="container">
         <header>
             <div class="logo-section">
-                <span class="logo-icon">⚡</span>
                 <div>
                     <h1 class="title">Raven Usage & Analytics</h1>
                     <p class="subtitle">Daily token consumption, latency telemetry, and model reliability metrics</p>
@@ -584,16 +583,16 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             </div>
 
             <!-- Section 1: Performance & Latency Analytics -->
-            <div class="section-header">⏱️ Model Latency & Speed Analytics</div>
+            <div class="section-header">Model Latency & Speed Analytics</div>
             <div class="charts-grid">
                 <div class="chart-card">
-                    <div class="chart-title">📈 Latency Trends Over Time (P50 Median & P95 Tail)</div>
+                    <div class="chart-title">Latency Trends Over Time (P50 Median & P95 Tail)</div>
                     <div class="chart-wrapper">
                         <canvas id="latencyTrendsChart"></canvas>
                     </div>
                 </div>
                 <div class="chart-card">
-                    <div class="chart-title">⚡ Latency vs. Output Tokens (Speed Analysis)</div>
+                    <div class="chart-title">Latency vs. Output Tokens (Speed Analysis)</div>
                     <div class="chart-wrapper">
                         <canvas id="latencyScatterChart"></canvas>
                     </div>
@@ -601,16 +600,16 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             </div>
 
             <!-- Section 2: Reliability & Error Analytics -->
-            <div class="section-header">🛡️ Reliability & Error Distribution</div>
+            <div class="section-header">Reliability & Error Distribution</div>
             <div class="charts-grid" style="grid-template-columns: 1fr 1fr;">
                 <div class="chart-card">
-                    <div class="chart-title">📊 Model Reliability Comparison (Normalized 100%)</div>
+                    <div class="chart-title">Model Reliability Comparison (Normalized 100%)</div>
                     <div class="chart-wrapper">
                         <canvas id="reliabilityChart"></canvas>
                     </div>
                 </div>
                 <div class="chart-card">
-                    <div class="chart-title">🚨 Error Category Breakdown</div>
+                    <div class="chart-title">Error Category Breakdown</div>
                     <div class="chart-wrapper">
                         <canvas id="errorBreakdownChart"></canvas>
                     </div>
@@ -618,16 +617,23 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             </div>
 
             <!-- Section 3: Consumption & Cost Analytics -->
-            <div class="section-header">📊 Token Consumption & Cost</div>
+            <div class="section-header">Token Consumption & Cost</div>
             <div class="charts-grid">
                 <div class="chart-card">
                     <div class="chart-card-header">
-                        <div class="chart-title">📊 Daily Token Consumption per Model</div>
-                        <div class="btn-group btn-group-sm">
-                            <button id="btn-tokens-7d" class="btn-toggle active" onclick="setTokenRange('7d')">7D</button>
-                            <button id="btn-tokens-14d" class="btn-toggle" onclick="setTokenRange('14d')">14D</button>
-                            <button id="btn-tokens-30d" class="btn-toggle" onclick="setTokenRange('30d')">30D</button>
-                            <button id="btn-tokens-all" class="btn-toggle" onclick="setTokenRange('all')">All</button>
+                        <div class="chart-title">Daily Token Consumption per Model</div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                            <div class="btn-group btn-group-sm">
+                                <button id="btn-token-type-all" class="btn-toggle active" onclick="setTokenType('all')">Total</button>
+                                <button id="btn-token-type-input" class="btn-toggle" onclick="setTokenType('input')">Input</button>
+                                <button id="btn-token-type-output" class="btn-toggle" onclick="setTokenType('output')">Output</button>
+                            </div>
+                            <div class="btn-group btn-group-sm">
+                                <button id="btn-tokens-7d" class="btn-toggle active" onclick="setTokenRange('7d')">7D</button>
+                                <button id="btn-tokens-14d" class="btn-toggle" onclick="setTokenRange('14d')">14D</button>
+                                <button id="btn-tokens-30d" class="btn-toggle" onclick="setTokenRange('30d')">30D</button>
+                                <button id="btn-tokens-all" class="btn-toggle" onclick="setTokenRange('all')">All</button>
+                            </div>
                         </div>
                     </div>
                     <div class="chart-wrapper">
@@ -635,7 +641,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                     </div>
                 </div>
                 <div class="chart-card">
-                    <div class="chart-title">🍩 Model Share (% Tokens)</div>
+                    <div class="chart-title">Model Share (% Tokens)</div>
                     <div class="chart-wrapper">
                         <canvas id="modelShareChart"></canvas>
                     </div>
@@ -644,7 +650,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
 
             <div class="chart-card" style="margin-bottom: 2rem;">
                 <div class="chart-card-header">
-                    <div class="chart-title">💰 Daily Cost Trajectory</div>
+                    <div class="chart-title">Daily Cost Trajectory</div>
                     <div class="btn-group btn-group-sm">
                         <button id="btn-cost-usd" class="btn-toggle active" onclick="setCostCurrency('USD')">$ USD</button>
                         <button id="btn-cost-inr" class="btn-toggle" onclick="setCostCurrency('INR')">₹ INR</button>
@@ -657,7 +663,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
 
             <!-- Detailed Telemetry Table -->
             <div class="table-card">
-                <div class="chart-title">📋 Daily Detailed Telemetry Breakdown</div>
+                <div class="chart-title">Daily Detailed Telemetry Breakdown</div>
                 <table>
                     <thead>
                         <tr>
@@ -737,6 +743,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             }
         }
         let tokenDateRange = getPref('token_range', '7d'); // '7d' | '14d' | '30d' | 'all'
+        let tokenType = getPref('token_type', 'all'); // 'all' | 'input' | 'output'
         let costCurrency = getPref('cost_currency', 'USD'); // 'USD' | 'INR'
         const chartInstances = {};
 
@@ -785,6 +792,11 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             ['7d', '14d', '30d', 'all'].forEach(r => {
                 const btn = document.getElementById('btn-tokens-' + r);
                 if (btn) btn.classList.toggle('active', tokenDateRange === r);
+            });
+
+            ['all', 'input', 'output'].forEach(t => {
+                const btn = document.getElementById('btn-token-type-' + t);
+                if (btn) btn.classList.toggle('active', tokenType === t);
             });
 
             const btnUsd = document.getElementById('btn-cost-usd');
@@ -891,6 +903,14 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             if (tokenDateRange === range) return;
             tokenDateRange = range;
             setPref('token_range', range);
+            syncUIPreferences();
+            renderDashboard();
+        }
+
+        function setTokenType(type) {
+            if (tokenType === type) return;
+            tokenType = type;
+            setPref('token_type', type);
             syncUIPreferences();
             renderDashboard();
         }
@@ -1345,12 +1365,18 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             else if (tokenDateRange === '14d') tokenDates = dates.slice(-14);
             else if (tokenDateRange === '30d') tokenDates = dates.slice(-30);
 
+            function getModelTokenVal(rec, type) {
+                if (!rec) return 0;
+                if (type === 'input') return rec.prompt_tokens || 0;
+                if (type === 'output') return rec.completion_tokens || 0;
+                return rec.tokens || ((rec.prompt_tokens || 0) + (rec.completion_tokens || 0));
+            }
+
             const dailyTotals = tokenDates.map(d => {
                 let daySum = 0;
                 activeModels.forEach(m => {
                     if (rawData[d] && rawData[d][m]) {
-                        const rec = rawData[d][m];
-                        daySum += (rec.tokens || ((rec.prompt_tokens || 0) + (rec.completion_tokens || 0)));
+                        daySum += getModelTokenVal(rawData[d][m], tokenType);
                     }
                 });
                 return daySum;
@@ -1360,9 +1386,11 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
             const ELEVATION_FACTOR = 1.08;
             const elevatedDailyTotals = dailyTotals.map(val => val > 0 ? Math.round(val * ELEVATION_FACTOR) : 0);
 
+            const tokenMetricLabel = tokenType === 'input' ? 'Input Tokens' : (tokenType === 'output' ? 'Output Tokens' : 'Total Tokens');
+
             const totalLineDataset = {
                 type: 'line',
-                label: 'Total Daily Tokens (Trend)',
+                label: `Daily ${tokenMetricLabel} (Trend)`,
                 data: elevatedDailyTotals,
                 borderColor: '#f59e0b',
                 backgroundColor: 'rgba(245, 158, 11, 0.14)',
@@ -1381,7 +1409,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                 return {
                     type: 'bar',
                     label: m,
-                    data: tokenDates.map(d => (rawData[d][m] ? (rawData[d][m].tokens || (rawData[d][m].prompt_tokens + rawData[d][m].completion_tokens)) : 0)),
+                    data: tokenDates.map(d => getModelTokenVal(rawData[d] && rawData[d][m], tokenType)),
                     backgroundColor: modelColorMap[m],
                     borderRadius: 4,
                     stack: 'tokens_stack',
@@ -1431,7 +1459,7 @@ USAGE_REPORT_TEMPLATE = """<!DOCTYPE html>
                                 label: function(context) {
                                     if (context.dataset.type === 'line') {
                                         const actualTotal = dailyTotals[context.dataIndex] || 0;
-                                        return `Total Tokens: ${actualTotal.toLocaleString()}`;
+                                        return `${tokenMetricLabel}: ${actualTotal.toLocaleString()}`;
                                     }
                                     return `${context.dataset.label}: ${context.parsed.y.toLocaleString()}`;
                                 }

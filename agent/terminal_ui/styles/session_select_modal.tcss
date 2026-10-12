@@ -1,66 +1,174 @@
 SessionSelectModal {
     align: center middle;
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.75);
 }
 
 #session_modal_container {
-    width: 70%;
-    max-width: 80;
-    height: 65%;
-    background: #1e1e1e;
-    border: none;
+    width: 90%;
+    max-width: 112;
+    height: 80%;
+    background: #0f1419;
+    border: solid #1e293b;
     padding: 1 2;
 }
 
-#session_modal_title {
-    text-align: center;
+#session_header_row {
+    width: 100%;
+    height: 1;
     margin-bottom: 1;
-    color: #06B6D4;
+    align: left middle;
+}
+
+#session_header_left {
+    width: 1fr;
+    height: 1;
+    align: left middle;
+}
+
+#session_modal_title {
+    width: auto;
+    color: #00E5BF;
+    text-style: bold;
+    margin-right: 1;
+}
+
+#session_count_badge {
+    width: auto;
+    color: #64748B;
+}
+
+#session_help_btn {
+    width: auto;
+    height: 1;
+    text-align: right;
+}
+
+#session_search_bar {
+    width: 100%;
+    height: 3;
+    border: solid #00E5BF;
+    background: #141c24;
+    margin-bottom: 1;
+    align: left middle;
+    padding: 0 1;
+}
+
+#session_search_icon {
+    width: 2;
+    height: 1;
+    color: #00E5BF;
     text-style: bold;
 }
 
 #session_search_input {
-    margin-bottom: 1;
-    background: #252526;
-    border: solid #06B6D4;
+    width: 1fr;
+    height: 1;
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: #F8FAFC;
+}
+
+#session_search_shortcuts {
+    width: auto;
+    height: 1;
 }
 
 #session_option_list {
     height: 1fr;
-    background: #1e1e1e;
+    background: #0f1419;
     border: none;
     margin-bottom: 1;
+    scrollbar-gutter: stable;
 }
 
 #session_option_list > .option-list--option {
-    padding: 1 2;
+    padding: 0 1;
+    background: transparent;
+    border-bottom: solid #19222c;
 }
 
 #session_option_list > .option-list--option-highlighted {
-    background: #2d3748;
+    background: #142830;
+    border-left: thick #00E5BF;
+    color: #FFFFFF;
 }
 
 #session_modal_actions {
-    height: auto;
-    align: right middle;
-    margin-top: 1;
-}
-
-Button {
-    margin-left: 1;
-    min-width: 12;
+    width: 100%;
     height: 3;
-    padding: 0 1;
+    margin-top: 1;
+    align: left middle;
 }
 
-#btn_cancel {
-    background: transparent;
-    color: #E2E8F0;
-    border: round #64748B;
+#session_actions_left {
+    width: 1fr;
+    height: 3;
+    align: left middle;
+}
+
+#session_actions_right {
+    width: auto;
+    height: 3;
+    align: right middle;
+}
+
+#btn_resume {
+    background: #00E5BF;
+    color: #000000;
+    text-style: bold;
+    border: none;
+    height: 3;
+    min-width: 22;
+    padding: 0 2;
+    margin-right: 1;
+}
+
+#btn_resume:hover {
+    background: #38BDF8;
 }
 
 #btn_delete {
+    background: #182028;
+    color: #CBD5E1;
+    border: solid #334155;
+    height: 3;
+    min-width: 14;
+    padding: 0 1;
+}
+
+#btn_delete:hover {
+    color: #EF4444;
+    border: solid #EF4444;
+    background: #241418;
+}
+
+#btn_new {
+    background: #182028;
+    color: #CBD5E1;
+    border: solid #334155;
+    height: 3;
+    min-width: 16;
+    padding: 0 1;
+    margin-right: 1;
+}
+
+#btn_new:hover {
+    color: #00E5BF;
+    border: solid #00E5BF;
+    background: #142426;
+}
+
+#btn_cancel {
+    background: #182028;
+    color: #CBD5E1;
+    border: solid #334155;
+    height: 3;
+    min-width: 14;
+    padding: 0 1;
+}
+
+#btn_cancel:hover {
     color: #FFFFFF;
-    border: round #EF4048;
-    text-style: bold;
+    border: solid #64748B;
 }

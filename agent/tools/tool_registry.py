@@ -11,6 +11,7 @@ from agent.tools.process_tools import (
 )
 from agent.tools.web_tools import web_search,extract_content_from_web_links
 from agent.tools.image_generation_tools import generate_image
+from agent.tools.interaction_tools import ask_user
 from agent.core.indexer import search_codebase
 
 raven_tools = [
@@ -610,10 +611,64 @@ raven_tools = [
                 ]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ask_user",
+            "description": "Presents a structured, interactive questionnaire modal in the terminal for user decisions, architectural trade-offs, and critical scope confirmations. Do not dump multi-question text blocks into chat when this tool is available. Batch up to 3-4 questions belonging to the active decision frontier.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Short heading for the decision batch (e.g. 'Architecture & Database Selection')."
+                    },
+                    "questions": {
+                        "type": "array",
+                        "description": "List of 1 to 4 structured decision items.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "description": "Unique key identifier for the answer (e.g. 'db_engine', 'auth_strategy')."
+                                },
+                                "question": {
+                                    "type": "string",
+                                    "description": "Clear, concise formulation of the decision to be made."
+                                },
+                                "context": {
+                                    "type": "string",
+                                    "description": "Brief technical context, trade-offs, or system implications."
+                                },
+                                "options": {
+                                    "type": "array",
+                                    "items": { "type": "string" },
+                                    "description": "2 to 4 concrete implementation options."
+                                },
+                                "recommended": {
+                                    "type": "string",
+                                    "description": "The exact recommended option from the list."
+                                }
+                            },
+                            "required": ["id", "question", "options", "recommended"]
+                        }
+                    }
+                },
+                "required": ["title", "questions"]
+            }
+        }
     }
 ]
 
 TOOL_REGISTRY = {
+    "ask_user": {
+        "fn": ask_user,
+        "display_name": "Ask User",
+        "display_arg": "title",
+        "ignore_display": False
+    },
     "generate_image": {
         "fn": generate_image,
         "display_name": "Generate Image",

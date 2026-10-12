@@ -62,7 +62,7 @@ def format_patch_diff(
         tool_logs.append("removal\n" if search_count == 1 else "removals\n", style="dim white")
 
         if result_str and "SYNTAX VERIFICATION WARNING" in result_str:
-            tool_logs.append("   |_ ⚠ Syntax Warning Detected\n", style="bold yellow")
+            tool_logs.append("   |_ [!] Syntax Warning Detected\n", style="bold yellow")
             for w_line in result_str.splitlines():
                 if any(k in w_line for k in ("Details:", "Syntax", "Error:", "JSONDecodeError", "SyntaxError")):
                     tool_logs.append(f"       {w_line.strip()}\n", style="yellow")
@@ -368,6 +368,26 @@ def format_image_generation_result(prompt: str, result_str: str, expanded: bool 
     return result_text
 
 
+def format_ask_user_result(title: str, result: Any, expanded: bool = False) -> Text:
+    """Formats questionnaire answers in the chat timeline."""
+    result_text = Text()
+    if isinstance(result, dict):
+        status = result.get("status", "")
+        answers = result.get("answers", {})
+        if status == "cancelled":
+            result_text.append("   |_ Questionnaire cancelled by user\n", style="bold yellow")
+            return result_text
+
+        count = len(answers)
+        result_text.append(f"   |_ Captured {count} decision(s) for '{title}':\n", style="bold green")
+        for qid, ans in answers.items():
+            result_text.append(f"       - {qid}: ", style="bold cyan")
+            result_text.append(f"{ans}\n", style="dim white")
+    else:
+        result_text.append(f"   |_ Questionnaire response: {str(result)}\n", style="bold green")
+    return result_text
+
+
 def format_tool_result_preview(
     tool_name: str,
     tool_args: dict,
@@ -376,7 +396,10 @@ def format_tool_result_preview(
 ) -> Text:
     """Dispatches to the appropriate tool result formatter."""
     args = tool_args or {}
-    if tool_name == "patch_file":
+    if tool_name == "ask_user":
+        title = args.get("title", "Questionnaire")
+        return format_ask_user_result(title, result, expanded=expanded)
+    elif tool_name == "patch_file":
         search_block = args.get("search_block", "")
         replace_block = args.get("replace_block", "")
         file_path = args.get("file_path", "Unknown")
@@ -624,7 +647,7 @@ class ChatMessageWidget(Vertical):
             match = re.match(markup_pattern, content)
             if match:
                 badge_text = match.group(1).strip()
-                clean_badge = badge_text.replace("🖼️", "").replace("🖼", "").strip("[] ")
+                clean_badge = badge_text.strip("[] ")
                 if clean_badge and not self.image_badge:
                     self.image_badge = clean_badge
                 return content[match.end():].strip()
@@ -659,7 +682,7 @@ class ChatMessageWidget(Vertical):
             yield Static(f"[bold #06B6D4]◆ Image: {self.image_badge}[/bold #06B6D4]", id="img_badge", classes="img-badge")
         yield Vertical(id="timeline_container", classes="timeline-container")
         yield Static(id="msg_content", classes="msg-content")
-        footer_text = f"[dim #64748B]⚡ {self.model_name}[/dim #64748B]" if (self.role == "assistant" and self.model_name) else ""
+        footer_text = f"[dim #64748B]{self.model_name}[/dim #64748B]" if (self.role == "assistant" and self.model_name) else ""
         yield Static(footer_text, id="model_footer", classes="model-footer")
 
     def _sync_timeline_widgets(self) -> None:
@@ -710,7 +733,7 @@ class ChatMessageWidget(Vertical):
         try:
             footer = self.query_one("#model_footer", Static)
             if self.role == "assistant" and model_name:
-                footer.update(f"[dim #64748B]⚡ {model_name}[/dim #64748B]")
+                footer.update(f"[dim #64748B]{model_name}[/dim #64748B]")
                 footer.styles.display = "block"
             else:
                 footer.update("")

@@ -39,7 +39,7 @@ class ConfirmDeleteModal(ModalScreen[bool]):
     def compose(self) -> ComposeResult:
         type_desc = "skill folder and all contained files" if self.skill_type == "folder" else "markdown file"
         with Vertical(id="confirm_delete_container"):
-            yield Static("⚠️ CONFIRM DELETION", id="confirm_delete_title")
+            yield Static("CONFIRM DELETION", id="confirm_delete_title")
             yield Static(
                 f"Are you sure you want to delete skill [bold cyan]'{self.skill_name}'[/bold cyan] "
                 f"from [bold #38BDF8]{self.scope}[/bold #38BDF8] scope?\n\n"
@@ -87,7 +87,7 @@ class CreateSkillModal(ModalScreen[dict | None]):
         ]
 
         with Vertical(id="create_skill_container"):
-            yield Static("✨ CREATE NEW SKILL", id="create_skill_title")
+            yield Static("CREATE NEW SKILL", id="create_skill_title")
 
             with Horizontal(classes="form_row"):
                 with Vertical(classes="form_col_flex"):
@@ -193,7 +193,7 @@ class SkillDetailModal(ModalScreen[dict | None]):
 
         with Vertical(id="skill_detail_container"):
             yield Static(
-                f"📝 SKILL: [bold cyan]{self.skill_name}[/bold cyan]  {scope_badge}  {type_badge}  {status_badge}",
+                f"SKILL: [bold cyan]{self.skill_name}[/bold cyan]  {scope_badge}  {type_badge}  {status_badge}",
                 id="skill_detail_title",
             )
             yield Static(f"[dim]{path_info}[/dim]", id="skill_detail_path")
@@ -304,7 +304,7 @@ class SkillsManagerModal(ModalScreen[str | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="skills_modal_container"):
-            yield Static("🛠️ INSTALLED AGENT SKILLS", id="skills_modal_title")
+            yield Static("INSTALLED AGENT SKILLS", id="skills_modal_title")
             yield Input(
                 placeholder="Search skills... (Type 'c' to create, 'Space' to toggle, 'e'/Enter to edit)",
                 id="skills_search_input",

@@ -132,14 +132,27 @@ def list_sessions() -> List[Dict[str, Any]]:
                     file_path.unlink(missing_ok=True)
                     continue
 
+                user_msgs = [m for m in msgs if m.get("role") == "user"]
+                turn_count = len(user_msgs) if user_msgs else max(1, len(msgs) // 2)
+
+                tokens = data.get("total_tokens")
+                if tokens is None:
+                    chars = sum(len(str(m.get("content", ""))) for m in msgs)
+                    tokens = max(100, chars // 4)
+
+                mtime = file_path.stat().st_mtime
+                fallback_iso = datetime.fromtimestamp(mtime, tz=timezone.utc).isoformat()
+
                 summaries.append({
                     "session_id": data.get("session_id", file_path.stem),
                     "title": data.get("title", "Untitled Conversation"),
-                    "created_at": data.get("created_at", ""),
-                    "updated_at": data.get("updated_at", ""),
+                    "created_at": data.get("created_at", fallback_iso),
+                    "updated_at": data.get("updated_at") or fallback_iso,
                     "model_name": data.get("model_name", "gpt-4o"),
                     "project_name": data.get("project_name", ""),
                     "message_count": len(msgs),
+                    "turn_count": turn_count,
+                    "total_tokens": tokens,
                     "parent_session_id": data.get("parent_session_id")
                 })
         except Exception:

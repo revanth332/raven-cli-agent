@@ -36,6 +36,8 @@ from agent.terminal_ui.model_select_modal import ModelSelectModal
 from agent.terminal_ui.session_select_modal import SessionSelectModal
 from agent.terminal_ui.checkpoint_modal import CheckpointSelectModal
 from agent.terminal_ui.skills_modal import SkillsManagerModal, CreateSkillModal
+from agent.terminal_ui.questionnaire_bar import QuestionnaireBar
+from agent.tools.interaction_tools import set_questionnaire_handler
 from agent.terminal_ui.sidebar import ConsumptionSidebar
 from agent.core.session_manager import create_session, list_sessions
 from agent.core.loop_guard import LoopGuard, LoopGuardState
@@ -77,6 +79,10 @@ class RavenTUI(App):
         self.permission_result = False
         self.permission_instruction = ""
         self.pending_permission = False
+        self.pending_questionnaire = False
+        self.questionnaire_event = threading.Event()
+        self.questionnaire_result = None
+        set_questionnaire_handler(self.request_user_questionnaire)
         self.is_generating = False
         self.init_loader = None
 
@@ -87,9 +93,11 @@ class RavenTUI(App):
     def on_unmount(self) -> None:
         """Ensures background worker threads unblock and exit cleanly on application shutdown."""
         self.pending_permission = False
+        self.pending_questionnaire = False
         self.permission_result = False
         self.cancel_event.set()
         self.permission_event.set()
+        self.questionnaire_event.set()
 
     def action_quit(self) -> None:
         """Cleanly quits the application."""
@@ -97,12 +105,18 @@ class RavenTUI(App):
         self.exit()
 
     def action_cancel_generation(self):
-        """Interrupts the active AI generation or denies pending permission."""
+        """Interrupts the active AI generation, denies pending permission, or skips active questionnaire."""
         if self.pending_permission:
             self.resolve_permission(granted=False, instruction="")
             return
 
+        if self.pending_questionnaire:
+            self.on_questionnaire_completed({"status": "cancelled", "answers": {}})
+            return
+
         self.cancel_event.set()
+        self.questionnaire_event.set()
+
         # Close option list if it's open, just in case
         autocomplete = self.query_one("#autocomplete_list", OptionList)
         if autocomplete.styles.display == "block":
@@ -279,6 +293,98 @@ class RavenTUI(App):
         chat_input.focus()
 
         self.permission_event.set()
+
+    def request_user_questionnaire(self, title: str, questions: list[dict]) -> dict:
+        """Mounts the in-stream questionnaire container above the bottom input bar
+        and synchronously pauses the background worker thread until answered.
+        Input is taken directly through Raven's existing bottom input box.
+        """
+        self.pending_questionnaire = True
+        self.questionnaire_event.clear()
+        self.questionnaire_result = None
+
+        from agent.utils import notify_user_action_required
+        notify_user_action_required(title=f"Decision Required: {title}", message="Please select options or specify decisions in the terminal.")
+
+        def _mount_bar():
+            bottom_bar = self.query_one("#bottom_bar")
+            chat_input = self.query_one("#chat_input", ChatInput)
+
+            try:
+                old_bar = self.query_one("#questionnaire_bar")
+                old_bar.remove()
+            except Exception:
+                pass
+
+            chat_input.display = True
+            chat_input.disabled = False
+
+            bar = QuestionnaireBar(
+                title=title,
+                questions=questions,
+                on_complete=self.on_questionnaire_completed,
+                on_step_change=self.update_questionnaire_placeholder,
+            )
+            bottom_bar.mount(bar, before=chat_input)
+            self.update_questionnaire_placeholder()
+            chat_input.focus()
+
+        if threading.get_ident() == getattr(self, "_thread_id", None):
+            _mount_bar()
+        else:
+            self.call_from_thread(_mount_bar)
+        self.questionnaire_event.wait()
+
+        if self.cancel_event.is_set() or self.questionnaire_result is None:
+            return {"status": "cancelled", "answers": {}}
+
+        return self.questionnaire_result
+
+    def update_questionnaire_placeholder(self) -> None:
+        """Updates ChatInput placeholder to reflect active decision options and key shortcuts."""
+        try:
+            bar = self.query_one("#questionnaire_bar", QuestionnaireBar)
+            chat_input = self.query_one("#chat_input", ChatInput)
+            curr_q = bar.get_current_question()
+            if not curr_q:
+                return
+            opts = curr_q.get("options", [])
+            sel_label = bar.get_selected_label()
+            num_opts = len(opts)
+            range_hint = f"1-{num_opts}" if num_opts > 1 else "1"
+            chat_input.placeholder = (
+                f"Enter: Accept [{sel_label}] | Type 1-{range_hint} or custom response..."
+            )
+        except Exception:
+            pass
+
+    def on_questionnaire_completed(self, result: dict | None) -> None:
+        """Callback triggered when QuestionnaireBar is completed or cancelled."""
+        self.pending_questionnaire = False
+        self.questionnaire_result = result or {"status": "cancelled", "answers": {}}
+
+        def _cleanup_ui():
+            try:
+                bar = self.query_one("#questionnaire_bar")
+                bar.remove()
+            except Exception:
+                pass
+
+            try:
+                chat_input = self.query_one("#chat_input", ChatInput)
+                chat_input.display = True
+                chat_input.disabled = False
+                chat_input.placeholder = "Ask Raven something... (Shift+Enter for newline, 'exit' to quit)"
+                chat_input.focus()
+            except Exception:
+                pass
+
+        if threading.get_ident() == getattr(self, "_thread_id", None):
+            _cleanup_ui()
+        else:
+            self.call_from_thread(_cleanup_ui)
+
+        self.questionnaire_event.set()
 
     def safe_update_raven_card(self, raven_card: ChatMessageWidget, content, raw_text: str = None) -> None:
         """Safely mounts and updates the Raven message card during streaming to avoid displaying empty boxes."""
@@ -489,6 +595,12 @@ class RavenTUI(App):
 
     def open_session_select_modal(self) -> None:
         def on_session_dismiss(selected_session_id: str | None) -> None:
+            if selected_session_id == "__new__":
+                self.start_new_session()
+                self.reload_history_ui()
+                self.update_status_bar()
+                self.notify("Started a fresh chat session", title="New Session", severity="information")
+                return
             if selected_session_id:
                 self.chat_session = get_chat_session(session_id=selected_session_id)
                 self.reload_history_ui()
@@ -508,7 +620,8 @@ class RavenTUI(App):
                             self.reload_history_ui()
                             self.update_status_bar()
 
-        self.push_screen(SessionSelectModal(), on_session_dismiss)
+        active_id = getattr(self.chat_session, "session_id", None) if self.chat_session else None
+        self.push_screen(SessionSelectModal(active_session_id=active_id), on_session_dismiss)
 
     def show_checkpoint_modal(self) -> None:
         """Opens the checkpoint select modal for inspecting and restoring snapshots."""
@@ -725,7 +838,7 @@ class RavenTUI(App):
             session_tokens = summary.get("session_tokens", summary.get("session_prompt_tokens", 0) + summary.get("session_completion_tokens", 0))
             lifetime_tokens = summary.get("lifetime_tokens", summary.get("lifetime_prompt_tokens", 0) + summary.get("lifetime_completion_tokens", 0))
             msg = (
-                f"📊 **Usage Analytics Dashboard Launched**\n\n"
+                f"**Usage Analytics Dashboard Launched**\n\n"
                 f"Opened `{dashboard_path}` in your browser.\n\n"
                 f"**Current Session:**\n"
                 f"- **Requests:** `{summary.get('session_requests', 0)}`\n"
@@ -844,6 +957,17 @@ class RavenTUI(App):
                 self.resolve_permission(granted=True, instruction="")
             else:
                 self.resolve_permission(granted=False, instruction=user_text)
+            return
+
+        if self.pending_questionnaire:
+            user_text = event.value.strip()
+            input_widget = event.text_area
+            input_widget.text = ""
+            try:
+                bar = self.query_one("#questionnaire_bar", QuestionnaireBar)
+                bar.submit_answer(user_text)
+            except Exception:
+                self.on_questionnaire_completed({"status": "cancelled", "answers": {}})
             return
 
         if self.is_generating:

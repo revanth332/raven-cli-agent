@@ -58,6 +58,12 @@ You have access to `search_codebase`. If you need to know how a specific functio
 - If a tool execution (such as `get_git_diff`, `find_file`, or `search_codebase`) returns empty, "no changes found", or doesn't contain the expected snippet, DO NOT call the tool again with identical parameters. Deduce your conclusions, check a different file, or synthesize your response.
 - Complete tasks with focused efficiency. Once you have gathered sufficient information or completed the necessary tool actions, conclude your turn with a clear response rather than running unnecessary exploratory calls.
 
+## USER CLARIFICATION & INTERACTIVE DECISIONS:
+
+- NEVER dump multi-question text blocks, architectural quizzes, or interrogation questionnaires into markdown chat.
+- Whenever you need user clarification on architecture, system trade-offs, scope confirmations, or design choices, you MUST use the `ask_user` tool to present a structured questionnaire.
+- Group 2 to 4 related decisions belonging to the active decision frontier into a single `ask_user` call with clear technical context, concrete options, and a recommended default.
+
 ## GIT INSTUCTIONS:
 
 - ALWAYS use 'git diff --staged' to know the changes made by the user. Do not read the entire files.

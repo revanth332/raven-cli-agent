@@ -34,6 +34,30 @@ class ChatInput(TextArea):
             event.prevent_default()
             event.stop()
             return
+
+        # Arrow navigation for in-stream decision cards when input is empty
+        if getattr(self.app, "pending_questionnaire", False) and not self.text.strip():
+            if event.key in ("left", "up"):
+                try:
+                    bar = self.app.query_one("#questionnaire_bar")
+                    if hasattr(bar, "select_previous"):
+                        bar.select_previous()
+                        event.prevent_default()
+                        event.stop()
+                        return
+                except Exception:
+                    pass
+            elif event.key in ("right", "down"):
+                try:
+                    bar = self.app.query_one("#questionnaire_bar")
+                    if hasattr(bar, "select_next"):
+                        bar.select_next()
+                        event.prevent_default()
+                        event.stop()
+                        return
+                except Exception:
+                    pass
+
         super()._on_key(event)
 
     def action_submit(self) -> None:
