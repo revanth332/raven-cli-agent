@@ -1,72 +1,83 @@
 CheckpointSelectModal {
     align: center middle;
-    background: rgba(0, 0, 0, 0.6);
+    background: rgba(0, 0, 0, 0.7);
 }
 
 #checkpoint_modal_container {
-    width: 75%;
-    max-width: 85;
-    height: 70%;
-    background: #1e1e1e;
+    width: 80;
+    max-width: 90;
+    height: 22;
+    background: #18181a;
     border: none;
     padding: 1 2;
 }
 
-#checkpoint_modal_title {
-    text-align: center;
+#checkpoint_header_row {
+    width: 100%;
+    height: 1;
     margin-bottom: 1;
-    color: #06B6D4;
+}
+
+#checkpoint_modal_title {
+    width: 1fr;
+    color: #FFFFFF;
     text-style: bold;
 }
 
+#checkpoint_close_hint {
+    width: auto;
+    color: #71717a;
+    text-align: right;
+}
+
 #checkpoint_search_input {
+    width: 100%;
+    height: 1;
+    border: none;
+    background: transparent;
+    padding: 0;
     margin-bottom: 1;
-    background: #252526;
-    border: solid #06B6D4;
+    color: #F8FAFC;
+}
+
+#checkpoint_search_input:focus {
+    border: none;
 }
 
 #checkpoint_option_list {
     height: 1fr;
-    background: #1e1e1e;
+    background: transparent;
     border: none;
-    margin-bottom: 1;
+    scrollbar-gutter: stable;
+    scrollbar-size: 0 0;
 }
 
 #checkpoint_option_list > .option-list--option {
-    padding: 1 2;
+    padding: 0 1;
+    background: transparent;
+    border: none;
+    color: #F8FAFC;
 }
 
 #checkpoint_option_list > .option-list--option-highlighted {
-    background: #2d3748;
+    background: #10B981;
+    color: #062b1e;
+    text-style: bold;
+    border: none;
 }
 
-#checkpoint_modal_actions {
-    height: auto;
-    align: right middle;
-    margin-top: 1;
-}
-
-Button {
-    margin-left: 1;
-    min-width: 12;
-    height: 3;
-    padding: 0 1;
-}
-
-#btn_cancel {
+#checkpoint_option_list > .option-list--option.-disabled {
     background: transparent;
+    color: #71717a;
+    border: none;
+    padding: 0 1;
+    text-style: none;
+}
+
+#checkpoint_footer_shortcuts {
+    width: 100%;
+    height: 1;
+    margin-top: 1;
     color: #E2E8F0;
-    border: round #64748B;
 }
 
-#btn_delete {
-    color: #FFFFFF;
-    border: round #EF4048;
-    text-style: bold;
-}
-
-#btn_restore {
-    color: #FFFFFF;
-    border: round #10B981;
-    text-style: bold;
-}

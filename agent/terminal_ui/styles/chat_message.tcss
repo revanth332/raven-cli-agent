@@ -14,13 +14,14 @@ ChatMessageWidget {
 ChatMessageWidget.user-msg {
     color: #F8FAFC;
     background: #1e1e1e;
-    border-left: heavy #06B6D4;
+    border-left: heavy #10B981;
 }
 
 ChatMessageWidget.raven-msg {
     color: #ECFDF5;
-    background: #1e1e1e;
-    border-left: heavy #10B981;
+    background: transparent;
+    border: none;
+    border-left: none;
 }
 
 .msg-header {

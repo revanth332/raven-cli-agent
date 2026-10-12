@@ -53,7 +53,7 @@ def is_command_dangerous(command_str: str) -> bool:
             return True
             
         # Check for dangerous flags in remaining tokens
-        dangerous_flags = {"-rf", "/s", "/q", "--no-preserve-root","-c"}
+        dangerous_flags = {"-rf", "/s", "/q", "--no-preserve-root"}
         for t in tokens[1:]:
             t_low = t.lower()
             # Direct match or containing dangerous flag patterns

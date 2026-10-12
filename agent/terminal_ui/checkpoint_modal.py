@@ -23,13 +23,17 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="checkpoint_modal_container"):
-            yield Static("PROJECT CHECKPOINTS", id="checkpoint_modal_title")
-            yield Input(placeholder="Search checkpoints... (↑/↓ to navigate, Enter to restore, Del to delete)", id="checkpoint_search_input")
+            with Horizontal(id="checkpoint_header_row"):
+                yield Static("Project Checkpoints", id="checkpoint_modal_title")
+                yield Static("esc to close", id="checkpoint_close_hint")
+            yield Input(placeholder="Search checkpoints...", id="checkpoint_search_input")
             yield OptionList(id="checkpoint_option_list")
-            with Horizontal(id="checkpoint_modal_actions"):
-                yield Button("Restore", id="btn_restore")
-                yield Button("Delete", id="btn_delete")
-                yield Button("Cancel", id="btn_cancel")
+            yield Static(
+                "restore [dim #71717a]enter[/dim #71717a]    "
+                "delete [dim #71717a]ctrl+d / del[/dim #71717a]    "
+                "navigate [dim #71717a]↑/↓[/dim #71717a]",
+                id="checkpoint_footer_shortcuts"
+            )
 
     def on_mount(self) -> None:
         self.all_checkpoints = get_project_checkpoints()
@@ -44,7 +48,7 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
         opt_list.clear_options()
 
         if not checkpoints:
-            opt_list.add_option(Option("[#94A3B8]No checkpoints found for this project.[/#94A3B8]", id="none"))
+            opt_list.add_option(Option("[#71717a]No checkpoints found for this project.[/#71717a]", id="none"))
             return
 
         for ckpt in checkpoints:
@@ -53,11 +57,8 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
             ts = ckpt.get("timestamp", "unknown")
             files_count = ckpt.get("total_files", 0)
 
-            file_label = f"{files_count} file(s)" if files_count else "clean working tree"
-            label = (
-                f"[bold cyan]{cname}[/bold cyan] [dim]({cid})[/dim]\n"
-                f" │ [dim]Saved:[/dim] {ts}  │  [dim]Files:[/dim] {file_label}"
-            )
+            file_label = f"{files_count} files" if files_count else "clean tree"
+            label = f"{cname} [dim #71717a]({cid} · {ts} · {file_label})[/dim #71717a]"
             opt_list.add_option(Option(label, id=cid))
 
         if checkpoints:
@@ -99,14 +100,17 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
             event.prevent_default()
             event.stop()
         elif event.key == "enter":
-            btn_delete = self.query_one("#btn_delete", Button)
-            btn_cancel = self.query_one("#btn_cancel", Button)
-            btn_restore = self.query_one("#btn_restore", Button)
-            if not btn_cancel.has_focus and not btn_delete.has_focus and not btn_restore.has_focus:
-                self.restore_highlighted_checkpoint()
-                event.prevent_default()
-                event.stop()
+            self.restore_highlighted_checkpoint()
+            event.prevent_default()
+            event.stop()
         elif event.key in ["delete", "ctrl+d"]:
+            self.delete_highlighted_checkpoint()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "escape":
+            self.dismiss(None)
+            event.prevent_default()
+            event.stop()
             self.delete_highlighted_checkpoint()
             event.prevent_default()
             event.stop()

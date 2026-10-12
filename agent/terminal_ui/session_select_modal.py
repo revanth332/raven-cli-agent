@@ -12,7 +12,13 @@ from textual.widgets import OptionList, Input, Static, Button
 from textual.widgets.option_list import Option
 from rich.table import Table
 
-from agent.core.session_manager import list_sessions, delete_session, get_active_session_id
+from agent.core.session_manager import (
+    list_sessions,
+    delete_session,
+    rename_session,
+    toggle_pin_session,
+    get_active_session_id
+)
 
 
 def format_relative_time(iso_str: str) -> str:
@@ -83,147 +89,86 @@ class SessionSelectModal(ModalScreen[str]):
         self.active_session_id = active_session_id or get_active_session_id()
         self.all_sessions: List[Dict[str, Any]] = []
         self._current_filtered_sessions: List[Dict[str, Any]] = []
-        self._last_highlighted_index: Optional[int] = None
+        self._renaming_sid: Optional[str] = None
 
     def compose(self) -> ComposeResult:
         with Vertical(id="session_modal_container"):
             with Horizontal(id="session_header_row"):
-                with Horizontal(id="session_header_left"):
-                    yield Static("SELECT CHAT SESSION", id="session_modal_title")
-                    yield Static("[0 Sessions Active]", id="session_count_badge")
-                yield Static(
-                    "[bold #00E5BF][?][/bold #00E5BF] [dim #94A3B8]Help[/dim #94A3B8]  "
-                    "[dim #475569]|[/dim #475569]  "
-                    "[bold #00E5BF][Esc][/bold #00E5BF] [dim #94A3B8]Close[/dim #94A3B8]",
-                    id="session_help_btn"
-                )
+                yield Static("Sessions", id="session_modal_title")
+                yield Static("esc", id="session_close_hint")
 
-            with Horizontal(id="session_search_bar"):
-                yield Static(">", id="session_search_icon")
-                yield Input(
-                    placeholder="Search sessions by title, id, or agent...",
-                    id="session_search_input"
-                )
-                yield Static(
-                    "[dim](↑/↓ to navigate,[/dim] [bold #00E5BF][↑/↓][/bold #00E5BF] [dim]Navigate[/dim]  "
-                    "[bold #00E5BF][Enter][/bold #00E5BF] [dim]Resume[/dim]  "
-                    "[bold #00E5BF][Del][/bold #00E5BF] [dim]Delete[/dim][dim])[/dim]",
-                    id="session_search_shortcuts"
-                )
+            yield Input(
+                placeholder="Search",
+                id="session_search_input"
+            )
 
             yield OptionList(id="session_option_list")
 
-            with Horizontal(id="session_modal_actions"):
-                with Horizontal(id="session_actions_left"):
-                    yield Button("Resume Session [Enter]", id="btn_resume")
-                    yield Button("Delete [Del]", id="btn_delete")
-                with Horizontal(id="session_actions_right"):
-                    yield Button("New Session [^N]", id="btn_new")
-                    yield Button("Cancel [Esc]", id="btn_cancel")
+            yield Static(
+                "pin/unpin [dim #71717a]ctrl+f[/dim #71717a]    "
+                "delete [dim #71717a]ctrl+d[/dim #71717a]    "
+                "rename [dim #71717a]ctrl+r[/dim #71717a]",
+                id="session_footer_shortcuts"
+            )
 
     def on_mount(self) -> None:
         self.all_sessions = list_sessions()
         self.populate_options(self.all_sessions)
         self.query_one("#session_search_input", Input).focus()
 
-    def _build_option_grid(self, sess: Dict[str, Any], is_highlighted: bool = False, is_active: bool = False) -> Table:
-        grid = Table.grid(expand=True)
-        grid.add_column(ratio=3, no_wrap=True)
-        grid.add_column(justify="right", no_wrap=True)
+    def _format_date_header(self, iso_str: str) -> str:
+        """Formats ISO date string into day header (e.g. 'Fri Sep 25 2026')."""
+        if not iso_str:
+            return datetime.now().strftime("%a %b %d %Y")
+        try:
+            dt = datetime.fromisoformat(iso_str)
+            return dt.strftime("%a %b %d %Y")
+        except Exception:
+            return datetime.now().strftime("%a %b %d %Y")
 
-        title = sess.get("title", "Untitled") or "Untitled"
-        parent_id = sess.get("parent_session_id")
-        fork_badge = " [#A3E635][Fork][/#A3E635]" if parent_id else ""
-        active_badge = " [bold #10B981][ACTIVE][/bold #10B981]" if is_active else ""
-
-        left_line1 = f"[bold #00E5BF]{title}[/bold #00E5BF]{active_badge}{fork_badge}"
-
-        rel_time = format_relative_time(sess.get("updated_at") or sess.get("created_at") or "")
-        if is_highlighted:
-            right_line1 = f"[dim #94A3B8]{rel_time}[/dim #94A3B8]  [bold #00E5BF][Enter] Select[/bold #00E5BF]"
-        else:
-            right_line1 = f"[dim #94A3B8]{rel_time}[/dim #94A3B8]" if rel_time else ""
-
-        grid.add_row(left_line1, right_line1)
-
-        p_name = sess.get("project_name") or "raven-cli-agent"
-        sid = sess.get("session_id", "unknown")
-        sid_short = sid[:8]
-        turns_str = format_turn_count(sess.get("turn_count", 0))
-        tokens_str = format_token_count(sess.get("total_tokens", 0))
-
-        left_line2 = (
-            f"[#38BDF8]{p_name}[/#38BDF8] [dim #64748B]•[/dim #64748B] "
-            f"[dim #94A3B8]{sid_short}[/dim #94A3B8] [dim #64748B]•[/dim #64748B] "
-            f"[dim #94A3B8]{turns_str}[/dim #94A3B8] [dim #64748B]•[/dim #64748B] "
-            f"[dim #94A3B8]{tokens_str}[/dim #94A3B8]"
-        )
-        grid.add_row(left_line2, "")
-        return grid
-
-    def populate_options(self, sessions: List[Dict[str, Any]], target_highlight: int = 0) -> None:
+    def populate_options(self, sessions: List[Dict[str, Any]], target_sid: Optional[str] = None) -> None:
         self._current_filtered_sessions = sessions
         opt_list = self.query_one("#session_option_list", OptionList)
         opt_list.clear_options()
 
-        # Update counter badge
-        badge = self.query_one("#session_count_badge", Static)
-        if len(sessions) == len(self.all_sessions):
-            badge.update(f"[{len(self.all_sessions)} Sessions Active]")
-        else:
-            badge.update(f"[{len(sessions)}/{len(self.all_sessions)} Sessions Active]")
-
         if not sessions:
-            opt_list.add_option(Option("[#94A3B8]No chat sessions found[/#94A3B8]", id="none"))
-            self._last_highlighted_index = None
+            opt_list.add_option(Option("[dim #71717a]No chat sessions found[/dim #71717a]", disabled=True, id="none"))
             return
 
-        safe_index = max(0, min(target_highlight, len(sessions) - 1))
-        self._last_highlighted_index = safe_index
+        last_date = None
+        target_highlight_idx = None
+        first_valid_idx = None
 
         for idx, sess in enumerate(sessions):
+            raw_date = sess.get("updated_at") or sess.get("created_at") or ""
+            date_header = self._format_date_header(raw_date)
+            if date_header != last_date:
+                opt_list.add_option(Option(f"[bold #10B981]{date_header}[/bold #10B981]", disabled=True))
+                last_date = date_header
+
             sid = sess.get("session_id", "unknown")
-            is_active = (sid == self.active_session_id)
-            is_highlight = (idx == safe_index)
-            grid = self._build_option_grid(sess, is_highlighted=is_highlight, is_active=is_active)
-            opt_list.add_option(Option(grid, id=sid))
+            title = sess.get("title", "Untitled") or "Untitled"
+            is_pinned = sess.get("pinned", False)
+            prefix = "📌 " if is_pinned else ""
 
-        opt_list.highlighted = safe_index
+            current_option_idx = opt_list.option_count
+            opt_list.add_option(Option(f"{prefix}{title}", id=sid))
 
-    def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
-        new_idx = getattr(event, "option_index", None)
-        if new_idx is None or not self._current_filtered_sessions:
-            return
+            if first_valid_idx is None:
+                first_valid_idx = current_option_idx
 
-        opt_list = self.query_one("#session_option_list", OptionList)
-        if self._last_highlighted_index is not None and self._last_highlighted_index != new_idx:
-            if 0 <= self._last_highlighted_index < len(self._current_filtered_sessions):
-                old_sess = self._current_filtered_sessions[self._last_highlighted_index]
-                old_grid = self._build_option_grid(
-                    old_sess,
-                    is_highlighted=False,
-                    is_active=(old_sess.get("session_id") == self.active_session_id)
-                )
-                try:
-                    opt_list.replace_option_prompt_at_index(self._last_highlighted_index, old_grid)
-                except Exception:
-                    pass
+            if target_sid and sid == target_sid:
+                target_highlight_idx = current_option_idx
 
-        if 0 <= new_idx < len(self._current_filtered_sessions):
-            new_sess = self._current_filtered_sessions[new_idx]
-            new_grid = self._build_option_grid(
-                new_sess,
-                is_highlighted=True,
-                is_active=(new_sess.get("session_id") == self.active_session_id)
-            )
-            try:
-                opt_list.replace_option_prompt_at_index(new_idx, new_grid)
-            except Exception:
-                pass
-
-        self._last_highlighted_index = new_idx
+        # Set highlight
+        if target_highlight_idx is not None:
+            opt_list.highlighted = target_highlight_idx
+        elif first_valid_idx is not None:
+            opt_list.highlighted = first_valid_idx
 
     def on_input_changed(self, event: Input.Changed) -> None:
+        if self._renaming_sid is not None:
+            return
         query = event.value.strip().lower()
         if not query:
             self.populate_options(self.all_sessions)
@@ -257,7 +202,14 @@ class SessionSelectModal(ModalScreen[str]):
             event.prevent_default()
             event.stop()
         elif event.key == "escape":
-            self.dismiss(None)
+            if self._renaming_sid is not None:
+                self._renaming_sid = None
+                inp = self.query_one("#session_search_input", Input)
+                inp.placeholder = "Search"
+                inp.value = ""
+                self.populate_options(self.all_sessions)
+            else:
+                self.dismiss(None)
             event.prevent_default()
             event.stop()
         elif event.key == "ctrl+n":
@@ -268,26 +220,89 @@ class SessionSelectModal(ModalScreen[str]):
             self.delete_highlighted_session()
             event.prevent_default()
             event.stop()
+        elif event.key == "ctrl+f":
+            self.toggle_highlighted_pin()
+            event.prevent_default()
+            event.stop()
+        elif event.key == "ctrl+r":
+            self.start_rename_highlighted()
+            event.prevent_default()
+            event.stop()
         elif event.key == "enter":
-            btn_delete = self.query_one("#btn_delete", Button)
-            btn_cancel = self.query_one("#btn_cancel", Button)
-            btn_new = self.query_one("#btn_new", Button)
-            if not btn_cancel.has_focus and not btn_delete.has_focus and not btn_new.has_focus:
+            if self._renaming_sid is not None:
+                inp = self.query_one("#session_search_input", Input)
+                new_title = inp.value.strip()
+                if new_title:
+                    rename_session(self._renaming_sid, new_title)
+                    self.all_sessions = list_sessions()
+                    if self.app:
+                        chat_sess = getattr(self.app, "chat_session", None)
+                        if chat_sess and getattr(chat_sess, "session_id", None) == self._renaming_sid:
+                            chat_sess.session_title = new_title
+                        if hasattr(self.app, "update_status_bar"):
+                            try:
+                                self.app.update_status_bar()
+                            except Exception:
+                                pass
+                target = self._renaming_sid
+                self._renaming_sid = None
+                inp.placeholder = "Search"
+                inp.value = ""
+                self.populate_options(self.all_sessions, target_sid=target)
+            else:
                 self.resume_highlighted_session()
-                event.prevent_default()
-                event.stop()
-        elif event.key in ["question_mark", "?"]:
-            search_input = self.query_one("#session_search_input", Input)
-            if not search_input.has_focus:
-                self.show_help()
-                event.prevent_default()
-                event.stop()
+            event.prevent_default()
+            event.stop()
+
+    def start_rename_highlighted(self) -> None:
+        opt_list = self.query_one("#session_option_list", OptionList)
+        if opt_list.highlighted is None or opt_list.option_count == 0:
+            return
+        opt = opt_list.get_option_at_index(opt_list.highlighted)
+        if not opt or not opt.id or opt.disabled or opt.id == "none":
+            return
+
+        self._renaming_sid = str(opt.id)
+        current_title = ""
+        for s in self.all_sessions:
+            if s.get("session_id") == self._renaming_sid:
+                current_title = s.get("title", "")
+                break
+
+        inp = self.query_one("#session_search_input", Input)
+        inp.placeholder = "Enter new session title and press Enter..."
+        inp.value = current_title
+        inp.focus()
+
+    def toggle_highlighted_pin(self) -> None:
+        opt_list = self.query_one("#session_option_list", OptionList)
+        if opt_list.highlighted is None or opt_list.option_count == 0:
+            return
+        opt = opt_list.get_option_at_index(opt_list.highlighted)
+        if not opt or not opt.id or opt.disabled or opt.id == "none":
+            return
+
+        sid = str(opt.id)
+        toggle_pin_session(sid)
+        self.all_sessions = list_sessions()
+        inp = self.query_one("#session_search_input", Input)
+        query = inp.value.strip().lower()
+        if query and self._renaming_sid is None:
+            filtered = [
+                s for s in self.all_sessions
+                if query in s.get("title", "").lower()
+                or query in s.get("session_id", "").lower()
+                or query in s.get("project_name", "").lower()
+            ]
+            self.populate_options(filtered, target_sid=sid)
+        else:
+            self.populate_options(self.all_sessions, target_sid=sid)
 
     def resume_highlighted_session(self) -> None:
         opt_list = self.query_one("#session_option_list", OptionList)
         if opt_list.highlighted is not None and opt_list.option_count > 0:
             opt = opt_list.get_option_at_index(opt_list.highlighted)
-            if opt and opt.id and opt.id != "none":
+            if opt and opt.id and not opt.disabled and opt.id != "none":
                 self.dismiss(str(opt.id))
 
     def delete_highlighted_session(self) -> None:
@@ -296,60 +311,30 @@ class SessionSelectModal(ModalScreen[str]):
             return
 
         opt = opt_list.get_option_at_index(opt_list.highlighted)
-        if not opt or not opt.id or opt.id == "none":
+        if not opt or not opt.id or opt.disabled or opt.id == "none":
             return
 
-        current_idx = opt_list.highlighted
         session_id = str(opt.id)
         if delete_session(session_id):
             self.all_sessions = list_sessions()
             search_input = self.query_one("#session_search_input", Input)
             query = search_input.value.strip().lower()
-            if query:
+            if query and self._renaming_sid is None:
                 filtered = [
                     s for s in self.all_sessions
                     if query in s.get("title", "").lower()
                     or query in s.get("session_id", "").lower()
                     or query in s.get("project_name", "").lower()
                 ]
-                self.populate_options(filtered, target_highlight=current_idx)
+                self.populate_options(filtered)
             else:
-                self.populate_options(self.all_sessions, target_highlight=current_idx)
+                self.populate_options(self.all_sessions)
 
-        # Restore focus back to search input so arrow navigation and search continue seamlessly
         self.query_one("#session_search_input", Input).focus()
 
-    def show_help(self) -> None:
-        self.notify(
-            "Shortcuts:\n"
-            "• ↑ / ↓: Navigate sessions\n"
-            "• Enter: Resume selected session\n"
-            "• Del / Ctrl+D: Delete session\n"
-            "• Ctrl+N: Start fresh session\n"
-            "• Esc: Close modal",
-            title="Sessions Help",
-            severity="information"
-        )
-
-    def on_click(self, event: events.Click) -> None:
-        if event.widget and event.widget.id == "session_help_btn":
-            self.show_help()
-        elif event.widget and event.widget.id in ("session_search_bar", "session_search_icon"):
-            self.query_one("#session_search_input", Input).focus()
-
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option.id and event.option.id != "none":
+        if event.option.id and not event.option.disabled and event.option.id != "none":
             self.dismiss(str(event.option.id))
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "btn_cancel":
-            self.dismiss(None)
-        elif event.button.id == "btn_resume":
-            self.resume_highlighted_session()
-        elif event.button.id == "btn_delete":
-            self.delete_highlighted_session()
-        elif event.button.id == "btn_new":
-            self.dismiss("__new__")
 
 
 

@@ -44,11 +44,6 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "placeholder": "/sessions",
         "system_prompt": "",
     },
-    "/switch": {
-        "description": "Switch active chat session",
-        "placeholder": "/switch",
-        "system_prompt": "",
-    },
     "/model": {
         "description": "Switch active AI model",
         "placeholder": "/model",
@@ -62,11 +57,6 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
     "/skill": {
         "description": "Directly invoke an agent skill (/skill <name> [prompt])",
         "placeholder": "/skill <name> [prompt]",
-        "system_prompt": "",
-    },
-    "/add-skill": {
-        "description": "Create and install a new agent skill",
-        "placeholder": "/add-skill",
         "system_prompt": "",
     },
     "/auto-approve": {

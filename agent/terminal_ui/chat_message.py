@@ -19,8 +19,8 @@ MAX_RESULT_LINES = 6
 def format_tool_header(display_name: str, display_value: str = "", tool_name: str = "") -> Text:
     """Formats a tool invocation header Text renderable."""
     tool_logs = Text()
-    tool_logs.append("\n• ", style="bold cyan")
-    tool_logs.append(display_name, style="bold cyan")
+    tool_logs.append("\n• ", style="bold #10B981")
+    tool_logs.append(display_name, style="bold #10B981")
     if display_value:
         clean_val = " ".join(str(display_value).split())
         max_len = 120 if tool_name == "search_codebase" else MAX_ARG_LENGTH

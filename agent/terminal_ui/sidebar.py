@@ -1,122 +1,107 @@
 """
-Sidebar component for displaying token, context, and cost consumption metrics in Textual TUI.
+Sidebar component for displaying session, context tokens, cost, and active model status in Textual TUI.
 """
 
 from pathlib import Path
+from typing import Dict, Any, Optional
 from textual.containers import Vertical
 from textual.widgets import Static
-from rich.panel import Panel
-from rich.text import Text
-from rich.console import Group
-from typing import Dict, Any
-
 
 _SIDEBAR_CSS = (Path(__file__).parent / "styles" / "sidebar.tcss").read_text(encoding="utf-8")
 
 
 class ConsumptionSidebar(Vertical):
     """
-    TUI Sidebar widget displaying real-time token usage, context fill ratio, and session cost analytics.
+    TUI Sidebar widget displaying session title, context token usage, cost, LSP status, and active model.
     """
 
     DEFAULT_CSS = _SIDEBAR_CSS
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self.metrics_static = Static(id="sidebar_metrics")
-        self.session_name = "New Conversation"
+        self.top_static = Static(id="sidebar_top")
+        self.spacer = Static(id="sidebar_spacer")
+        self.bottom_static = Static(id="sidebar_bottom")
+        self.metrics_static = self.top_static
+        self.session_name = "Greeting"
         self.project_name = "New Project"
+        self.model_name: Optional[str] = None
 
     def compose(self):
-        yield self.metrics_static
+        yield self.top_static
+        yield self.spacer
+        yield self.bottom_static
 
     def on_mount(self):
         from agent.utils import get_active_project_name
-        from pathlib import Path
         proj = get_active_project_name() or Path.cwd().name
         self.project_name = proj
         self.update_metrics()
 
+    def _format_cwd(self) -> str:
+        try:
+            cwd = Path.cwd().resolve()
+            home = Path.home().resolve()
+            try:
+                rel = cwd.relative_to(home)
+                path_str = f"/~\\{rel}" if rel.parts else "/~"
+            except ValueError:
+                path_str = str(cwd)
+        except Exception:
+            path_str = str(Path.cwd())
+
+        if len(path_str) > 32:
+            path_str = path_str[:30] + ".."
+        return path_str
+
     def update_metrics(
         self,
-        metrics: Dict[str, Any] | None = None,
-        session_name: str | None = None,
-        project_name: str | None = None
+        metrics: Optional[Dict[str, Any]] = None,
+        session_name: Optional[str] = None,
+        project_name: Optional[str] = None,
+        model_name: Optional[str] = None,
     ):
         """
-        Updates the sidebar with session/project context as well as usage, context, and cost metrics.
+        Updates the sidebar with session context, tokens, cost, and Raven status info.
         """
         if session_name is not None:
             self.session_name = session_name
         if project_name is not None:
             self.project_name = project_name
+        if model_name is not None:
+            self.model_name = model_name
+
         if metrics is None:
             metrics = {
-                "last_prompt_tokens": 0,
-                "last_completion_tokens": 0,
-                "last_cost": 0.0,
-                "session_prompt_tokens": 0,
-                "session_completion_tokens": 0,
                 "session_cost": 0.0,
-                "total_requests": 0,
                 "current_context_tokens": 0,
-                "max_context_limit": 128000,
                 "context_percent": 0.0,
             }
 
-        last_prompt = metrics.get("last_prompt_tokens", 0)
-        last_completion = metrics.get("last_completion_tokens", 0)
-        last_cost = metrics.get("last_cost", 0.0)
-
-        session_prompt = metrics.get("session_prompt_tokens", 0)
-        session_completion = metrics.get("session_completion_tokens", 0)
-        session_tokens = session_prompt + session_completion
-        session_cost = metrics.get("session_cost", 0.0)
-        session_reqs = metrics.get("session_requests", metrics.get("total_requests", 0))
-
         curr_context = metrics.get("current_context_tokens", 0)
-        max_context = metrics.get("max_context_limit", 128000)
         context_pct = metrics.get("context_percent", 0.0)
+        session_cost = metrics.get("session_cost", 0.0)
 
-        # Build Context Progress Bar
-        bar_length = 20
-        filled_length = int(round((bar_length * context_pct) / 100.0))
-        filled_length = min(bar_length, max(0, filled_length))
-        empty_length = bar_length - filled_length
+        s_name = self.session_name or "Greeting"
+        clean_session = s_name if len(s_name) <= 32 else s_name[:30] + ".."
 
-        if context_pct > 80:
-            bar_color = "red"
-        elif context_pct > 50:
-            bar_color = "yellow"
-        else:
-            bar_color = "#F59E0B"
+        top_markup = (
+            f"[bold #F8FAFC]{clean_session}[/bold #F8FAFC]\n\n"
+            f"[bold #F8FAFC]Context[/bold #F8FAFC]\n"
+            f"[#94A3B8]{curr_context:,} tokens[/#94A3B8]\n"
+            f"[#94A3B8]{int(round(context_pct))}% used[/#94A3B8]\n"
+            f"[#94A3B8]${session_cost:.2f} spent[/#94A3B8]"
+        )
 
-        bar_str = f"[{bar_color}]" + "█" * filled_length + f"[dim white]" + "░" * empty_length + f"[/dim white][/{bar_color}]"
+        cwd_str = self._format_cwd()
 
-        # Truncate long session / project names for side panel display
-        s_name = self.session_name or "New Conversation"
-        p_name = self.project_name or "New Project"
-        clean_session = s_name if len(s_name) <= 26 else s_name[:24] + ".."
-        clean_project = p_name if len(p_name) <= 26 else p_name[:24] + ".."
-
-        # Render context bar using markup format in static
-        text_markup = (
-            f"[bold #F8FAFC]Project:[/bold #F8FAFC] [bold #D97706]{clean_project}[/bold #D97706]\n"
-            f"[bold #F8FAFC]Session:[/bold #F8FAFC] [bold #D97706]{clean_session}[/bold #D97706]\n\n"
-            f"[bold #F8FAFC]Context Fill:[/bold #F8FAFC] {context_pct:.1f}%\n"
-            f"{bar_str}\n"
-            f"[dim #94A3B8]{curr_context:,} / {max_context:,} tokens[/dim #94A3B8]\n\n"
-            f"[bold #F8FAFC]Last Turn:[/bold #F8FAFC]\n"
-            f"  [dim #94A3B8]Prompt:[/dim #94A3B8] {last_prompt:,}\n"
-            f"  [dim #94A3B8]Completion:[/dim #94A3B8] {last_completion:,}\n"
-            f"  [dim #94A3B8]Cost:[/dim #94A3B8] [bold #10B981]${last_cost:.4f}[/bold #10B981]\n\n"
-            f"[bold #F8FAFC]Session Totals:[/bold #F8FAFC]\n"
-            f"  [dim #94A3B8]Requests:[/dim #94A3B8] {session_reqs}\n"
-            f"  [dim #94A3B8]Total Tokens:[/dim #94A3B8] {session_tokens:,}\n"
-            f"  [dim #94A3B8]Total Cost:[/dim #94A3B8] [bold #10B981]${session_cost:.4f}[/bold #10B981]\n"
+        bottom_markup = (
+            f"[#94A3B8]{cwd_str}[/#94A3B8]\n\n"
+            f"[#10B981]•[/#10B981] [bold #F8FAFC]Raven[/bold #F8FAFC]"
         )
 
         try:
-            self.metrics_static.update(text_markup)
+            self.top_static.update(top_markup)
+            self.bottom_static.update(bottom_markup)
         except Exception:
             pass

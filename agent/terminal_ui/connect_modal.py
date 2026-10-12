@@ -44,7 +44,9 @@ class ConnectModal(ModalScreen[dict | None]):
         delete_disabled = (initial_val in BUILTIN_PRESETS) or (initial_val == "__new__")
 
         with Vertical(id="modal_container"):
-            yield Static("Configure Provider & Presets", id="modal_title")
+            with Horizontal(id="connect_header_row"):
+                yield Static("Configure Provider & Presets", id="modal_title")
+                yield Static("esc to close", id="connect_close_hint")
 
             yield Label("Provider Preset:", classes="field_label")
             yield Select(

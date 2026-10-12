@@ -5,7 +5,7 @@ import threading
 
 from textual.app import ComposeResult
 from textual.screen import ModalScreen
-from textual.widgets import OptionList, Button, Static, Input
+from textual.widgets import OptionList, Static, Input
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal
 from textual import work, events
@@ -33,16 +33,14 @@ class ModelSelectModal(ModalScreen[str]):
 
     def compose(self) -> ComposeResult:
         with Vertical(id="modal_container"):
-            yield Static(f"Select AI Model ({self.preset_name})", id="modal_title")
+            with Horizontal(id="model_header_row"):
+                yield Static(f"Select AI Model ({self.preset_name})", id="modal_title")
+                yield Static("esc to close", id="model_close_hint")
             yield Input(placeholder="Search models...", id="search_input")
             yield OptionList(id="model_list")
             yield Input(placeholder="Or type custom model string...", id="custom_input")
             yield Static("Loading models...", id="status_label")
-            
-            with Horizontal(id="button_container"):
-                yield Button("Refresh", id="refresh_btn")
-                yield Button("Cancel", id="cancel_btn")
-                yield Button("Select", id="select_btn")
+            yield Static("select enter    refresh ctrl+r    esc cancel", id="model_footer_shortcuts")
 
     def on_mount(self) -> None:
         self._load_models_initial()
@@ -138,6 +136,12 @@ class ModelSelectModal(ModalScreen[str]):
             self._search_timer = self.set_timer(0.15, lambda: self.update_option_list(event.value))
 
     def on_key(self, event: events.Key) -> None:
+        if event.key == "ctrl+r":
+            self.action_refresh_models()
+            event.prevent_default()
+            event.stop()
+            return
+
         search_input = self.query_one("#search_input", Input)
         custom_input = self.query_one("#custom_input", Input)
         opt_list = self.query_one("#model_list", OptionList)
@@ -189,14 +193,6 @@ class ModelSelectModal(ModalScreen[str]):
 
     def action_dismiss_modal(self) -> None:
         self.dismiss(None)
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        if event.button.id == "cancel_btn":
-            self.dismiss(None)
-        elif event.button.id == "select_btn":
-            self.confirm_selection()
-        elif event.button.id == "refresh_btn":
-            self.action_refresh_models()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
         option_id = event.option.id

@@ -153,13 +153,42 @@ def list_sessions() -> List[Dict[str, Any]]:
                     "message_count": len(msgs),
                     "turn_count": turn_count,
                     "total_tokens": tokens,
-                    "parent_session_id": data.get("parent_session_id")
+                    "parent_session_id": data.get("parent_session_id"),
+                    "pinned": bool(data.get("pinned", False))
                 })
         except Exception:
             continue
 
-    summaries.sort(key=lambda x: x.get("updated_at", ""), reverse=True)
+    def _sort_key(item: Dict[str, Any]):
+        pinned_order = 0 if item.get("pinned", False) else 1
+        updated = item.get("updated_at") or item.get("created_at") or ""
+        return (pinned_order, -1 * (datetime.fromisoformat(updated).timestamp() if updated else 0.0))
+
+    try:
+        summaries.sort(key=_sort_key)
+    except Exception:
+        summaries.sort(key=lambda x: (not x.get("pinned", False), x.get("updated_at", "")), reverse=True)
     return summaries
+
+
+def rename_session(session_id: str, new_title: str) -> bool:
+    """Renames an existing session."""
+    data = load_session(session_id)
+    if not data:
+        return False
+    data["title"] = new_title.strip() or "Untitled"
+    save_session(data, force=True)
+    return True
+
+
+def toggle_pin_session(session_id: str) -> bool:
+    """Toggles the pinned status of an existing session."""
+    data = load_session(session_id)
+    if not data:
+        return False
+    data["pinned"] = not data.get("pinned", False)
+    save_session(data, force=True)
+    return bool(data["pinned"])
 
 
 def delete_session(session_id: str) -> bool:

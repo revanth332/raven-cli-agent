@@ -4,20 +4,30 @@ ConnectModal {
 }
 
 #modal_container {
-    width: 74;
+    width: 76;
     height: auto;
     max-height: 90%;
-    background: #1e1e1e;
-    border: heavy #06B6D4;
+    background: #18181a;
+    border: none;
     padding: 1 2;
 }
 
-#modal_title {
-    text-style: bold;
-    color: #06B6D4;
+#connect_header_row {
+    width: 100%;
+    height: 1;
     margin-bottom: 1;
-    content-align: center middle;
-    text-align: center;
+}
+
+#modal_title {
+    width: 1fr;
+    color: #FFFFFF;
+    text-style: bold;
+}
+
+#connect_close_hint {
+    width: auto;
+    color: #71717a;
+    text-align: right;
 }
 
 .field_label {
@@ -29,22 +39,30 @@ ConnectModal {
 
 .field_input {
     margin-bottom: 1;
-    background: #121212;
+    background: #252526;
     border: none;
     color: #F8FAFC;
 }
 
+.field_input:focus {
+    border: none;
+}
+
 .field_input:disabled {
     opacity: 0.55;
-    background: #18181b;
+    background: #1e1e1e;
     color: #64748B;
 }
 
 #preset_select {
     margin-bottom: 1;
-    background: #121212;
-    border: round #334155;
+    background: #252526;
+    border: none;
     color: #F8FAFC;
+}
+
+#preset_select:focus {
+    border: none;
 }
 
 #provider_type_radios {
@@ -81,38 +99,58 @@ Button {
     min-width: 10;
     height: 3;
     padding: 0 1;
+    border: none;
 }
 
 #cancel_btn {
     background: transparent;
     color: #E2E8F0;
-    border: round #64748B;
+    border: none;
+}
+
+#cancel_btn:hover {
+    background: #27272a;
 }
 
 #delete_btn {
     background: transparent;
     color: #EF4444;
-    border: round #EF4444;
+    border: none;
     min-width: 13;
+}
+
+#delete_btn:hover {
+    background: rgba(239, 68, 68, 0.15);
 }
 
 #delete_btn:disabled {
     color: #475569;
-    border: round #334155;
+    border: none;
     opacity: 0.4;
+    background: transparent;
 }
 
 #save_btn {
     background: transparent;
     color: #38BDF8;
-    border: round #0284C7;
+    border: none;
     min-width: 15;
     text-style: bold;
 }
 
+#save_btn:hover {
+    background: rgba(56, 189, 248, 0.15);
+}
+
 #submit_btn {
-    color: #FFFFFF;
-    border: round #10B981;
+    background: #10B981;
+    color: #062b1e;
+    border: none;
     min-width: 11;
     text-style: bold;
 }
+
+#submit_btn:hover {
+    background: #059669;
+}
+

@@ -1,14 +1,14 @@
 SessionSelectModal {
     align: center middle;
-    background: rgba(0, 0, 0, 0.75);
+    background: rgba(0, 0, 0, 0.7);
 }
 
 #session_modal_container {
-    width: 90%;
-    max-width: 112;
-    height: 80%;
-    background: #0f1419;
-    border: solid #1e293b;
+    width: 80;
+    max-width: 90;
+    height: 22;
+    background: #18181a;
+    border: none;
     padding: 1 2;
 }
 
@@ -16,159 +16,64 @@ SessionSelectModal {
     width: 100%;
     height: 1;
     margin-bottom: 1;
-    align: left middle;
-}
-
-#session_header_left {
-    width: 1fr;
-    height: 1;
-    align: left middle;
 }
 
 #session_modal_title {
-    width: auto;
-    color: #00E5BF;
+    width: 1fr;
+    color: #FFFFFF;
     text-style: bold;
-    margin-right: 1;
 }
 
-#session_count_badge {
+#session_close_hint {
     width: auto;
-    color: #64748B;
-}
-
-#session_help_btn {
-    width: auto;
-    height: 1;
+    color: #71717a;
     text-align: right;
 }
 
-#session_search_bar {
-    width: 100%;
-    height: 3;
-    border: solid #00E5BF;
-    background: #141c24;
-    margin-bottom: 1;
-    align: left middle;
-    padding: 0 1;
-}
-
-#session_search_icon {
-    width: 2;
-    height: 1;
-    color: #00E5BF;
-    text-style: bold;
-}
-
 #session_search_input {
-    width: 1fr;
+    width: 100%;
     height: 1;
     border: none;
     background: transparent;
     padding: 0;
+    margin-bottom: 1;
     color: #F8FAFC;
-}
-
-#session_search_shortcuts {
-    width: auto;
-    height: 1;
 }
 
 #session_option_list {
     height: 1fr;
-    background: #0f1419;
+    background: transparent;
     border: none;
-    margin-bottom: 1;
     scrollbar-gutter: stable;
+    scrollbar-size: 0 0;
 }
 
 #session_option_list > .option-list--option {
     padding: 0 1;
     background: transparent;
-    border-bottom: solid #19222c;
+    border: none;
+    color: #F8FAFC;
 }
 
 #session_option_list > .option-list--option-highlighted {
-    background: #142830;
-    border-left: thick #00E5BF;
-    color: #FFFFFF;
-}
-
-#session_modal_actions {
-    width: 100%;
-    height: 3;
-    margin-top: 1;
-    align: left middle;
-}
-
-#session_actions_left {
-    width: 1fr;
-    height: 3;
-    align: left middle;
-}
-
-#session_actions_right {
-    width: auto;
-    height: 3;
-    align: right middle;
-}
-
-#btn_resume {
-    background: #00E5BF;
-    color: #000000;
+    background: #10B981;
+    color: #062b1e;
     text-style: bold;
     border: none;
-    height: 3;
-    min-width: 22;
-    padding: 0 2;
-    margin-right: 1;
 }
 
-#btn_resume:hover {
-    background: #38BDF8;
-}
-
-#btn_delete {
-    background: #182028;
-    color: #CBD5E1;
-    border: solid #334155;
-    height: 3;
-    min-width: 14;
+#session_option_list > .option-list--option.-disabled {
+    background: transparent;
+    color: #10B981;
+    border: none;
     padding: 0 1;
+    text-style: bold;
 }
 
-#btn_delete:hover {
-    color: #EF4444;
-    border: solid #EF4444;
-    background: #241418;
+#session_footer_shortcuts {
+    width: 100%;
+    height: 1;
+    margin-top: 1;
+    color: #E2E8F0;
 }
 
-#btn_new {
-    background: #182028;
-    color: #CBD5E1;
-    border: solid #334155;
-    height: 3;
-    min-width: 16;
-    padding: 0 1;
-    margin-right: 1;
-}
-
-#btn_new:hover {
-    color: #00E5BF;
-    border: solid #00E5BF;
-    background: #142426;
-}
-
-#btn_cancel {
-    background: #182028;
-    color: #CBD5E1;
-    border: solid #334155;
-    height: 3;
-    min-width: 14;
-    padding: 0 1;
-}
-
-#btn_cancel:hover {
-    color: #FFFFFF;
-    border: solid #64748B;
-}

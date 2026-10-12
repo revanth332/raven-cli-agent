@@ -3,6 +3,23 @@ ConsumptionSidebar {
     min-width: 32;
     max-width: 44;
     height: 100%;
-    background: #1e1e1e;
-    padding: 1 1;
+    background: #18181b;
+    padding: 1 2;
+    layout: vertical;
+}
+
+#sidebar_top {
+    height: auto;
+    width: 100%;
+}
+
+#sidebar_spacer {
+    height: 1fr;
+    width: 100%;
+}
+
+#sidebar_bottom {
+    height: auto;
+    width: 100%;
+    margin-bottom: 0;
 }

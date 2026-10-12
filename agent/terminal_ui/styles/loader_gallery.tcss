@@ -7,7 +7,7 @@ Screen {
     dock: top;
     height: 4;
     background: #111827;
-    border-bottom: heavy #06B6D4;
+    border: none;
     padding: 0 2;
     layout: horizontal;
     align: left middle;
@@ -38,12 +38,12 @@ Screen {
 #search_input {
     width: 100%;
     background: #1E293B;
-    border: round #334155;
+    border: none;
     color: #F8FAFC;
 }
 
 #search_input:focus {
-    border: round #06B6D4;
+    border: none;
 }
 
 #gallery_container {
@@ -62,14 +62,14 @@ Screen {
 
 .spinner_card {
     background: #161F30;
-    border: round #334155;
+    border: none;
     padding: 1;
     height: 9;
     layout: vertical;
 }
 
 .spinner_card:hover {
-    border: round #06B6D4;
+    border: none;
     background: #1E293B;
 }
 
@@ -95,7 +95,7 @@ Screen {
 .spinner_preview_box {
     height: 3;
     background: #0F172A;
-    border: solid #1E293B;
+    border: none;
     content-align: center middle;
     align: center middle;
     margin-bottom: 1;

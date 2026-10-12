@@ -80,24 +80,25 @@ Footer {
 .message {
     margin: 1 0;
     padding: 1 1;
-    border-title-align: left;
 }
 
 .user-msg {
     color: #F8FAFC;
     background: #1e1e1e;
-    border: none;
-    border-left: heavy #06B6D4;
+    border-left: heavy #10B981;
     padding: 1 2;
 }
 
 .raven-msg {
     color: #ECFDF5;
+    background: transparent;
+    border: none;
+    border-left: none;
 }
 
 ChatInput {
     border: none;
-    border-left: heavy #06B6D4;
+    border-left: heavy #10B981;
     margin: 0;
     padding: 1 2;
     color: #F8FAFC;         /* Bright text while typing */
@@ -113,18 +114,19 @@ ChatInput > .text-area--background {
 
 ChatInput:focus {
     border: none;
-    border-left: heavy #22D3EE;
+    border-left: heavy #10B981;
     background: #1e1e1e;
 }
 
 ChatInput:disabled {
+    border: none;
     opacity: 0.6;
-    border-left: heavy #64748B;
+    border-left: heavy #10B981;
 }
 
 #input_status {
     border: none;
-    border-left: heavy #06B6D4;
+    border-left: heavy #10B981;
     margin: 0;
     padding: 0 2 1 2;
     height: auto;
@@ -134,7 +136,6 @@ ChatInput:disabled {
 #permission_bar {
     background: #1e1e1e;
     border: none;
-    border-left: heavy #EF4048;
     padding: 1 2;
     margin-bottom: 1;
     height: auto;
@@ -181,20 +182,26 @@ ChatInput:disabled {
     display: none;
     max-height: 10;
     border: none;
-    border-left: heavy #06B6D4;
+    border-left: heavy #71717a;
     margin: 0;
-    padding: 1 0;
+    padding: 0;
     background: #1e1e1e;
-    scrollbar-size: 1 1;
+    scrollbar-gutter: stable;
+    scrollbar-size: 0 0;
 }
 
 #autocomplete_list > .option-list--option {
-    padding: 0 2;
+    padding: 0 1;
+    background: transparent;
+    border: none;
+    color: #F8FAFC;
 }
 
 #autocomplete_list > .option-list--option-highlighted {
-    background: #2d3748;
-    color: #38BDF8;
+    background: #10B981;
+    color: #062b1e;
+    text-style: bold;
+    border: none;
 }
 
 /* Questionnaire Bar (In-Stream Decisions Container) */
@@ -203,7 +210,6 @@ ChatInput:disabled {
     height: auto;
     background: #1e1e1e;
     border: none;
-    border-left: heavy #06B6D4;
     padding: 1 2;
     margin-bottom: 1;
 }
@@ -252,19 +258,19 @@ ChatInput:disabled {
     height: auto;
     min-height: 5;
     background: #262626;
-    border: solid #3f3f46;
+    border: none;
     padding: 0 1;
     margin-right: 1;
     width: 1fr;
 }
 
 .option-card:hover {
-    border: solid #38BDF8;
+    border: none;
     background: #2e2e2e;
 }
 
 .option-card.selected {
-    border: solid #06B6D4;
+    border: none;
     background: #1e293b;
 }
 

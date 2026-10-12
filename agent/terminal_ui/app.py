@@ -35,7 +35,7 @@ from agent.terminal_ui.connect_modal import ConnectModal
 from agent.terminal_ui.model_select_modal import ModelSelectModal
 from agent.terminal_ui.session_select_modal import SessionSelectModal
 from agent.terminal_ui.checkpoint_modal import CheckpointSelectModal
-from agent.terminal_ui.skills_modal import SkillsManagerModal, CreateSkillModal
+from agent.terminal_ui.skills_modal import SkillsManagerModal
 from agent.terminal_ui.questionnaire_bar import QuestionnaireBar
 from agent.tools.interaction_tools import set_questionnaire_handler
 from agent.terminal_ui.sidebar import ConsumptionSidebar
@@ -175,7 +175,7 @@ class RavenTUI(App):
                 self.open_model_select_modal()
                 return
 
-            if cmd in ["/sessions", "/switch"]:
+            if cmd == "/sessions":
                 chat_input.text = ""
                 self.open_session_select_modal()
                 return
@@ -183,11 +183,6 @@ class RavenTUI(App):
             if cmd == "/skills":
                 chat_input.text = ""
                 self.open_skills_modal()
-                return
-
-            if cmd == "/add-skill":
-                chat_input.text = ""
-                self.open_create_skill_modal()
                 return
 
             if cmd == "/checkpoints":
@@ -546,13 +541,13 @@ class RavenTUI(App):
 
             status_widget = self.query_one("#input_status", Static)
             status_widget.update(
-                f"[dim #64748B]Provider:[/dim #64748B] [bold #38BDF8]{provider_display}[/bold #38BDF8]  │  [dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
+                f"[dim #64748B]Provider:[/dim #64748B] [bold #10B981]{provider_display}[/bold #10B981]  │  [dim #64748B]Model:[/dim #64748B] [bold #10B981]{active_model}[/bold #10B981]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}"
             )
 
             try:
                 sidebar = self.query_one(ConsumptionSidebar)
                 metrics = self.chat_session.get_context_usage() if self.chat_session else None
-                sidebar.update_metrics(metrics=metrics, session_name=session_title, project_name=project_name)
+                sidebar.update_metrics(metrics=metrics, session_name=session_title, project_name=project_name, model_name=active_model)
             except Exception:
                 pass
         except Exception:
@@ -611,13 +606,17 @@ class RavenTUI(App):
                     active_id = getattr(self.chat_session, "session_id", None)
                     if active_id:
                         sessions = list_sessions()
-                        if not any(s["session_id"] == active_id for s in sessions):
+                        curr_session = next((s for s in sessions if s.get("session_id") == active_id), None)
+                        if not curr_session:
                             if sessions:
                                 self.chat_session = get_chat_session(session_id=sessions[0]["session_id"])
                                 self.notify(f"Active session was deleted. Switched to '{self.chat_session.session_title}'", title="Session Changed", severity="warning")
                             else:
                                 self.start_new_session()
                             self.reload_history_ui()
+                            self.update_status_bar()
+                        else:
+                            self.chat_session.session_title = curr_session.get("title", self.chat_session.session_title)
                             self.update_status_bar()
 
         active_id = getattr(self.chat_session, "session_id", None) if self.chat_session else None
@@ -876,14 +875,6 @@ class RavenTUI(App):
 
         self.push_screen(SkillsManagerModal(), on_skills_dismiss)
 
-    def open_create_skill_modal(self) -> None:
-        def on_create_dismiss(result: dict | None) -> None:
-            if result:
-                self.notify(f"Skill '{result.get('name')}' installed successfully!", title="Skill Installed", severity="information")
-                self.initialize_ai()
-
-        self.push_screen(CreateSkillModal(), on_create_dismiss)
-
     @work(thread=True)
     def execute_compact_history(self, custom_instructions: str = "") -> None:
         """Background worker to distill conversation history and reload the UI."""
@@ -987,7 +978,7 @@ class RavenTUI(App):
             self.exit()
             return
         
-        if user_input.lower() in ["/sessions", "/switch"] or user_input.lower().startswith("/sessions ") or user_input.lower().startswith("/switch "):
+        if user_input.lower() == "/sessions" or user_input.lower().startswith("/sessions "):
             input_widget = event.text_area
             input_widget.text = ""
             self.query_one('#autocomplete_list', OptionList).styles.display = "none"
@@ -1035,13 +1026,6 @@ class RavenTUI(App):
             input_widget.text = ""
             self.query_one('#autocomplete_list', OptionList).styles.display = "none"
             self.open_skills_modal()
-            return
-
-        if user_input.lower() in ["/add-skill", "/add-skill "] or user_input.lower().startswith("/add-skill "):
-            input_widget = event.text_area
-            input_widget.text = ""
-            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
-            self.open_create_skill_modal()
             return
         
         if user_input.lower() == "/auto-approve" or user_input.lower().startswith("/auto-approve "):
@@ -1302,16 +1286,12 @@ class RavenTUI(App):
                 self.open_model_select_modal()
                 return
 
-            if cmd in ["/sessions", "/switch"]:
+            if cmd == "/sessions":
                 self.open_session_select_modal()
                 return
 
             if cmd == "/skills":
                 self.open_skills_modal()
-                return
-
-            if cmd == "/add-skill":
-                self.open_create_skill_modal()
                 return
 
             if cmd == "/auto-approve":
@@ -1769,7 +1749,8 @@ class RavenTUI(App):
                     session_title = getattr(self.chat_session, "session_title", "New Conversation")
                     current_project = get_active_project_name()
                     project_name = current_project if current_project else Path.cwd().name
-                    self.call_from_thread(sidebar.update_metrics, summary, session_title, project_name)
+                    active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+                    self.call_from_thread(sidebar.update_metrics, summary, session_title, project_name, active_model)
                 except Exception:
                     pass
 
