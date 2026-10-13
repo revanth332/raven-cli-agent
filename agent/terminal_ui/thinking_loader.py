@@ -32,7 +32,7 @@ class ThinkingMessage(Static):
         frame = self.SPINNER_FRAMES[self.frame_index % len(self.SPINNER_FRAMES)]
         self.frame_index += 1
         
-        super().update(f"[bold cyan]{frame}[/bold cyan] {self.FULL_TEXT} [dim]({elapsed:.1f}s)[/dim]")
+        super().update(f"[bold #10B981]{frame}[/bold #10B981] {self.FULL_TEXT} [dim]({elapsed:.1f}s)[/dim]")
 
     def update(self, renderable="") -> None:
         if self._is_thinking:
@@ -52,5 +52,5 @@ class ThinkingMessage(Static):
             self._timer.resume()
         elapsed = time.time() - self.start_time
         frame = self.SPINNER_FRAMES[self.frame_index % len(self.SPINNER_FRAMES)]
-        super().update(f"[bold cyan]{frame}[/bold cyan] {self.FULL_TEXT} [dim]({elapsed:.1f}s)[/dim]")
+        super().update(f"[bold #10B981]{frame}[/bold #10B981] {self.FULL_TEXT} [dim]({elapsed:.1f}s)[/dim]")
 

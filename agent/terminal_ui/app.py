@@ -4,11 +4,12 @@ from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 from textual.containers import VerticalScroll,Horizontal,Vertical
 from textual import work
-from textual.widgets import Footer, Static
+from textual.widgets import Static
 
 from rich.markdown import Markdown
 from rich.console import Group
 from rich.text import Text
+from rich.theme import Theme
 
 from agent.tools.tool_registry import TOOL_REGISTRY
 from agent.tools.checkpoint_tools import create_checkpoint, rollback_checkpoint, list_checkpoints
@@ -57,13 +58,35 @@ raven_logo = """
     """
 
 
+RAVEN_MARKDOWN_THEME = Theme({
+    "markdown.h1": "bold #10B981",
+    "markdown.h2": "bold #10B981",
+    "markdown.h3": "bold #10B981",
+    "markdown.h4": "bold #10B981",
+    "markdown.h5": "bold #10B981",
+    "markdown.h6": "dim #10B981",
+    "markdown.code": "bold #10B981",
+    "markdown.code_block": "#10B981",
+    "markdown.block_quote": "#10B981",
+    "markdown.list": "#10B981",
+    "markdown.item": "none",
+    "markdown.item.bullet": "bold #10B981",
+    "markdown.item.number": "bold #10B981",
+    "markdown.hr": "dim #10B981",
+    "markdown.link": "#10B981 underline",
+    "markdown.link_url": "underline #10B981",
+    "markdown.table.border": "#10B981",
+    "markdown.table.header": "bold #10B981",
+})
+
+
 class RavenTUI(App):
     CSS_PATH = [
         "styles/app.tcss",
         "styles/chat_message.tcss",
         "styles/sidebar.tcss",
     ]
-    # Define system hotkeys for the footer
+    # Define system hotkeys
     BINDINGS = [
         ("escape", "cancel_generation", "Stop Generation"),
         ("q", "quit", "Quit"),
@@ -72,6 +95,7 @@ class RavenTUI(App):
     active_suggestions = []
     def on_mount(self):
         """Runs the exact moment the UI mounts to the screen."""
+        self.console.push_theme(RAVEN_MARKDOWN_THEME)
         self.chat_session = None
 
         self.permission_event = threading.Event()
@@ -423,6 +447,28 @@ class RavenTUI(App):
         except Exception:
             pass
 
+    def show_input_error(self, message: str) -> None:
+        """Displays a single-line light red error or retry message below the input box."""
+        try:
+            err_widget = self.query_one("#input_error_status", Static)
+            single_line = " ".join(str(message).replace("\r", " ").replace("\n", " ").split()).strip()
+            max_len = 120
+            if len(single_line) > max_len:
+                single_line = single_line[:max_len - 3] + "..."
+            err_widget.update(f"[#F87171]{single_line}[/#F87171]")
+            err_widget.styles.display = "block"
+        except Exception:
+            pass
+
+    def clear_input_error(self) -> None:
+        """Clears any error/retry message below the input box."""
+        try:
+            err_widget = self.query_one("#input_error_status", Static)
+            err_widget.update("")
+            err_widget.styles.display = "none"
+        except Exception:
+            pass
+
     def _async_auto_checkpoint(self) -> None:
         """Fire-and-forget background checkpoint worker to avoid blocking the main UI stream."""
         try:
@@ -493,11 +539,11 @@ class RavenTUI(App):
                     # Add a welcome card on boot
                     yield Vertical(
                         Static(
-                            f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
+                            f"[bold #10B981]RAVEN CLI AGENT v1.0.0[/bold #10B981]\n"
                             f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
-                            f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}  │  "
-                            f"[bold #06B6D4]{'Project' if current_project else 'Folder'}:[/bold #06B6D4] {project_or_folder}\n"
-                            f"[bold #06B6D4]Agent Version:[/bold #06B6D4] 1.0.0 (Raven Personal AI Developer Agent)",
+                            f"[bold #10B981]Active Model:[/bold #10B981] {active_model}  │  "
+                            f"[bold #10B981]{'Project' if current_project else 'Folder'}:[/bold #10B981] {project_or_folder}\n"
+                            f"[bold #10B981]Agent Version:[/bold #10B981] 1.0.0 (Raven Personal AI Developer Agent)",
                             classes="version-text"
                         ),
                         id="welcome-container"
@@ -514,8 +560,8 @@ class RavenTUI(App):
                         f"[dim #64748B]Provider:[/dim #64748B] [bold #38BDF8]{provider_display}[/bold #38BDF8]  │  [dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
                         id="input_status"
                     )
+                    yield Static("", id="input_error_status")
             yield ConsumptionSidebar(id="sidebar")
-        yield Footer()
 
     # --- EVENT HANDLERS ---
     def update_status_bar(self) -> None:
@@ -659,11 +705,11 @@ class RavenTUI(App):
                 project_or_folder = current_project if current_project else str(Path.cwd())
                 welcome_widget = Vertical(
                     Static(
-                        f"[bold #06B6D4]RAVEN CLI AGENT v1.0.0[/bold #06B6D4]\n"
+                        f"[bold #10B981]RAVEN CLI AGENT v1.0.0[/bold #10B981]\n"
                         f"[dim]Ready to assist. Type below to begin.[/dim]\n\n"
-                        f"[bold #06B6D4]Session:[/bold #06B6D4] {getattr(self.chat_session, 'session_title', 'New Conversation')}  │  "
-                        f"[bold #06B6D4]Active Model:[/bold #06B6D4] {active_model}\n"
-                        f"[bold #06B6D4]{'Project' if current_project else 'Folder'}:[/bold #06B6D4] {project_or_folder}",
+                        f"[bold #10B981]Session:[/bold #10B981] {getattr(self.chat_session, 'session_title', 'New Conversation')}  │  "
+                        f"[bold #10B981]Active Model:[/bold #10B981] {active_model}\n"
+                        f"[bold #10B981]{'Project' if current_project else 'Folder'}:[/bold #10B981] {project_or_folder}",
                         classes="version-text"
                     ),
                     id="welcome-container"
@@ -953,6 +999,7 @@ class RavenTUI(App):
 
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         """Triggers when the user presses 'Enter' in the input box."""
+        self.clear_input_error()
         if self.pending_permission:
             user_text = event.value.strip()
             input_widget = event.text_area
@@ -1428,8 +1475,10 @@ class RavenTUI(App):
         """Background thread that streams the AI response with chronological interleaved timeline."""
         if not self.chat_session:
             self.call_from_thread(self.remove_thinking_loader)
-            self.call_from_thread(self.safe_update_raven_card, raven_card, "[red]AI is still initializing. Please try again.[/red]")
+            self.call_from_thread(self.show_input_error, "AI is still initializing. Please try again.")
             return
+
+        self.call_from_thread(self.clear_input_error)
 
         # Fire-and-forget background auto-checkpoint to avoid UI blocking
         threading.Thread(target=self._async_auto_checkpoint, daemon=True, name="AutoCheckpointWorker").start()
@@ -1500,7 +1549,7 @@ class RavenTUI(App):
 
                 function_calls = {}
                 round_text = ""
-                max_retries = 5
+                max_retries = 6
                 user_message_committed = query is None
                 token_received = False
                 self.call_from_thread(self.show_thinking_loader, "Thinking...")
@@ -1547,21 +1596,28 @@ class RavenTUI(App):
                                 round_text += delta.content
                                 timeline.append_text(delta.content)
                                 self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+                        self.call_from_thread(self.clear_input_error)
                         break
                     except Exception as api_error:
                         error_str = str(api_error).lower()
                         if "image_url" in error_str or "multimodal" in error_str:
-                            msg = f"**Model Incompatibility:** Model `{settings.RAVEN_MODEL}` does not support image input. Please switch to a vision model with `/model`."
-                            self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(msg), msg)
+                            err_msg = f"Model Incompatibility: Model {settings.RAVEN_MODEL} does not support image input. Please switch with /model."
+                            self.call_from_thread(self.show_input_error, err_msg)
                             return
-                        if "429" in error_str or "exhausted" in error_str or "quota" in error_str:
+                        if "429" in error_str or "exhausted" in error_str or "quota" in error_str or "rate" in error_str:
                             if attempt < max_retries - 1:
                                 # Exponential backoff: 2, 4, 8, 16 seconds...
                                 sleep_time = 2 ** (attempt + 1)
-                                msg = f"*API Rate Limit hit. (Retrying in {sleep_time}s)*"
-                                self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(msg), msg)
+                                retry_msg = f"API Rate Limit hit (429). Retrying in {sleep_time}s..."
+                                self.call_from_thread(self.show_input_error, retry_msg)
                                 time.sleep(sleep_time)
                                 continue
+                        if attempt < max_retries - 1 and ("connection" in error_str or "timeout" in error_str or "503" in error_str or "502" in error_str or "temporarily" in error_str):
+                            sleep_time = 2 ** (attempt + 1)
+                            retry_msg = f"Connection error. Retrying in {sleep_time}s..."
+                            self.call_from_thread(self.show_input_error, retry_msg)
+                            time.sleep(sleep_time)
+                            continue
                         raise api_error
 
                 if self.cancel_event.is_set():
@@ -1770,7 +1826,8 @@ class RavenTUI(App):
                     pass
 
         except Exception as e:
-            self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(f"**Error:** {e}"), f"Error: {e}")
+            err_str = str(e)
+            self.call_from_thread(self.show_input_error, f"Error: {err_str}")
         finally:
             self.call_from_thread(self.remove_thinking_loader)
             self.is_generating = False

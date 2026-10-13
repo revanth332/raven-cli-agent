@@ -1,11 +1,13 @@
 import typer
 from rich.console import Console
+from rich.theme import Theme
 from rich.panel import Panel
 from rich.text import Text
 from rich.align import Align
 from rich.live import Live
 from rich.spinner import Spinner
-from rich.markdown import Markdown
+from rich.markdown import Markdown, TextElement
+from rich.syntax import Syntax
 from rich.prompt import Prompt
 import questionary
 from questionary import Style
@@ -21,11 +23,64 @@ import json
 import shutil
 import subprocess
 import time
-from typing import List, Optional
+from typing import List, Optional, Any
 
+
+class SubtleCodeBlock(TextElement):
+    """A code block with subtle, low-opacity background syntax highlighting."""
+
+    style_name = "markdown.code_block"
+
+    @classmethod
+    def create(cls, markdown: Markdown, token: Any) -> "SubtleCodeBlock":
+        node_info = token.info or ""
+        lexer_name = node_info.partition(" ")[0]
+        return cls(lexer_name or "text", markdown.code_theme)
+
+    def __init__(self, lexer_name: str, theme: str) -> None:
+        self.lexer_name = lexer_name
+        self.theme = theme
+
+    def __rich_console__(self, console: Any, options: Any) -> Any:
+        code = str(self.text).rstrip()
+        syntax = Syntax(
+            code,
+            self.lexer_name,
+            theme=self.theme,
+            word_wrap=True,
+            padding=1,
+            background_color="#121418",
+        )
+        yield syntax
+
+
+Markdown.elements["fence"] = SubtleCodeBlock
+Markdown.elements["code_block"] = SubtleCodeBlock
+
+
+RAVEN_MARKDOWN_THEME = Theme({
+    "markdown.h1": "bold #10B981",
+    "markdown.h2": "bold #10B981",
+    "markdown.h3": "bold #10B981",
+    "markdown.h4": "bold #10B981",
+    "markdown.h5": "bold #10B981",
+    "markdown.h6": "dim #10B981",
+    "markdown.code": "bold #10B981",
+    "markdown.code_block": "#10B981",
+    "markdown.block_quote": "#10B981",
+    "markdown.list": "#10B981",
+    "markdown.item": "none",
+    "markdown.item.bullet": "bold #10B981",
+    "markdown.item.number": "bold #10B981",
+    "markdown.hr": "dim #10B981",
+    "markdown.link": "#10B981 underline",
+    "markdown.link_url": "underline #10B981",
+    "markdown.table.border": "#10B981",
+    "markdown.table.header": "bold #10B981",
+})
 
 app = typer.Typer()
-console = Console()
+console = Console(theme=RAVEN_MARKDOWN_THEME)
 
 chat_style = Style([
             ('question', 'fg:#06B6D4 bold'),
@@ -69,7 +124,7 @@ def display_welcome():
 def run_agent_loop(chat_session,intial_input):
     """The core multi-turn engine of Raven"""
     current_input = intial_input
-    max_retries = 5
+    max_retries = 6
     loop_guard = LoopGuard(
         max_turns=settings.RAVEN_AGENT_SOFT_TURNS,
         hard_max_turns=settings.RAVEN_AGENT_HARD_TURNS,

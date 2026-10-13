@@ -8,10 +8,6 @@ Header {
     height: 3;           /* Makes the header slightly taller and cleaner */
     content-align: center middle;
 }
-Footer {
-    background: #05070B; /* Sleek black footer */
-    color: #64748B;      /* Dim keybind labels */
-}
 
 #workspace_container {
     height: 1fr;
@@ -131,6 +127,16 @@ ChatInput:disabled {
     padding: 0 2 1 2;
     height: auto;
     background: #1e1e1e;
+}
+
+#input_error_status {
+    border: none;
+    border-left: heavy #10B981;
+    margin: 0;
+    padding: 0 2 1 2;
+    height: auto;
+    background: #1e1e1e;
+    display: none;
 }
 
 #permission_bar {

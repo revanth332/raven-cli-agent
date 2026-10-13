@@ -5,7 +5,8 @@ from typing import Any, List, Optional
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
 from textual.widgets import Static, Button
-from rich.markdown import Markdown
+from rich.markdown import Markdown, TextElement
+from rich.syntax import Syntax
 from rich.console import Group, RenderableType
 from rich.text import Text
 
@@ -14,6 +15,38 @@ from agent.tools.miscellaneous_tools import strip_ansi
 MAX_DIFF_LINES = 8
 MAX_ARG_LENGTH = 80
 MAX_RESULT_LINES = 6
+
+
+class SubtleCodeBlock(TextElement):
+    """A code block with subtle, low-opacity background syntax highlighting."""
+
+    style_name = "markdown.code_block"
+
+    @classmethod
+    def create(cls, markdown: Markdown, token: Any) -> "SubtleCodeBlock":
+        node_info = token.info or ""
+        lexer_name = node_info.partition(" ")[0]
+        return cls(lexer_name or "text", markdown.code_theme)
+
+    def __init__(self, lexer_name: str, theme: str) -> None:
+        self.lexer_name = lexer_name
+        self.theme = theme
+
+    def __rich_console__(self, console: Any, options: Any) -> Any:
+        code = str(self.text).rstrip()
+        syntax = Syntax(
+            code,
+            self.lexer_name,
+            theme=self.theme,
+            word_wrap=True,
+            padding=1,
+            background_color="#121418",
+        )
+        yield syntax
+
+
+Markdown.elements["fence"] = SubtleCodeBlock
+Markdown.elements["code_block"] = SubtleCodeBlock
 
 
 def format_tool_header(display_name: str, display_value: str = "", tool_name: str = "") -> Text:
@@ -76,7 +109,7 @@ def format_patch_diff(
                 tool_logs.append(f"- {line}\n", style="white on #961b1b")
             collapsed_search = search_count - len(visible_search)
             if collapsed_search > 0:
-                tool_logs.append(f"       ▶ ... [{collapsed_search} search lines collapsed - click to expand]\n", style="dim cyan italic")
+                tool_logs.append(f"       ▶ ... [{collapsed_search} search lines collapsed - click to expand]\n", style="dim #10B981 italic")
 
         if replace_block_lines:
             visible_replace = replace_block_lines[:diff_limit]
@@ -85,10 +118,10 @@ def format_patch_diff(
                 tool_logs.append(f"+ {line}\n", style="white on #26753a")
             collapsed_replace = replace_count - len(visible_replace)
             if collapsed_replace > 0:
-                tool_logs.append(f"       ▶ ... [{collapsed_replace} replace lines collapsed - click to expand]\n", style="dim cyan italic")
+                tool_logs.append(f"       ▶ ... [{collapsed_replace} replace lines collapsed - click to expand]\n", style="dim #10B981 italic")
 
         if expanded and (search_count > MAX_DIFF_LINES or replace_count > MAX_DIFF_LINES):
-            tool_logs.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+            tool_logs.append("       ▼ [Click to collapse]\n", style="dim #10B981 italic")
 
     return tool_logs
 
@@ -135,9 +168,9 @@ def format_command_result(command: str, raw_output: str, expanded: bool = False)
                 result_text.append(f"       {clean_l}\n", style="dim white")
             collapsed = len(clean_lines) - len(visible_lines)
             if collapsed > 0:
-                result_text.append(f"       ▶ ... [{collapsed} lines collapsed - click to expand]\n", style="dim cyan italic")
+                result_text.append(f"       ▶ ... [{collapsed} lines collapsed - click to expand]\n", style="dim #10B981 italic")
             elif expanded and len(clean_lines) > MAX_RESULT_LINES:
-                result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+                result_text.append("       ▼ [Click to collapse]\n", style="dim #10B981 italic")
     else:
         result_text.append(f"   |_ Exit Code: {exit_code} (Failed)\n", style="bold red")
         error_lines = [l for l in (stderr_lines or stdout_lines) if l.strip()]
@@ -148,9 +181,9 @@ def format_command_result(command: str, raw_output: str, expanded: bool = False)
                 result_text.append(f"       {clean_l}\n", style="red")
             collapsed = len(error_lines) - len(visible_lines)
             if collapsed > 0:
-                result_text.append(f"       ▶ ... [{collapsed} error lines collapsed - click to expand]\n", style="dim cyan italic")
+                result_text.append(f"       ▶ ... [{collapsed} error lines collapsed - click to expand]\n", style="dim #10B981 italic")
             elif expanded and len(error_lines) > MAX_RESULT_LINES:
-                result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+                result_text.append("       ▼ [Click to collapse]\n", style="dim #10B981 italic")
     return result_text
 
 
@@ -210,9 +243,9 @@ def format_read_result(file_path: str, content: str, expanded: bool = False, arg
         collapsed = num_lines - len(visible_lines)
         if collapsed > 0:
             result_text.append(f"       ... [{collapsed} more lines]\n", style="dim italic white")
-        result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+        result_text.append("       ▼ [Click to collapse]\n", style="dim #10B981 italic")
     elif not expanded and num_lines > 4:
-        result_text.append("       ▶ ... [Click to view file content]\n", style="dim cyan italic")
+        result_text.append("       ▶ ... [Click to view file content]\n", style="dim #10B981 italic")
 
     return result_text
 
@@ -240,14 +273,14 @@ def format_find_result(file_name: str, result_str: str, expanded: bool = False) 
                         result_text.append(f"   |_ Found {count} files:\n", style="dim white")
                         for p in parsed:
                             result_text.append(f"       {p}\n", style="dim white")
-                        result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+                        result_text.append("       ▼ [Click to collapse]\n", style="dim #10B981 italic")
                     else:
                         preview = ", ".join(parsed[:2])
                         if count > 2:
                             preview += f", ... (+{count - 2} more)"
                         result_text.append(f"   |_ Found {count} files: {preview}\n", style="dim white")
                         if count > 2:
-                            result_text.append("       ▶ ... [Click to view all matches]\n", style="dim cyan italic")
+                            result_text.append("       ▶ ... [Click to view all matches]\n", style="dim #10B981 italic")
                 return result_text
         except Exception:
             pass
@@ -275,7 +308,7 @@ def format_generic_tool_result(tool_name: str, result: Any, expanded: bool = Fal
                 first_line = first_line[:97] + "..."
             result_text.append(f"   |_ {first_line}\n", style="dim white")
             if len(lines) > 1 and not expanded:
-                result_text.append(f"       ▶ ... [{len(lines) - 1} more lines - click to expand]\n", style="dim cyan italic")
+                result_text.append(f"       ▶ ... [{len(lines) - 1} more lines - click to expand]\n", style="dim #10B981 italic")
         else:
             result_text.append(f"   |_ {lines[0]}\n", style="dim white")
             for l in lines[1:20]:
@@ -283,7 +316,7 @@ def format_generic_tool_result(tool_name: str, result: Any, expanded: bool = Fal
                 result_text.append(f"       {clean_l}\n", style="dim white")
             if len(lines) > 20:
                 result_text.append(f"       ... [{len(lines) - 20} more lines]\n", style="dim italic white")
-            result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+            result_text.append("       ▼ [Click to collapse]\n", style="dim #10B981 italic")
     return result_text
 
 
@@ -312,7 +345,7 @@ def format_search_content_result(query: str, result_str: str, expanded: bool = F
             visible_lines = lines[:limit]
             for l in visible_lines:
                 if l.startswith("--- ") and l.endswith(" ---"):
-                    result_text.append(f"       {l}\n", style="bold cyan")
+                    result_text.append(f"       {l}\n", style="bold #10B981")
                 elif l.startswith(">"):
                     result_text.append(f"     {l}\n", style="white on #1e3a5f")
                 else:
@@ -321,11 +354,11 @@ def format_search_content_result(query: str, result_str: str, expanded: bool = F
             collapsed = len(lines) - len(visible_lines)
             if collapsed > 0:
                 result_text.append(f"       ... [{collapsed} more lines]\n", style="dim italic white")
-            result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+            result_text.append("       ▼ [Click to collapse]\n", style="dim #10B981 italic")
         elif not expanded and lines:
             preview_line = file_headers[0] if file_headers else lines[0]
             result_text.append(f"       {preview_line}\n", style="dim white")
-            result_text.append("       ▶ ... [Click to view matches & context]\n", style="dim cyan italic")
+            result_text.append("       ▶ ... [Click to view matches & context]\n", style="dim #10B981 italic")
 
     return result_text
 
@@ -381,7 +414,7 @@ def format_ask_user_result(title: str, result: Any, expanded: bool = False) -> T
         count = len(answers)
         result_text.append(f"   |_ Captured {count} decision(s) for '{title}':\n", style="bold green")
         for qid, ans in answers.items():
-            result_text.append(f"       - {qid}: ", style="bold cyan")
+            result_text.append(f"       - {qid}: ", style="bold #10B981")
             result_text.append(f"{ans}\n", style="dim white")
     else:
         result_text.append(f"   |_ Questionnaire response: {str(result)}\n", style="bold green")
@@ -518,7 +551,7 @@ class ResponseTimeline:
                 header = format_tool_header(block.display_name, block.display_val, block.tool_name)
                 renderables.append(header)
                 if block.status == "running":
-                    running_text = Text("   |_ Running...\n", style="dim cyan italic")
+                    running_text = Text("   |_ Running...\n", style="dim #10B981 italic")
                     renderables.append(running_text)
             elif isinstance(block, ToolResultBlock):
                 if block.raw_result is not None or (block.tool_args and block.renderable is None):

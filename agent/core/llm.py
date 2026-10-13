@@ -139,12 +139,9 @@ class AgentChatSession:
         self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory_path}",project_memory_path).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT).replace("{skills}", skills_section)
         
         session_data = load_session(session_id) if session_id else None
-        target_id = session_id or get_active_session_id()
-        if not session_data and target_id:
-            session_data = load_session(target_id)
 
         if not session_data:
-            session_data = create_session(model_name=self.model_name, session_id=target_id)
+            session_data = create_session(model_name=self.model_name, session_id=session_id)
 
         self.session_id = session_data["session_id"]
         self.session_title = session_data.get("title", "New Conversation")
