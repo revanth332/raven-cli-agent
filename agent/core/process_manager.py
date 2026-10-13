@@ -6,7 +6,13 @@ import atexit
 import threading
 from collections import deque
 from typing import Any, Deque, Dict, List, Optional
-from agent.tools.miscellaneous_tools import strip_ansi, sanitize_command
+from agent.tools.miscellaneous_tools import (
+    strip_ansi,
+    sanitize_command,
+    set_active_sync_process,
+    kill_active_sync_process,
+    was_sync_process_cancelled,
+)
 
 @dataclass
 class BackgroundProcess:

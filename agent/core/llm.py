@@ -188,6 +188,9 @@ class AgentChatSession:
         self._last_duration_ms = 0.0
         self._last_ttft_ms = None
         self._last_usage = None
+        self._active_stream = None
+        self._stream_lock = Lock()
+        self._stream_aborted = False
         self.get_context_usage()
         if restored_messages and "session_cost" not in session_data:
             self.save_session_state()
@@ -201,14 +204,15 @@ class AgentChatSession:
     def save_session_state(self):
         # Exclude system prompt from persisted messages payload for clean state
         non_system_msgs = [m for m in self.messages if m.get("role") != "system"]
-        if not non_system_msgs:
-            return
         payload = {
             "session_id": self.session_id,
             "title": self.session_title,
             "model_name": self.model_name,
             "messages": non_system_msgs
         }
+        if not non_system_msgs:
+            save_session(payload)
+            return
         if hasattr(self, "tracker") and self.tracker is not None:
             with self.tracker._lock:
                 payload["session_cost"] = round(float(self.tracker.session_cost), 6)
@@ -302,6 +306,25 @@ class AgentChatSession:
             clean["name"] = msg["name"]
         return clean
 
+    def abort_active_stream(self) -> None:
+        """Immediately closes any active HTTP streaming response socket."""
+        with self._stream_lock:
+            self._stream_aborted = True
+            stream = self._active_stream
+            self._active_stream = None
+        if stream is not None:
+            try:
+                if hasattr(stream, "close"):
+                    stream.close()
+            except Exception:
+                pass
+            try:
+                inner_resp = getattr(stream, "response", None)
+                if inner_resp is not None and hasattr(inner_resp, "close"):
+                    inner_resp.close()
+            except Exception:
+                pass
+
     def _wrap_stream(self, response, start_time: float):
         """
         Wraps LLM response stream to capture time-to-first-token (TTFT),
@@ -312,6 +335,8 @@ class AgentChatSession:
         self._last_usage = None
         try:
             for chunk in response:
+                if self._stream_aborted:
+                    break
                 if not ttft_recorded:
                     ttft_ms = (time.perf_counter() - start_time) * 1000.0
                     ttft_recorded = True
@@ -338,6 +363,8 @@ class AgentChatSession:
             self._last_duration_ms = total_duration_ms
             self._last_ttft_ms = ttft_ms
         except Exception as e:
+            if self._stream_aborted:
+                return
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             error_code = extract_error_code(e)
             try:
@@ -353,9 +380,22 @@ class AgentChatSession:
             except Exception:
                 pass
             raise e
+        finally:
+            with self._stream_lock:
+                if self._active_stream is response:
+                    self._active_stream = None
+            try:
+                if hasattr(response, "close"):
+                    response.close()
+            except Exception:
+                pass
 
     def send_message_stream(self, query, execution_instruction=None, allow_tools=True, status_callback=None):
         """Send chat history with optional transient loop-control instructions, applying micro-compaction and auto-compaction guardrails."""
+        with self._stream_lock:
+            self._stream_aborted = False
+            self._active_stream = None
+
         # 1. Autonomous compaction threshold check
         if getattr(settings, "RAVEN_AUTO_COMPACTION_ENABLED", True):
             threshold = getattr(settings, "RAVEN_AUTO_COMPACTION_TOKEN_THRESHOLD", 60000)
@@ -416,6 +456,8 @@ class AgentChatSession:
                 else:
                     raise e
         except Exception as e:
+            if self._stream_aborted:
+                return iter(())
             duration_ms = (time.perf_counter() - start_time) * 1000.0
             error_code = extract_error_code(e)
             try:
@@ -431,6 +473,16 @@ class AgentChatSession:
             except Exception:
                 pass
             raise e
+
+        with self._stream_lock:
+            if self._stream_aborted:
+                try:
+                    if hasattr(response, "close"):
+                        response.close()
+                except Exception:
+                    pass
+                return iter(())
+            self._active_stream = response
 
         return self._wrap_stream(response, start_time)
 

@@ -63,6 +63,8 @@ def save_session(session_data: Dict[str, Any], force: bool = False) -> None:
 
     messages = session_data.get("messages", [])
     if not messages and not force:
+        if session_id in _pending_sessions:
+            _pending_sessions[session_id].update(session_data)
         # Do not persist empty waste sessions
         return
 

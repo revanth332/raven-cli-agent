@@ -1,11 +1,74 @@
 import os
 import re
+import signal
 import subprocess
+import threading
 from datetime import datetime
 
 MAX_COMMAND_OUTPUT_CHARS = 6000
 MAX_COMMAND_OUTPUT_LINES = 120
 DEFAULT_COMMAND_TIMEOUT_SECONDS = 120
+
+active_sync_process: subprocess.Popen | None = None
+_sync_process_cancelled: bool = False
+process_lock = threading.Lock()
+
+
+def set_active_sync_process(proc: subprocess.Popen | None) -> None:
+    """Registers or clears the currently running synchronous subprocess."""
+    global active_sync_process, _sync_process_cancelled
+    with process_lock:
+        active_sync_process = proc
+        if proc is not None:
+            _sync_process_cancelled = False
+
+
+def was_sync_process_cancelled() -> bool:
+    """Returns True if the active synchronous subprocess was cancelled by the user."""
+    with process_lock:
+        return _sync_process_cancelled
+
+
+def kill_active_sync_process() -> bool:
+    """Forcefully terminates the currently executing synchronous subprocess tree if any."""
+    global active_sync_process, _sync_process_cancelled
+    with process_lock:
+        proc = active_sync_process
+        if proc is None or proc.poll() is not None:
+            active_sync_process = None
+            return False
+        _sync_process_cancelled = True
+        pid = proc.pid
+        active_sync_process = None
+
+    try:
+        if os.name == "nt":
+            creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
+            try:
+                subprocess.Popen(
+                    ["taskkill", "/F", "/T", "/PID", str(pid)],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    creationflags=creationflags,
+                )
+            except Exception:
+                pass
+            try:
+                proc.kill()
+            except Exception:
+                pass
+        else:
+            try:
+                os.killpg(os.getpgid(pid), signal.SIGKILL)
+            except Exception:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+    except Exception:
+        pass
+    return True
 
 ANSI_ESCAPE_RE = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
 ANSI_OSC_RE = re.compile(r'\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)')
@@ -118,30 +181,45 @@ def execute_command(command: str) -> str:
         if os.name == 'nt':
             creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0x00000200)
 
-        # Run the command with strict timeout and no window / no shared console buffer
-        result = subprocess.run(
-            cmd_to_run, 
-            shell=True, 
-            capture_output=True, 
-            text=True, 
-            encoding="utf-8", 
+        # Run the command with strict timeout, process tracking, and no shared console buffer
+        proc = subprocess.Popen(
+            cmd_to_run,
+            shell=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
             errors="replace",
             env=env,
             creationflags=creationflags,
-            timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS
+            start_new_session=(os.name != "nt"),
         )
-        
-        output = f"Exit Code: {result.returncode}\n"
-        if result.stdout:
-            stdout_clean = strip_ansi(result.stdout)
+        set_active_sync_process(proc)
+        try:
+            stdout_raw, stderr_raw = proc.communicate(timeout=DEFAULT_COMMAND_TIMEOUT_SECONDS)
+        except subprocess.TimeoutExpired:
+            kill_active_sync_process()
+            try:
+                proc.communicate(timeout=2)
+            except Exception:
+                pass
+            return f"Execution Error: Command timed out after {DEFAULT_COMMAND_TIMEOUT_SECONDS}s. If this is a long-running process, background server, or file download, please use 'start_background_process' instead."
+        finally:
+            set_active_sync_process(None)
+
+        if was_sync_process_cancelled():
+            return "Command execution cancelled by user."
+
+        output = f"Exit Code: {proc.returncode}\n"
+        if stdout_raw:
+            stdout_clean = strip_ansi(stdout_raw)
             output += f"STDOUT:\n{truncate_output(stdout_clean)}\n"
-        if result.stderr:
-            stderr_clean = strip_ansi(result.stderr)
+        if stderr_raw:
+            stderr_clean = strip_ansi(stderr_raw)
             output += f"STDERR:\n{truncate_output(stderr_clean, max_chars=3000, max_lines=60)}\n"
-            
+
         return output
-    except subprocess.TimeoutExpired:
-        return f"Execution Error: Command timed out after {DEFAULT_COMMAND_TIMEOUT_SECONDS}s. If this is a long-running process, background server, or file download, please use 'start_background_process' instead."
     except Exception as e:
         return f"Failed to execute command. Error: {e}"
     

@@ -1,5 +1,6 @@
 import threading
 from textual.app import App, ComposeResult
+from textual.binding import Binding
 from textual.widgets import OptionList
 from textual.widgets.option_list import Option
 from textual.containers import VerticalScroll,Horizontal,Vertical
@@ -12,6 +13,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from agent.tools.tool_registry import TOOL_REGISTRY
+from agent.tools.miscellaneous_tools import kill_active_sync_process
 from agent.tools.checkpoint_tools import create_checkpoint, rollback_checkpoint, list_checkpoints
 from agent.core.llm import get_chat_session, generate_ai_session_title, reset_genai_client
 from agent.utils import (
@@ -88,7 +90,7 @@ class RavenTUI(App):
     ]
     # Define system hotkeys
     BINDINGS = [
-        ("escape", "cancel_generation", "Stop Generation"),
+        Binding("escape", "cancel_generation", "Stop Generation", priority=True),
         ("q", "quit", "Quit"),
     ]
 
@@ -108,6 +110,9 @@ class RavenTUI(App):
         self.questionnaire_result = None
         set_questionnaire_handler(self.request_user_questionnaire)
         self.is_generating = False
+        self._active_generation_id = 0
+        self._active_raven_card = None
+        self._active_timeline = None
         self.init_loader = None
 
         set_terminal_title("Raven - New Conversation")
@@ -122,6 +127,9 @@ class RavenTUI(App):
         self.cancel_event.set()
         self.permission_event.set()
         self.questionnaire_event.set()
+        kill_active_sync_process()
+        if self.chat_session and hasattr(self.chat_session, "abort_active_stream"):
+            self.chat_session.abort_active_stream()
 
     def action_quit(self) -> None:
         """Cleanly quits the application."""
@@ -129,23 +137,49 @@ class RavenTUI(App):
         self.exit()
 
     def action_cancel_generation(self):
-        """Interrupts the active AI generation, denies pending permission, or skips active questionnaire."""
-        if self.pending_permission:
-            self.resolve_permission(granted=False, instruction="")
-            return
-
-        if self.pending_questionnaire:
-            self.on_questionnaire_completed({"status": "cancelled", "answers": {}})
+        """Interrupts the active AI generation immediately, denies pending permission, or skips active questionnaire."""
+        if len(self.screen_stack) > 1:
+            modal = self.screen
+            for action_name in ("cancel", "close_modal", "cancel_or_back", "dismiss"):
+                action_fn = getattr(modal, f"action_{action_name}", None)
+                if callable(action_fn):
+                    action_fn()
+                    return
+            try:
+                modal.dismiss(None)
+            except Exception:
+                pass
             return
 
         self.cancel_event.set()
         self.questionnaire_event.set()
 
+        if self.pending_permission:
+            self.resolve_permission(granted=False, instruction="User cancelled generation via Escape key.")
+
+        if self.pending_questionnaire:
+            self.on_questionnaire_completed({"status": "cancelled", "answers": {}})
+
+        kill_active_sync_process()
+        if self.chat_session and hasattr(self.chat_session, "abort_active_stream"):
+            self.chat_session.abort_active_stream()
+
+        if self.is_generating:
+            self.remove_thinking_loader()
+            self.clear_input_error()
+            if getattr(self, "_active_timeline", None) is not None and getattr(self, "_active_raven_card", None) is not None:
+                self._active_timeline.add_status("Generation stopped by user.", style="bold yellow")
+                self.safe_update_raven_card(self._active_raven_card, self._active_timeline)
+            self.is_generating = False
+
         # Close option list if it's open, just in case
-        autocomplete = self.query_one("#autocomplete_list", OptionList)
-        if autocomplete.styles.display == "block":
-            autocomplete.styles.display = "none"
-            self.query_one("#chat_input", ChatInput).styles.margin = (0, 0, 0, 0)
+        try:
+            autocomplete = self.query_one("#autocomplete_list", OptionList)
+            if autocomplete.styles.display == "block":
+                autocomplete.styles.display = "none"
+                self.query_one("#chat_input", ChatInput).styles.margin = (0, 0, 0, 0)
+        except Exception:
+            pass
 
     def on_text_area_changed(self, event):
         val = event.text_area.text.strip()
@@ -516,7 +550,8 @@ class RavenTUI(App):
     def initialize_ai(self):
         """Background task to load credentials and initialize Gemini."""
         try:
-            self.chat_session = get_chat_session()
+            current_session_id = getattr(self.chat_session, "session_id", None) if self.chat_session else None
+            self.chat_session = get_chat_session(session_id=current_session_id)
             self.is_generating = False
             self.call_from_thread(self.reload_history_ui)
             self.call_from_thread(self.update_status_bar)
@@ -600,6 +635,8 @@ class RavenTUI(App):
             pass
 
     def start_new_session(self) -> None:
+        if self.is_generating or self.pending_permission or self.pending_questionnaire:
+            self.action_cancel_generation()
         new_sess = create_session(model_name=settings.RAVEN_MODEL)
         self.chat_session = get_chat_session(session_id=new_sess["session_id"])
         self.reload_history_ui()
@@ -648,6 +685,8 @@ class RavenTUI(App):
                 self.notify("Started a fresh chat session", title="New Session", severity="information")
                 return
             if selected_session_id:
+                if self.is_generating or self.pending_permission or self.pending_questionnaire:
+                    self.action_cancel_generation()
                 self.chat_session = get_chat_session(session_id=selected_session_id)
                 self.reload_history_ui()
                 self.update_status_bar()
@@ -858,6 +897,9 @@ class RavenTUI(App):
                 target_model = selected_model or initial_model
                 if target_model and target_model != settings.RAVEN_MODEL:
                     settings.set_config({"RAVEN_MODEL": target_model})
+                if self.chat_session and target_model:
+                    self.chat_session.model_name = target_model
+                    self.chat_session.save_session_state()
                 self.set_input_ready(False, f"Connecting to {target_model}...")
                 self.initialize_ai()
                 self.update_status_bar()
@@ -912,9 +954,13 @@ class RavenTUI(App):
                 settings.set_config({"RAVEN_MODEL": selected_model})
                 if self.chat_session:
                     self.chat_session.model_name = selected_model
+                    self.chat_session.get_context_usage()
                     self.chat_session.save_session_state()
-                self.set_input_ready(False, f"Switching to {selected_model}...")
-                self.initialize_ai()
+                    if len(self.chat_session.messages) <= 1:
+                        self.reload_history_ui()
+                else:
+                    self.set_input_ready(False, f"Switching to {selected_model}...")
+                    self.initialize_ai()
                 self.update_status_bar()
                 self.notify(f"Switched model to {selected_model}", title="Model Changed", severity="information")
 
@@ -1484,7 +1530,10 @@ class RavenTUI(App):
         threading.Thread(target=self._async_auto_checkpoint, daemon=True, name="AutoCheckpointWorker").start()
 
         start_time = time.time()
-        self.cancel_event.clear()
+        cancel_event = threading.Event()
+        self.cancel_event = cancel_event
+        self._active_generation_id = getattr(self, "_active_generation_id", 0) + 1
+        turn_id = self._active_generation_id
         loop_guard = LoopGuard(
             max_turns=settings.RAVEN_AGENT_SOFT_TURNS,
             hard_max_turns=settings.RAVEN_AGENT_HARD_TURNS,
@@ -1494,10 +1543,12 @@ class RavenTUI(App):
         )
         try:
             timeline = ResponseTimeline()
+            self._active_raven_card = raven_card
+            self._active_timeline = timeline
             total_text_response = ""
 
             while True:
-                if self.cancel_event.is_set():
+                if cancel_event.is_set() or self.cancel_event.is_set():
                     timeline.add_status("Generation stopped by user.", style="bold yellow")
                     self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                     break
@@ -1523,7 +1574,9 @@ class RavenTUI(App):
                     )
                     self.permission_event.wait()
 
-                    if self.cancel_event.is_set():
+                    if cancel_event.is_set() or self.cancel_event.is_set():
+                        timeline.add_status("Generation stopped by user.", style="bold yellow")
+                        self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                         break
 
                     if self.permission_result and not self.permission_instruction:
@@ -1552,21 +1605,24 @@ class RavenTUI(App):
                 max_retries = 6
                 user_message_committed = query is None
                 token_received = False
-                self.call_from_thread(self.show_thinking_loader, "Thinking...")
+                if not (cancel_event.is_set() or self.cancel_event.is_set()):
+                    self.call_from_thread(self.show_thinking_loader, "Thinking...")
 
                 for attempt in range(max_retries):
+                    if cancel_event.is_set() or self.cancel_event.is_set():
+                        break
                     try:
                         generator = self.chat_session.send_message_stream(
                             query,
                             execution_instruction=execution_instruction,
                             allow_tools=allow_tools,
-                            status_callback=lambda st: self.call_from_thread(self.show_thinking_loader, st),
+                            status_callback=lambda st: self.call_from_thread(self.show_thinking_loader, st) if not (cancel_event.is_set() or self.cancel_event.is_set()) else None,
                         )
                         if query is not None and not user_message_committed:
                             self.chat_session.commit_user_message(query)
                             user_message_committed = True
                         for chunk in generator:
-                            if self.cancel_event.is_set():
+                            if cancel_event.is_set() or self.cancel_event.is_set():
                                 break
                             if not chunk.choices:
                                 continue
@@ -1599,6 +1655,8 @@ class RavenTUI(App):
                         self.call_from_thread(self.clear_input_error)
                         break
                     except Exception as api_error:
+                        if cancel_event.is_set() or self.cancel_event.is_set():
+                            break
                         error_str = str(api_error).lower()
                         if "image_url" in error_str or "multimodal" in error_str:
                             err_msg = f"Model Incompatibility: Model {settings.RAVEN_MODEL} does not support image input. Please switch with /model."
@@ -1610,17 +1668,21 @@ class RavenTUI(App):
                                 sleep_time = 2 ** (attempt + 1)
                                 retry_msg = f"API Rate Limit hit (429). Retrying in {sleep_time}s..."
                                 self.call_from_thread(self.show_input_error, retry_msg)
-                                time.sleep(sleep_time)
+                                if cancel_event.wait(timeout=sleep_time) or self.cancel_event.is_set():
+                                    break
                                 continue
                         if attempt < max_retries - 1 and ("connection" in error_str or "timeout" in error_str or "503" in error_str or "502" in error_str or "temporarily" in error_str):
                             sleep_time = 2 ** (attempt + 1)
                             retry_msg = f"Connection error. Retrying in {sleep_time}s..."
                             self.call_from_thread(self.show_input_error, retry_msg)
-                            time.sleep(sleep_time)
+                            if cancel_event.wait(timeout=sleep_time) or self.cancel_event.is_set():
+                                break
                             continue
                         raise api_error
 
-                if self.cancel_event.is_set():
+                if cancel_event.is_set() or self.cancel_event.is_set():
+                    if round_text:
+                        self.chat_session.commit_assistant_message(content=round_text, tool_calls=None)
                     timeline.add_status("Generation stopped by user.", style="bold yellow")
                     self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
                     break
@@ -1659,7 +1721,7 @@ class RavenTUI(App):
                 tool_responses_to_append = []
                 for _, fc in function_calls.items():
                     loop_guard.record_tool_call()
-                    if self.cancel_event.is_set():
+                    if cancel_event.is_set() or self.cancel_event.is_set():
                         break
 
                     tool_name = fc["name"]
@@ -1724,7 +1786,7 @@ class RavenTUI(App):
                                 self.call_from_thread(self.ask_permission_ui, title, msg)
                                 self.permission_event.wait()
 
-                                if self.cancel_event.is_set():
+                                if cancel_event.is_set() or self.cancel_event.is_set():
                                     break
 
                                 if not self.permission_result:
@@ -1753,10 +1815,20 @@ class RavenTUI(App):
                         self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
 
                         try:
-                            self.call_from_thread(self.show_thinking_loader, f"Executing {display_name}...")
+                            if not (cancel_event.is_set() or self.cancel_event.is_set()):
+                                self.call_from_thread(self.show_thinking_loader, f"Executing {display_name}...")
                             result = tool_meta["fn"](**tool_args)
                         except Exception as e:
                             result = f"Error: {e}"
+
+                        if cancel_event.is_set() or self.cancel_event.is_set():
+                            tool_responses_to_append.append({
+                                "role": "tool",
+                                "tool_call_id": fc["id"],
+                                "name": fc["name"],
+                                "content": json.dumps(str(result) if result else "Tool execution cancelled by user.")
+                            })
+                            break
 
                         preview_renderable = format_tool_result_preview(tool_name, tool_args, result)
                         timeline.add_tool_result(
@@ -1782,6 +1854,17 @@ class RavenTUI(App):
                         "content": json.dumps(result)
                     })
 
+                if cancel_event.is_set() or self.cancel_event.is_set():
+                    responded_ids = {tr["tool_call_id"] for tr in tool_responses_to_append}
+                    for _, fc in function_calls.items():
+                        if fc["id"] not in responded_ids:
+                            tool_responses_to_append.append({
+                                "role": "tool",
+                                "tool_call_id": fc["id"],
+                                "name": fc["name"],
+                                "content": json.dumps("Tool execution cancelled by user.")
+                            })
+
                 for tool_response in tool_responses_to_append:
                     self.chat_session.add_message(
                         role="tool",
@@ -1789,23 +1872,31 @@ class RavenTUI(App):
                         name=tool_response["name"],
                         content=tool_response["content"]
                     )
+
+                if cancel_event.is_set() or self.cancel_event.is_set():
+                    self.chat_session.save_session_state()
+                    timeline.add_status("Generation stopped by user.", style="bold yellow")
+                    self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+                    break
+
                 loop_guard.record_round_outcome(round_made_progress)
                 query = None
 
-            elapsed = time.time() - start_time
-            if elapsed >= 60:
-                mins = int(elapsed // 60)
-                secs = elapsed % 60
-                time_str = f"{mins}m {secs:.1f}s"
-            else:
-                time_str = f"{elapsed:.1f}s"
+            if not (cancel_event.is_set() or self.cancel_event.is_set()):
+                elapsed = time.time() - start_time
+                if elapsed >= 60:
+                    mins = int(elapsed // 60)
+                    secs = elapsed % 60
+                    time_str = f"{mins}m {secs:.1f}s"
+                else:
+                    time_str = f"{elapsed:.1f}s"
 
-            timeline.add_status(f"Generation took {time_str}", style="dim white")
-            self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+                timeline.add_status(f"Generation took {time_str}", style="dim white")
+                self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
 
             if self.chat_session:
                 needs_ai_title = getattr(self.chat_session, "_needs_ai_title", False)
-                if needs_ai_title:
+                if needs_ai_title and total_text_response:
                     self.chat_session._needs_ai_title = False
                     first_user_msg = ""
                     for msg in self.chat_session.messages:
@@ -1826,11 +1917,15 @@ class RavenTUI(App):
                     pass
 
         except Exception as e:
-            err_str = str(e)
-            self.call_from_thread(self.show_input_error, f"Error: {err_str}")
+            if not (cancel_event.is_set() or self.cancel_event.is_set()):
+                err_str = str(e)
+                self.call_from_thread(self.show_input_error, f"Error: {err_str}")
         finally:
-            self.call_from_thread(self.remove_thinking_loader)
-            self.is_generating = False
+            if getattr(self, "_active_generation_id", 0) == turn_id:
+                self.call_from_thread(self.remove_thinking_loader)
+                self.is_generating = False
+                self._active_raven_card = None
+                self._active_timeline = None
 
 
 # --- To run it directly for testing ---

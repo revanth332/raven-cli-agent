@@ -538,6 +538,12 @@ class ResponseTimeline:
 
     def add_status(self, message: str, style: str = "dim white") -> None:
         """Appends an operational status or timing note to the timeline."""
+        if "stopped by user" in message.lower():
+            for block in self.blocks:
+                if isinstance(block, ToolCallBlock) and block.status == "running":
+                    block.status = "cancelled"
+        if self.blocks and isinstance(self.blocks[-1], StatusBlock) and self.blocks[-1].message == message:
+            return
         self.blocks.append(StatusBlock(message=message, style=style))
 
     def to_renderables(self) -> list:
@@ -703,20 +709,18 @@ class ChatMessageWidget(Vertical):
         return str(content) if content is not None else ""
 
     def compose(self) -> ComposeResult:
-        with Horizontal(classes="msg-header"):
-            if self.role == "user":
-                yield Static("[bold #06B6D4]YOU[/bold #06B6D4]", classes="msg-role")
-            else:
-                yield Static("[bold #10B981]RAVEN[/bold #10B981]", classes="msg-role")
-            yield Static("Copy", id="copy_btn", classes="copy-btn")
-            if self.role == "assistant":
-                yield Static("Copy Log", id="copy_all_btn", classes="copy-btn copy-all-btn")
         if self.image_badge:
             yield Static(f"[bold #06B6D4]◆ Image: {self.image_badge}[/bold #06B6D4]", id="img_badge", classes="img-badge")
         yield Vertical(id="timeline_container", classes="timeline-container")
         yield Static(id="msg_content", classes="msg-content")
-        footer_text = f"[dim #64748B]{self.model_name}[/dim #64748B]" if (self.role == "assistant" and self.model_name) else ""
-        yield Static(footer_text, id="model_footer", classes="model-footer")
+        with Horizontal(classes="msg-footer"):
+            if self.role == "assistant":
+                footer_text = f"[dim #64748B]{self.model_name}[/dim #64748B]" if self.model_name else ""
+                yield Static(footer_text, id="model_footer", classes="model-footer")
+                yield Static("Copy", id="copy_btn", classes="copy-btn")
+                yield Static("Copy Log", id="copy_all_btn", classes="copy-btn copy-all-btn")
+            else:
+                yield Static("Copy", id="copy_btn", classes="copy-btn")
 
     def _sync_timeline_widgets(self) -> None:
         """Syncs child widgets in timeline_container with self._timeline.blocks."""
@@ -763,26 +767,20 @@ class ChatMessageWidget(Vertical):
 
     def set_model_name(self, model_name: str) -> None:
         self.model_name = model_name
-        try:
-            footer = self.query_one("#model_footer", Static)
-            if self.role == "assistant" and model_name:
-                footer.update(f"[dim #64748B]{model_name}[/dim #64748B]")
-                footer.styles.display = "block"
-            else:
-                footer.update("")
-                footer.styles.display = "none"
-        except Exception:
-            pass
+        if self.role == "assistant":
+            try:
+                footer = self.query_one("#model_footer", Static)
+                footer.update(f"[dim #64748B]{model_name}[/dim #64748B]" if model_name else "")
+            except Exception:
+                pass
 
     def on_mount(self) -> None:
-        try:
-            footer = self.query_one("#model_footer", Static)
-            if not (self.role == "assistant" and self.model_name):
-                footer.styles.display = "none"
-            else:
-                footer.styles.display = "block"
-        except Exception:
-            pass
+        if self.role == "assistant":
+            try:
+                footer = self.query_one("#model_footer", Static)
+                footer.update(f"[dim #64748B]{self.model_name}[/dim #64748B]" if self.model_name else "")
+            except Exception:
+                pass
 
         if self._timeline is not None:
             self.raw_text = self._timeline.to_plain_text()
