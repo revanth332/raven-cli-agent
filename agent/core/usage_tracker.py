@@ -32,7 +32,14 @@ def compute_percentile(sorted_samples: list, p: float) -> float:
 
 
 class UsageTracker:
-    def __init__(self, persistence_file: Optional[Path] = None):
+    def __init__(
+        self,
+        persistence_file: Optional[Path] = None,
+        session_prompt_tokens: int = 0,
+        session_completion_tokens: int = 0,
+        session_cost: float = 0.0,
+        session_requests: int = 0,
+    ):
         self._lock = Lock()
         
         # Turn metrics (latest request)
@@ -42,11 +49,11 @@ class UsageTracker:
         self.last_duration_ms = 0.0
         self.last_ttft_ms: Optional[float] = None
         
-        # Cumulative session metrics
-        self.session_prompt_tokens = 0
-        self.session_completion_tokens = 0
-        self.session_cost = 0.0
-        self.session_requests = 0
+        # Cumulative session metrics (persisted per session)
+        self.session_prompt_tokens = int(session_prompt_tokens or 0)
+        self.session_completion_tokens = int(session_completion_tokens or 0)
+        self.session_cost = float(session_cost or 0.0)
+        self.session_requests = int(session_requests or 0)
 
         # Persistent lifetime metrics (across all sessions)
         self.lifetime_prompt_tokens = 0
@@ -224,6 +231,22 @@ class UsageTracker:
             self.last_duration_ms = 0.0
             self.last_ttft_ms = None
             self.current_context_tokens = 0
+
+    def restore_session_metrics(
+        self,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        cost: float = 0.0,
+        requests: int = 0
+    ) -> None:
+        """
+        Restores cumulative session metrics from persisted session data.
+        """
+        with self._lock:
+            self.session_prompt_tokens = int(prompt_tokens or 0)
+            self.session_completion_tokens = int(completion_tokens or 0)
+            self.session_cost = float(cost or 0.0)
+            self.session_requests = int(requests or 0)
 
     def get_summary(self, model_name: str = "gpt-4o") -> Dict[str, Any]:
         """

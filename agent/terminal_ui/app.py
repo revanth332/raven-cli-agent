@@ -566,11 +566,16 @@ class RavenTUI(App):
             self.notify("No active session to fork.", severity="warning")
             return
             
+        messages = (
+            self.chat_session.get_messages()
+            if hasattr(self.chat_session, "get_messages")
+            else [m for m in getattr(self.chat_session, "messages", []) if m.get("role") != "system"]
+        )
         current_data = {
             "session_id": getattr(self.chat_session, "session_id", None),
             "title": getattr(self.chat_session, "session_title", "Untitled Conversation"),
-            "messages": self.chat_session.get_messages(),
-            "model_name": getattr(self.chat_session, "model", settings.RAVEN_MODEL),
+            "messages": messages,
+            "model_name": getattr(self.chat_session, "model_name", getattr(self.chat_session, "model", settings.RAVEN_MODEL)),
             "project_name": getattr(self.chat_session, "project_name", "")
         }
         
@@ -871,7 +876,15 @@ class RavenTUI(App):
 
     def open_skills_modal(self) -> None:
         def on_skills_dismiss(selected: str | None) -> None:
-            pass
+            if not selected:
+                return
+            try:
+                chat_input = self.query_one("#chat_input", ChatInput)
+                chat_input.text = f"/{selected} "
+                chat_input.focus()
+                chat_input.cursor_location = (0, len(chat_input.text))
+            except Exception:
+                pass
 
         self.push_screen(SkillsManagerModal(), on_skills_dismiss)
 
@@ -1319,8 +1332,9 @@ class RavenTUI(App):
                 if skill_obj and skill_obj.get("enabled", True):
                     skill_body = skill_obj.get("content", "")
                     prompt_label = skill_prompt if skill_prompt else f"Follow the guidelines and instructions for the '{target_skill_name}' skill."
+                    folder_note = f"\nSkill Base Directory: {skill_obj.get('full_root_dir')}\n" if skill_obj.get("skill_type") == "folder" and skill_obj.get("full_root_dir") else ""
                     user_input = (
-                        f"[SYSTEM INSTRUCTION: The user has explicitly invoked the '{target_skill_name}' skill.]\n"
+                        f"[SYSTEM INSTRUCTION: The user has explicitly invoked the '{target_skill_name}' skill.]{folder_note}\n"
                         f"---\n"
                         f"{skill_body}\n"
                         f"---\n"
@@ -1336,8 +1350,9 @@ class RavenTUI(App):
                 if skill_obj and skill_obj.get("enabled", True):
                     skill_body = skill_obj.get("content", "")
                     prompt_label = query if query else f"Follow the guidelines and instructions for the '{possible_skill_name}' skill."
+                    folder_note = f"\nSkill Base Directory: {skill_obj.get('full_root_dir')}\n" if skill_obj.get("skill_type") == "folder" and skill_obj.get("full_root_dir") else ""
                     user_input = (
-                        f"[SYSTEM INSTRUCTION: The user has explicitly invoked the '{possible_skill_name}' skill.]\n"
+                        f"[SYSTEM INSTRUCTION: The user has explicitly invoked the '{possible_skill_name}' skill.]{folder_note}\n"
                         f"---\n"
                         f"{skill_body}\n"
                         f"---\n"

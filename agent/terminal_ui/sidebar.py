@@ -81,6 +81,7 @@ class ConsumptionSidebar(Vertical):
         curr_context = metrics.get("current_context_tokens", 0)
         context_pct = metrics.get("context_percent", 0.0)
         session_cost = metrics.get("session_cost", 0.0)
+        cost_str = f"${session_cost:.3f}" if (0 < session_cost < 0.01) else f"${session_cost:.2f}"
 
         s_name = self.session_name or "Greeting"
         clean_session = s_name if len(s_name) <= 32 else s_name[:30] + ".."
@@ -90,7 +91,7 @@ class ConsumptionSidebar(Vertical):
             f"[bold #F8FAFC]Context[/bold #F8FAFC]\n"
             f"[#94A3B8]{curr_context:,} tokens[/#94A3B8]\n"
             f"[#94A3B8]{int(round(context_pct))}% used[/#94A3B8]\n"
-            f"[#94A3B8]${session_cost:.2f} spent[/#94A3B8]"
+            f"[#94A3B8]{cost_str} spent[/#94A3B8]"
         )
 
         cwd_str = self._format_cwd()

@@ -81,6 +81,23 @@ def save_session(session_data: Dict[str, Any], force: bool = False) -> None:
 
     with _session_lock:
         try:
+            if file_path.exists():
+                try:
+                    with open(file_path, "r", encoding="utf-8") as f:
+                        existing = json.load(f)
+                    for preserve_key in [
+                        "created_at", "pinned", "parent_session_id",
+                        "session_cost", "session_prompt_tokens",
+                        "session_completion_tokens", "session_requests",
+                        "total_tokens"
+                    ]:
+                        if preserve_key in existing and preserve_key not in session_data:
+                            session_data[preserve_key] = existing[preserve_key]
+                except Exception:
+                    pass
+            elif "created_at" not in session_data:
+                session_data["created_at"] = session_data["updated_at"]
+
             with open(temp_path, "w", encoding="utf-8") as f:
                 json.dump(session_data, f, indent=2, ensure_ascii=False)
             temp_path.replace(file_path)
@@ -153,6 +170,10 @@ def list_sessions() -> List[Dict[str, Any]]:
                     "message_count": len(msgs),
                     "turn_count": turn_count,
                     "total_tokens": tokens,
+                    "session_cost": float(data.get("session_cost", data.get("cost", 0.0)) or 0.0),
+                    "session_prompt_tokens": int(data.get("session_prompt_tokens", 0) or 0),
+                    "session_completion_tokens": int(data.get("session_completion_tokens", 0) or 0),
+                    "session_requests": int(data.get("session_requests", 0) or 0),
                     "parent_session_id": data.get("parent_session_id"),
                     "pinned": bool(data.get("pinned", False))
                 })

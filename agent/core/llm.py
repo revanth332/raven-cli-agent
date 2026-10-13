@@ -155,23 +155,71 @@ class AgentChatSession:
         restored_messages = [m for m in session_data.get("messages", []) if m.get("role") != "system"]
         self.messages = [{"role": "system", "content": self.system_prompt}] + restored_messages
 
-        self.tracker = UsageTracker()
+        # Cumulative metrics restoration for this specific session
+        if "session_cost" in session_data or "cost" in session_data:
+            initial_cost = float(session_data.get("session_cost", session_data.get("cost", 0.0)) or 0.0)
+            initial_prompt = int(session_data.get("session_prompt_tokens", 0) or 0)
+            initial_completion = int(session_data.get("session_completion_tokens", 0) or 0)
+            initial_requests = int(session_data.get("session_requests", 0) or 0)
+        elif restored_messages:
+            # Baseline estimation for legacy sessions missing explicit cost tracking
+            from agent.core.pricing import calculate_cost
+            initial_prompt = 0
+            initial_completion = 0
+            for m in restored_messages:
+                content_str = str(m.get("content") or "")
+                toks = count_tokens(content_str, self.model_name)
+                if m.get("role") == "assistant":
+                    initial_completion += toks
+                elif m.get("role") == "user":
+                    initial_prompt += toks
+            initial_cost = calculate_cost(initial_prompt, initial_completion, self.model_name)
+            user_msgs = [m for m in restored_messages if m.get("role") == "user"]
+            initial_requests = len(user_msgs)
+        else:
+            initial_cost = 0.0
+            initial_prompt = 0
+            initial_completion = 0
+            initial_requests = 0
+
+        self.tracker = UsageTracker(
+            session_prompt_tokens=initial_prompt,
+            session_completion_tokens=initial_completion,
+            session_cost=initial_cost,
+            session_requests=initial_requests
+        )
         self._last_duration_ms = 0.0
         self._last_ttft_ms = None
         self._last_usage = None
         self.get_context_usage()
+        if restored_messages and "session_cost" not in session_data:
+            self.save_session_state()
+
+    def get_messages(self, include_system: bool = False):
+        """Returns the conversation messages, excluding the system prompt by default."""
+        if include_system:
+            return list(self.messages)
+        return [m for m in self.messages if m.get("role") != "system"]
 
     def save_session_state(self):
         # Exclude system prompt from persisted messages payload for clean state
         non_system_msgs = [m for m in self.messages if m.get("role") != "system"]
         if not non_system_msgs:
             return
-        save_session({
+        payload = {
             "session_id": self.session_id,
             "title": self.session_title,
             "model_name": self.model_name,
             "messages": non_system_msgs
-        })
+        }
+        if hasattr(self, "tracker") and self.tracker is not None:
+            with self.tracker._lock:
+                payload["session_cost"] = round(float(self.tracker.session_cost), 6)
+                payload["session_prompt_tokens"] = int(self.tracker.session_prompt_tokens)
+                payload["session_completion_tokens"] = int(self.tracker.session_completion_tokens)
+                payload["session_requests"] = int(self.tracker.session_requests)
+                payload["total_tokens"] = int(self.tracker.session_prompt_tokens + self.tracker.session_completion_tokens)
+        save_session(payload)
 
     def get_context_usage(self):
         context_tokens = count_tokens(self.messages, self.model_name)
