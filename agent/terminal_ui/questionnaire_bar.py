@@ -105,7 +105,7 @@ class OptionCardWidget(Vertical):
 
     def compose(self) -> ComposeResult:
         _, main_title, subtext = parse_option_display(self.full_text)
-        top_markup = f"[bold #38BDF8][{self.option_index + 1}][/bold #38BDF8]"
+        top_markup = f"[bold #10B981][{self.option_index + 1}][/bold #10B981]"
         if self.is_recommended:
             top_markup += "  [bold #10B981][RECOMMENDED][/bold #10B981]"
 
@@ -197,8 +197,8 @@ class QuestionnaireBar(Widget):
         # Update Header
         hdr_left = self.query_one("#qbar_header_left", Static)
         hdr_left.update(
-            f"[bold #06B6D4]▌[/bold #06B6D4] [bold #F8FAFC]{self.batch_title}[/bold #F8FAFC]  "
-            f"[bold #06B6D4][{self.current_index + 1}/{len(self.questions)}][/bold #06B6D4]"
+            f"[bold #10B981]▌[/bold #10B981] [bold #F8FAFC]{self.batch_title}[/bold #F8FAFC]  "
+            f"[bold #10B981][{self.current_index + 1}/{len(self.questions)}][/bold #10B981]"
         )
 
         # Update Question Text & Context

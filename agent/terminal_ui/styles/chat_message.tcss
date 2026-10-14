@@ -41,7 +41,7 @@ ChatMessageWidget.raven-msg {
 }
 
 .copy-btn:hover {
-    color: #38BDF8;
+    color: #10B981;
     background: #27272a;
 }
 

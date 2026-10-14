@@ -277,7 +277,7 @@ ChatInput:disabled {
 
 .option-card.selected {
     border: none;
-    background: #1e293b;
+    background: #132e27;
 }
 
 .card-top-badge {
@@ -292,7 +292,7 @@ ChatInput:disabled {
 }
 
 .option-card.selected .card-title {
-    color: #00FFFF;
+    color: #10B981;
 }
 
 .card-subtext {
@@ -337,11 +337,11 @@ ChatInput:disabled {
 }
 
 #qbar_btn_accept {
-    color: #06B6D4;
+    color: #10B981;
 }
 
 #qbar_btn_accept:hover {
-    color: #22D3EE;
+    color: #34D399;
     background: rgba(255, 255, 255, 0.05);
 }
 

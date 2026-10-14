@@ -21,7 +21,7 @@ from agent.utils import (
     encode_image_file, grab_clipboard_image, create_multimodal_content,
     set_terminal_title
 )
-from agent.terminal_ui.slash_commands import SLASH_COMMANDS, get_dynamic_slash_commands
+from agent.terminal_ui.slash_commands import SLASH_COMMANDS
 from agent.core.skills_manager import get_skill
 from agent.core.vision import is_model_vision_capable, transcribe_image_with_vision_model
 from agent.core.settings import settings
@@ -183,11 +183,11 @@ class RavenTUI(App):
 
     def on_text_area_changed(self, event):
         val = event.text_area.text.strip()
+        raw_text = event.text_area.text
         autocomplete = self.query_one("#autocomplete_list",OptionList)
         chat_input = self.query_one("#chat_input", ChatInput)
-        if val.startswith("/") and " " not in val:
-            all_commands = get_dynamic_slash_commands()
-            matches = [(cmd,info) for cmd,info in all_commands.items() if cmd.startswith(val)]
+        if raw_text.startswith("/") and " " not in raw_text:
+            matches = [(cmd,info) for cmd,info in SLASH_COMMANDS.items() if cmd.startswith(val)]
             if matches:
                 autocomplete.clear_options()
                 self.active_suggestions = [m[0] for m in matches]
@@ -592,7 +592,7 @@ class RavenTUI(App):
                     except Exception:
                         provider_display = "OpenAI"
                     yield Static(
-                        f"[dim #64748B]Provider:[/dim #64748B] [bold #38BDF8]{provider_display}[/bold #38BDF8]  │  [dim #64748B]Model:[/dim #64748B] [bold #06B6D4]{active_model}[/bold #06B6D4]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
+                        f"[dim #64748B]Provider:[/dim #64748B] [bold #10B981]{provider_display}[/bold #10B981]  │  [dim #64748B]Model:[/dim #64748B] [bold #10B981]{active_model}[/bold #10B981]  │  [dim #64748B]Approve:[/dim #64748B] {approve_status}",
                         id="input_status"
                     )
                     yield Static("", id="input_error_status")
@@ -975,6 +975,8 @@ class RavenTUI(App):
                 chat_input.text = f"/{selected} "
                 chat_input.focus()
                 chat_input.cursor_location = (0, len(chat_input.text))
+                self.query_one("#autocomplete_list", OptionList).styles.display = "none"
+                self.call_after_refresh(lambda: (chat_input.focus(), setattr(chat_input, "cursor_location", (0, len(chat_input.text)))))
             except Exception:
                 pass
 

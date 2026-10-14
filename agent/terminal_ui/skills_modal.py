@@ -140,8 +140,9 @@ class SkillsManagerModal(ModalScreen[str | None]):
                 event.stop()
 
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
-        if event.option_id and event.option_id not in ("none", "header_skills"):
-            self.dismiss(str(event.option_id))
+        opt_id = getattr(event, "option_id", None) or getattr(getattr(event, "option", None), "id", None)
+        if opt_id and opt_id not in ("none", "header_skills"):
+            self.dismiss(str(opt_id))
         else:
             self.dismiss(None)
 
