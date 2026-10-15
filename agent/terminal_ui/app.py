@@ -186,6 +186,11 @@ class RavenTUI(App):
         raw_text = event.text_area.text
         autocomplete = self.query_one("#autocomplete_list",OptionList)
         chat_input = self.query_one("#chat_input", ChatInput)
+        if getattr(chat_input, "_suppress_autocomplete_once", False):
+            chat_input._suppress_autocomplete_once = False
+            autocomplete.styles.display = "none"
+            chat_input.styles.margin = (0, 0, 0, 0)
+            return
         if raw_text.startswith("/") and " " not in raw_text:
             matches = [(cmd,info) for cmd,info in SLASH_COMMANDS.items() if cmd.startswith(val)]
             if matches:
@@ -1081,6 +1086,9 @@ class RavenTUI(App):
         
         if not user_input:
             return
+
+        if hasattr(event.text_area, "add_to_history"):
+            event.text_area.add_to_history(user_input)
             
         if user_input.lower() in ["exit", "quit", "/exit"] or user_input.lower().startswith("/exit"):
             self.exit()
