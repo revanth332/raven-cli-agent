@@ -12,6 +12,7 @@ from agent.tools.process_tools import (
 from agent.tools.web_tools import web_search,extract_content_from_web_links
 from agent.tools.image_generation_tools import generate_image
 from agent.tools.interaction_tools import ask_user
+from agent.tools.subagent_tools import delegate_to_subagent
 from agent.core.indexer import search_codebase
 
 raven_tools = [
@@ -659,10 +660,37 @@ raven_tools = [
                 "required": ["title", "questions"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "delegate_to_subagent",
+            "description": "Delegate a self-contained or context-heavy sub-task (e.g., multi-file codebase scouting, git staging/committing, commit history reporting, or isolated tasks) to a specialized subagent. Runs in an isolated context window on a fast/cost-effective model and returns only the concise summary.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subagent_name": {
+                        "type": "string",
+                        "description": "Name of the subagent to invoke ('explore', 'git_ops', 'reporter', 'general', or a custom subagent)."
+                    },
+                    "task_prompt": {
+                        "type": "string",
+                        "description": "Clear, self-contained instructions and context for the subagent to complete."
+                    }
+                },
+                "required": ["subagent_name", "task_prompt"]
+            }
+        }
     }
 ]
 
 TOOL_REGISTRY = {
+    "delegate_to_subagent": {
+        "fn": delegate_to_subagent,
+        "display_name": "Subagent",
+        "display_arg": ["subagent_name", "task_prompt"],
+        "ignore_display": False
+    },
     "ask_user": {
         "fn": ask_user,
         "display_name": "Ask User",

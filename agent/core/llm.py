@@ -135,8 +135,10 @@ class AgentChatSession:
         COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.md") if is_coach else ""
 
         skills_section = build_skills_prompt_section()
+        from agent.core.subagent_manager import build_subagents_prompt_section
+        subagents_section = build_subagents_prompt_section()
 
-        self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory_path}",project_memory_path).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT).replace("{skills}", skills_section)
+        self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory_path}",project_memory_path).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT).replace("{skills}", skills_section).replace("{subagents}", subagents_section)
         
         session_data = load_session(session_id) if session_id else None
 

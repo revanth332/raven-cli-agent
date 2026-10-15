@@ -59,6 +59,21 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "placeholder": "/skill <name> [prompt]",
         "system_prompt": "",
     },
+    "/subagents": {
+        "description": "List available isolated subagents and their models/tools",
+        "placeholder": "/subagents",
+        "system_prompt": "",
+    },
+    "/subagent": {
+        "description": "Directly run an isolated subagent (/subagent <name> <task>)",
+        "placeholder": "/subagent <name> <task>",
+        "system_prompt": "",
+    },
+    "/commit": {
+        "description": "Inspect changes and commit via isolated git_ops subagent",
+        "placeholder": "/commit [optional instructions]",
+        "system_prompt": "",
+    },
     "/auto-approve": {
         "description": "Toggle Auto-Approval Mode",
         "placeholder": "/auto-approve",

@@ -23,6 +23,12 @@ from agent.utils import (
 )
 from agent.terminal_ui.slash_commands import SLASH_COMMANDS
 from agent.core.skills_manager import get_skill
+from agent.core.subagent_manager import discover_subagents, get_subagent, resolve_subagent_model
+from agent.core.subagent_runner import (
+    SubAgentRunner,
+    set_subagent_execution_context,
+    clear_subagent_execution_context,
+)
 from agent.core.vision import is_model_vision_capable, transcribe_image_with_vision_model
 from agent.core.settings import settings
 from agent.core.safety import is_command_dangerous
@@ -113,6 +119,7 @@ class RavenTUI(App):
         self._active_generation_id = 0
         self._active_raven_card = None
         self._active_timeline = None
+        self._active_subagent_runner = None
         self.init_loader = None
 
         set_terminal_title("Raven - New Conversation")
@@ -128,6 +135,11 @@ class RavenTUI(App):
         self.permission_event.set()
         self.questionnaire_event.set()
         kill_active_sync_process()
+        if getattr(self, "_active_subagent_runner", None) is not None:
+            try:
+                self._active_subagent_runner.abort_active_stream()
+            except Exception:
+                pass
         if self.chat_session and hasattr(self.chat_session, "abort_active_stream"):
             self.chat_session.abort_active_stream()
 
@@ -161,6 +173,11 @@ class RavenTUI(App):
             self.on_questionnaire_completed({"status": "cancelled", "answers": {}})
 
         kill_active_sync_process()
+        if getattr(self, "_active_subagent_runner", None) is not None:
+            try:
+                self._active_subagent_runner.abort_active_stream()
+            except Exception:
+                pass
         if self.chat_session and hasattr(self.chat_session, "abort_active_stream"):
             self.chat_session.abort_active_stream()
 
@@ -246,6 +263,11 @@ class RavenTUI(App):
             if cmd == "/skills":
                 chat_input.text = ""
                 self.open_skills_modal()
+                return
+
+            if cmd == "/subagents":
+                chat_input.text = ""
+                self.show_subagents_overview()
                 return
 
             if cmd == "/checkpoints":
@@ -987,6 +1009,201 @@ class RavenTUI(App):
 
         self.push_screen(SkillsManagerModal(), on_skills_dismiss)
 
+    def show_subagents_overview(self) -> None:
+        """Displays a formatted summary card of all discovered built-in and custom subagents."""
+        main_container = self.query_one("#main_container")
+        if main_container.has_class("centered"):
+            main_container.remove_class("centered")
+
+        fallback_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+        subagents = discover_subagents()
+        lines = [
+            "### Available Isolated Subagents",
+            "",
+            "Subagents run in an isolated context window with filtered tools and resolved fast/cost-effective models.",
+            "",
+        ]
+        for sub in subagents:
+            resolved = resolve_subagent_model(sub, fallback_model=fallback_model)
+            scope_badge = sub.get("scope", "builtin")
+            tools_list = ", ".join(f"`{t}`" for t in sub.get("allowed_tools", [])) or "*none*"
+            ephemeral_tag = " • *ephemeral*" if sub.get("ephemeral") else ""
+            lines.append(
+                f"- **`{sub['name']}`** ({scope_badge} • model: `{resolved}` • max steps: {sub.get('max_steps', 12)}{ephemeral_tag})\n"
+                f"  {sub.get('description', '')}\n"
+                f"  *Tools:* {tools_list}"
+            )
+        lines.extend([
+            "",
+            "**Direct Invocation:** `/subagent <name> <task>` | `/commit [instructions]` | `/report [time_period]`",
+            "**Custom Subagents:** Add Markdown files with YAML frontmatter to `~/.raven/subagents/*.md` or `./subagents/*.md`.",
+        ])
+        history_container = self.query_one("#history")
+        card = ChatMessageWidget(role="assistant", raw_text="\n".join(lines), classes="raven-msg")
+        history_container.mount(card)
+        self.scroll_to_bottom()
+
+    def _prompt_tool_permission_from_thread(
+        self, tool_name: str, tool_args: dict, cancel_event: threading.Event
+    ) -> tuple[bool, str]:
+        """Thread-safe bridge to request user approval via the TUI permission bar."""
+        self.permission_event.clear()
+        title = f"Action Required: {tool_name}"
+        msg = f"Raven wants to execute {tool_name}.\nArgs: {str(tool_args)}"
+        self.call_from_thread(self.ask_permission_ui, title, msg)
+        self.permission_event.wait()
+        if cancel_event.is_set() or self.cancel_event.is_set():
+            return False, "Cancelled by user."
+        allowed = bool(self.permission_result)
+        instr = getattr(self, "permission_instruction", "") or ""
+        return allowed, instr
+
+    def launch_subagent_card(self, subagent: dict, task_prompt: str, raw_user_input: str) -> None:
+        """Instantiates an assistant card and starts an isolated SubAgentRunner worker."""
+        fallback_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+        resolved_model = resolve_subagent_model(subagent, fallback_model=fallback_model)
+        badge_model = f"subagent:{subagent['name']} • {resolved_model}"
+        raven_card = ChatMessageWidget(
+            role="assistant",
+            raw_text="",
+            model_name=badge_model,
+            classes="raven-msg",
+        )
+        self.scroll_to_bottom()
+        self.show_thinking_loader(f"Subagent [{subagent['name']}] ({resolved_model}): Thinking...")
+        self.is_generating = True
+        self.stream_subagent_response(subagent, task_prompt, raw_user_input, raven_card)
+
+    @work(thread=True)
+    def stream_subagent_response(
+        self,
+        subagent: dict,
+        task_prompt: str,
+        raw_user_input: str,
+        raven_card: ChatMessageWidget,
+    ) -> None:
+        """Executes a direct slash-command Subagent in a background worker thread and streams into TUI."""
+        if not self.chat_session:
+            self.call_from_thread(self.remove_thinking_loader)
+            self.call_from_thread(self.show_input_error, "AI is still initializing. Please try again.")
+            self.is_generating = False
+            return
+
+        self.call_from_thread(self.clear_input_error)
+        start_time = time.time()
+        cancel_event = threading.Event()
+        self.cancel_event = cancel_event
+        self._active_generation_id = getattr(self, "_active_generation_id", 0) + 1
+        turn_id = self._active_generation_id
+
+        fallback_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+        timeline = ResponseTimeline()
+        self._active_raven_card = raven_card
+        self._active_timeline = timeline
+
+        def on_text_chunk(delta_text: str) -> None:
+            timeline.append_text(delta_text)
+            self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+
+        def on_tool_call(t_name: str, disp_name: str, disp_val: str, status: str) -> None:
+            timeline.add_tool_call(t_name, disp_name, disp_val, status=status)
+            self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+
+        def on_tool_result(t_name: str, t_args: dict, raw_res: object, status_kind: str = "completed") -> None:
+            if status_kind == "denied":
+                renderable = Text(f"   |_ {raw_res}\n", style="bold red")
+                timeline.add_tool_result(t_name, renderable, plain_text=str(raw_res))
+            elif status_kind == "duplicate":
+                renderable = Text(f"   |_ {raw_res}\n", style="yellow")
+                timeline.add_tool_result(t_name, renderable, plain_text=str(raw_res))
+            else:
+                preview = format_tool_result_preview(t_name, t_args, raw_res)
+                timeline.add_tool_result(
+                    t_name,
+                    renderable=preview,
+                    plain_text=str(raw_res),
+                    tool_args=t_args,
+                    raw_result=raw_res,
+                )
+            self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+
+        def on_status_block(msg: str, style: str) -> None:
+            timeline.add_status(msg, style=style)
+            self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+
+        def on_model_fallback(new_model: str) -> None:
+            badge = f"subagent:{subagent['name']} • {new_model}"
+            self.call_from_thread(raven_card.set_model_name, badge)
+
+        runner = SubAgentRunner(
+            subagent=subagent,
+            fallback_model=fallback_model,
+            cancel_event=cancel_event,
+            permission_callback=lambda t_name, t_args: self._prompt_tool_permission_from_thread(t_name, t_args, cancel_event),
+            status_callback=lambda st: self.call_from_thread(self.show_thinking_loader, st)
+            if not (cancel_event.is_set() or self.cancel_event.is_set())
+            else None,
+            usage_tracker=self.chat_session.tracker,
+            session_save_callback=self.chat_session.save_session_state,
+        )
+        self._active_subagent_runner = runner
+
+        try:
+            res = runner.run(
+                task_prompt=task_prompt,
+                on_text_chunk=on_text_chunk,
+                on_tool_call=on_tool_call,
+                on_tool_result=on_tool_result,
+                on_status_block=on_status_block,
+                on_model_fallback=on_model_fallback,
+            )
+
+            if not (cancel_event.is_set() or self.cancel_event.is_set()):
+                elapsed = time.time() - start_time
+                if elapsed >= 60:
+                    mins = int(elapsed // 60)
+                    secs = elapsed % 60
+                    time_str = f"{mins}m {secs:.1f}s"
+                else:
+                    time_str = f"{elapsed:.1f}s"
+                timeline.add_status(f"Subagent [{subagent['name']}] finished in {time_str}", style="dim white")
+                self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+
+            if self.chat_session:
+                # Non-ephemeral subagents persist ONLY the compact user query & final summary (zero tool bloat)
+                output_text = (res.get("output") or "").strip()
+                if not subagent.get("ephemeral", False) and output_text and not res.get("cancelled"):
+                    badge_model = f"subagent:{subagent['name']} • {res.get('model_used', runner.model_name)}"
+                    self.chat_session.commit_user_message(raw_user_input)
+                    self.chat_session.messages.append(
+                        self.chat_session._create_message(
+                            "assistant",
+                            content=output_text,
+                            model_name=badge_model,
+                        )
+                    )
+                self.chat_session.save_session_state()
+                summary = self.chat_session.get_context_usage()
+                try:
+                    sidebar = self.query_one(ConsumptionSidebar)
+                    session_title = getattr(self.chat_session, "session_title", "New Conversation")
+                    current_project = get_active_project_name()
+                    project_name = current_project if current_project else Path.cwd().name
+                    active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+                    self.call_from_thread(sidebar.update_metrics, summary, session_title, project_name, active_model)
+                except Exception:
+                    pass
+        except Exception as e:
+            if not (cancel_event.is_set() or self.cancel_event.is_set()):
+                self.call_from_thread(self.show_input_error, f"Subagent Error: {e}")
+        finally:
+            self._active_subagent_runner = None
+            if getattr(self, "_active_generation_id", 0) == turn_id:
+                self.call_from_thread(self.remove_thinking_loader)
+                self.is_generating = False
+                self._active_raven_card = None
+                self._active_timeline = None
+
     @work(thread=True)
     def execute_compact_history(self, custom_instructions: str = "") -> None:
         """Background worker to distill conversation history and reload the UI."""
@@ -1142,6 +1359,13 @@ class RavenTUI(App):
             input_widget.text = ""
             self.query_one('#autocomplete_list', OptionList).styles.display = "none"
             self.open_skills_modal()
+            return
+
+        if user_input.lower() == "/subagents" or user_input.lower().startswith("/subagents "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.show_subagents_overview()
             return
         
         if user_input.lower() == "/auto-approve" or user_input.lower().startswith("/auto-approve "):
@@ -1410,6 +1634,59 @@ class RavenTUI(App):
                 self.open_skills_modal()
                 return
 
+            if cmd == "/subagents":
+                self.show_subagents_overview()
+                return
+
+            if cmd == "/subagent":
+                sub_parts = query.split(" ", 1) if query else []
+                target_sub_name = sub_parts[0].strip().lower() if sub_parts and sub_parts[0].strip() else ""
+                sub_task = sub_parts[1].strip() if len(sub_parts) > 1 else ""
+                if not target_sub_name:
+                    self.notify(
+                        "Usage: /subagent <name> <task>. Type /subagents to list available subagents.",
+                        title="Subagent",
+                        severity="warning",
+                    )
+                    return
+                sub_obj = get_subagent(target_sub_name)
+                if not sub_obj:
+                    available = ", ".join(s["name"] for s in discover_subagents())
+                    self.notify(
+                        f"Subagent '{target_sub_name}' not found. Available: {available}",
+                        title="Subagent Error",
+                        severity="error",
+                    )
+                    return
+                if not sub_task:
+                    sub_task = f"Execute your primary role as the '{sub_obj['name']}' subagent."
+                self.launch_subagent_card(sub_obj, sub_task, raw_user_input=user_input)
+                return
+
+            if cmd == "/commit":
+                sub_obj = get_subagent("git_ops")
+                if sub_obj:
+                    if query:
+                        sub_task = (
+                            "Inspect staged git changes (or check git status if nothing is staged) "
+                            f"and commit with a concise lowercase commit message. User instructions: {query}"
+                        )
+                    else:
+                        sub_task = (
+                            "Inspect staged git changes using `get_staged_git_changes` (or check `get_git_status` "
+                            "if nothing is staged) and commit the changes with a concise lowercase commit message."
+                        )
+                    self.launch_subagent_card(sub_obj, sub_task, raw_user_input=user_input)
+                    return
+
+            if cmd == "/report":
+                time_period = query if query else "past 7 days"
+                sub_obj = get_subagent("reporter")
+                if sub_obj:
+                    sub_task = f"Generate a work report for the target time period: {time_period}"
+                    self.launch_subagent_card(sub_obj, sub_task, raw_user_input=user_input)
+                    return
+
             if cmd == "/auto-approve":
                 self.toggle_auto_approve()
                 return
@@ -1552,6 +1829,17 @@ class RavenTUI(App):
             grace_turns=settings.RAVEN_AGENT_GRACE_TURNS,
         )
         try:
+            set_subagent_execution_context(
+                cancel_event=cancel_event,
+                permission_callback=lambda t_name, t_args: self._prompt_tool_permission_from_thread(t_name, t_args, cancel_event),
+                status_callback=lambda st: self.call_from_thread(self.show_thinking_loader, st)
+                if not (cancel_event.is_set() or self.cancel_event.is_set())
+                else None,
+                usage_tracker=self.chat_session.tracker,
+                session_save_callback=self.chat_session.save_session_state,
+                active_runner_callback=lambda r: setattr(self, "_active_subagent_runner", r),
+                fallback_model=getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL,
+            )
             timeline = ResponseTimeline()
             self._active_raven_card = raven_card
             self._active_timeline = timeline
@@ -1931,6 +2219,8 @@ class RavenTUI(App):
                 err_str = str(e)
                 self.call_from_thread(self.show_input_error, f"Error: {err_str}")
         finally:
+            clear_subagent_execution_context()
+            self._active_subagent_runner = None
             if getattr(self, "_active_generation_id", 0) == turn_id:
                 self.call_from_thread(self.remove_thinking_loader)
                 self.is_generating = False

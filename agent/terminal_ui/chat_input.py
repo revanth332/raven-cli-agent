@@ -21,6 +21,7 @@ EXCLUDED_HISTORY_COMMANDS = {
     "/model",
     "/models",
     "/skills",
+    "/subagents",
     "/checkpoints",
     "/auto-approve",
     "/image-model",
@@ -30,6 +31,7 @@ COMMANDS_REQUIRING_ARGS = {
     "/image",
     "/imagine",
     "/skill",
+    "/subagent",
 }
 
 

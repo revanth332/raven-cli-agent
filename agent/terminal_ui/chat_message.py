@@ -421,6 +421,40 @@ def format_ask_user_result(title: str, result: Any, expanded: bool = False) -> T
     return result_text
 
 
+def format_subagent_result(subagent_name: str, result_str: str, expanded: bool = False) -> Text:
+    """Formats the summary returned by a delegated subagent in the chat timeline."""
+    result_text = Text()
+    clean = str(result_str or "").strip()
+    if clean.startswith("Error:"):
+        result_text.append(f"   |_ {clean}\n", style="bold red")
+        return result_text
+
+    lines = [l for l in clean.splitlines() if l.strip()]
+    if not lines:
+        result_text.append(f"   |_ Subagent '{subagent_name}' completed.\n", style="bold green")
+        return result_text
+
+    header = lines[0]
+    body_lines = lines[1:] if header.startswith("[Subagent:") else lines
+    if header.startswith("[Subagent:"):
+        result_text.append(f"   |_ {header}\n", style="bold #10B981")
+    else:
+        result_text.append(f"   |_ Subagent '{subagent_name}' completed\n", style="bold #10B981")
+
+    max_lines = 500 if expanded else MAX_RESULT_LINES
+    visible = body_lines[:max_lines]
+    for line in visible:
+        result_text.append(f"       {line}\n", style="dim white")
+
+    collapsed = len(body_lines) - len(visible)
+    if collapsed > 0:
+        result_text.append(
+            f"       ▶ ... [{collapsed} more lines - click to expand]\n",
+            style="dim #10B981 italic",
+        )
+    return result_text
+
+
 def format_tool_result_preview(
     tool_name: str,
     tool_args: dict,
@@ -429,7 +463,10 @@ def format_tool_result_preview(
 ) -> Text:
     """Dispatches to the appropriate tool result formatter."""
     args = tool_args or {}
-    if tool_name == "ask_user":
+    if tool_name == "delegate_to_subagent":
+        sub_name = args.get("subagent_name", "subagent")
+        return format_subagent_result(sub_name, str(result or ""), expanded=expanded)
+    elif tool_name == "ask_user":
         title = args.get("title", "Questionnaire")
         return format_ask_user_result(title, result, expanded=expanded)
     elif tool_name == "patch_file":

@@ -84,3 +84,7 @@ You have access to `search_codebase`. If you need to know how a specific functio
 ## SKILL SECTION:
 
 {skills}
+
+## SUBAGENTS & TASK DELEGATION:
+
+{subagents}
