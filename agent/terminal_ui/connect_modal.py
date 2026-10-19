@@ -1,4 +1,6 @@
+from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.widgets import Button, Static, Input, Label, Select, RadioSet, RadioButton
 from textual.containers import Vertical, Horizontal
@@ -14,7 +16,9 @@ from agent.core.preset_manager import (
 
 
 class ConnectModal(ModalScreen[dict | None]):
-    BINDINGS = [("escape", "dismiss_modal", "Cancel")]
+    BINDINGS = [
+        Binding("escape", "dismiss_modal", "Cancel", priority=True),
+    ]
     CSS_PATH = "styles/connect_modal.tcss"
 
     def __init__(self) -> None:
@@ -97,6 +101,12 @@ class ConnectModal(ModalScreen[dict | None]):
 
     def action_dismiss_modal(self) -> None:
         self.dismiss(None)
+
+    def on_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            self.action_dismiss_modal()
+            event.prevent_default()
+            event.stop()
 
     def on_select_changed(self, event: Select.Changed) -> None:
         if event.select.id != "preset_select":

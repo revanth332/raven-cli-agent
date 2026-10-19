@@ -8,6 +8,7 @@ from textual.screen import ModalScreen
 from textual.widgets import OptionList, Static, Input
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal
+from textual.binding import Binding
 from textual import work, events
 from textual.timer import Timer
 
@@ -18,7 +19,9 @@ from agent.core.model_fetcher import fetch_models
 
 
 class ModelSelectModal(ModalScreen[str]):
-    BINDINGS = [("escape", "dismiss_modal", "Cancel")]
+    BINDINGS = [
+        Binding("escape", "dismiss_modal", "Cancel", priority=True),
+    ]
     CSS_PATH = "styles/model_select_modal.tcss"
 
     def __init__(self, current_model: Optional[str] = None) -> None:
@@ -136,6 +139,12 @@ class ModelSelectModal(ModalScreen[str]):
             self._search_timer = self.set_timer(0.15, lambda: self.update_option_list(event.value))
 
     def on_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            self.action_dismiss_modal()
+            event.prevent_default()
+            event.stop()
+            return
+
         if event.key == "ctrl+r":
             self.action_refresh_models()
             event.prevent_default()

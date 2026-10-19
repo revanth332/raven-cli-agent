@@ -6,6 +6,7 @@ from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.containers import Vertical, Horizontal
 from textual.widgets import OptionList, Input, Static, Button
@@ -82,6 +83,9 @@ class SessionSelectModal(ModalScreen[str]):
     Returns selected session_id, '__new__', or None if dismissed.
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_modal", "Cancel", priority=True),
+    ]
     CSS_PATH = "styles/session_select_modal.tcss"
 
     def __init__(self, active_session_id: Optional[str] = None, *args, **kwargs):
@@ -90,6 +94,16 @@ class SessionSelectModal(ModalScreen[str]):
         self.all_sessions: List[Dict[str, Any]] = []
         self._current_filtered_sessions: List[Dict[str, Any]] = []
         self._renaming_sid: Optional[str] = None
+
+    def action_dismiss_modal(self) -> None:
+        if self._renaming_sid is not None:
+            self._renaming_sid = None
+            inp = self.query_one("#session_search_input", Input)
+            inp.placeholder = "Search"
+            inp.value = ""
+            self.populate_options(self.all_sessions)
+        else:
+            self.dismiss(None)
 
     def compose(self) -> ComposeResult:
         with Vertical(id="session_modal_container"):
@@ -202,14 +216,7 @@ class SessionSelectModal(ModalScreen[str]):
             event.prevent_default()
             event.stop()
         elif event.key == "escape":
-            if self._renaming_sid is not None:
-                self._renaming_sid = None
-                inp = self.query_one("#session_search_input", Input)
-                inp.placeholder = "Search"
-                inp.value = ""
-                self.populate_options(self.all_sessions)
-            else:
-                self.dismiss(None)
+            self.action_dismiss_modal()
             event.prevent_default()
             event.stop()
         elif event.key == "ctrl+n":

@@ -5,6 +5,7 @@ Modal screen for viewing, restoring, or deleting saved checkpoints in Textual TU
 from typing import Optional, Tuple
 from textual import events
 from textual.app import ComposeResult
+from textual.binding import Binding
 from textual.screen import ModalScreen
 from textual.containers import Vertical, Horizontal
 from textual.widgets import OptionList, Input, Static, Button
@@ -19,6 +20,9 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
     Returns ('restore', checkpoint_id) or None if dismissed.
     """
 
+    BINDINGS = [
+        Binding("escape", "dismiss_modal", "Cancel", priority=True),
+    ]
     CSS_PATH = "styles/checkpoint_modal.tcss"
 
     def compose(self) -> ComposeResult:
@@ -108,14 +112,7 @@ class CheckpointSelectModal(ModalScreen[tuple | None]):
             event.prevent_default()
             event.stop()
         elif event.key == "escape":
-            self.dismiss(None)
-            event.prevent_default()
-            event.stop()
-            self.delete_highlighted_checkpoint()
-            event.prevent_default()
-            event.stop()
-        elif event.key == "escape":
-            self.dismiss(None)
+            self.action_dismiss_modal()
             event.prevent_default()
             event.stop()
 

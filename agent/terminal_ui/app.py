@@ -45,6 +45,7 @@ from agent.terminal_ui.model_select_modal import ModelSelectModal
 from agent.terminal_ui.session_select_modal import SessionSelectModal
 from agent.terminal_ui.checkpoint_modal import CheckpointSelectModal
 from agent.terminal_ui.skills_modal import SkillsManagerModal
+from agent.terminal_ui.subagents_modal import SubagentsModal
 from agent.terminal_ui.questionnaire_bar import QuestionnaireBar
 from agent.tools.interaction_tools import set_questionnaire_handler
 from agent.terminal_ui.sidebar import ConsumptionSidebar
@@ -152,7 +153,7 @@ class RavenTUI(App):
         """Interrupts the active AI generation immediately, denies pending permission, or skips active questionnaire."""
         if len(self.screen_stack) > 1:
             modal = self.screen
-            for action_name in ("cancel", "close_modal", "cancel_or_back", "dismiss"):
+            for action_name in ("dismiss_modal", "dismiss", "close", "close_modal", "cancel", "cancel_or_back"):
                 action_fn = getattr(modal, f"action_{action_name}", None)
                 if callable(action_fn):
                     action_fn()
@@ -267,7 +268,7 @@ class RavenTUI(App):
 
             if cmd == "/subagents":
                 chat_input.text = ""
-                self.show_subagents_overview()
+                self.open_subagents_modal()
                 return
 
             if cmd == "/checkpoints":
@@ -1009,39 +1010,25 @@ class RavenTUI(App):
 
         self.push_screen(SkillsManagerModal(), on_skills_dismiss)
 
-    def show_subagents_overview(self) -> None:
-        """Displays a formatted summary card of all discovered built-in and custom subagents."""
-        main_container = self.query_one("#main_container")
-        if main_container.has_class("centered"):
-            main_container.remove_class("centered")
+    def open_subagents_modal(self) -> None:
+        def on_subagents_dismiss(selected: str | None) -> None:
+            if not selected:
+                return
+            try:
+                chat_input = self.query_one("#chat_input", ChatInput)
+                chat_input.text = f"/{selected} "
+                chat_input.focus()
+                chat_input.cursor_location = (0, len(chat_input.text))
+                self.query_one("#autocomplete_list", OptionList).styles.display = "none"
+                self.call_after_refresh(lambda: (chat_input.focus(), setattr(chat_input, "cursor_location", (0, len(chat_input.text)))))
+            except Exception:
+                pass
 
-        fallback_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
-        subagents = discover_subagents()
-        lines = [
-            "### Available Isolated Subagents",
-            "",
-            "Subagents run in an isolated context window with filtered tools and resolved fast/cost-effective models.",
-            "",
-        ]
-        for sub in subagents:
-            resolved = resolve_subagent_model(sub, fallback_model=fallback_model)
-            scope_badge = sub.get("scope", "builtin")
-            tools_list = ", ".join(f"`{t}`" for t in sub.get("allowed_tools", [])) or "*none*"
-            ephemeral_tag = " • *ephemeral*" if sub.get("ephemeral") else ""
-            lines.append(
-                f"- **`{sub['name']}`** ({scope_badge} • model: `{resolved}` • max steps: {sub.get('max_steps', 12)}{ephemeral_tag})\n"
-                f"  {sub.get('description', '')}\n"
-                f"  *Tools:* {tools_list}"
-            )
-        lines.extend([
-            "",
-            "**Direct Invocation:** `/subagent <name> <task>` | `/commit [instructions]` | `/report [time_period]`",
-            "**Custom Subagents:** Add Markdown files with YAML frontmatter to `~/.raven/subagents/*.md` or `./subagents/*.md`.",
-        ])
-        history_container = self.query_one("#history")
-        card = ChatMessageWidget(role="assistant", raw_text="\n".join(lines), classes="raven-msg")
-        history_container.mount(card)
-        self.scroll_to_bottom()
+        self.push_screen(SubagentsModal(), on_subagents_dismiss)
+
+    def show_subagents_overview(self) -> None:
+        """Opens the subagents modal."""
+        self.open_subagents_modal()
 
     def _prompt_tool_permission_from_thread(
         self, tool_name: str, tool_args: dict, cancel_event: threading.Event
@@ -1365,7 +1352,7 @@ class RavenTUI(App):
             input_widget = event.text_area
             input_widget.text = ""
             self.query_one('#autocomplete_list', OptionList).styles.display = "none"
-            self.show_subagents_overview()
+            self.open_subagents_modal()
             return
         
         if user_input.lower() == "/auto-approve" or user_input.lower().startswith("/auto-approve "):
@@ -1635,7 +1622,7 @@ class RavenTUI(App):
                 return
 
             if cmd == "/subagents":
-                self.show_subagents_overview()
+                self.open_subagents_modal()
                 return
 
             if cmd == "/subagent":
@@ -1723,7 +1710,7 @@ class RavenTUI(App):
                 else:
                     self.notify(f"Skill '{target_skill_name}' not found or is disabled.", title="Skill Error", severity="error")
                     return
-            # Dynamic slash alias: /<skill_name> [prompt]
+            # Dynamic slash alias: /<skill_name> [prompt] or /<subagent_name> [task]
             elif cmd not in SLASH_COMMANDS:
                 possible_skill_name = cmd.lstrip("/")
                 skill_obj = get_skill(possible_skill_name)
@@ -1738,6 +1725,12 @@ class RavenTUI(App):
                         f"---\n"
                         f"User Request: {prompt_label}"
                     )
+                else:
+                    sub_obj = get_subagent(possible_skill_name)
+                    if sub_obj:
+                        sub_task = query.strip() if query and query.strip() else f"Execute your primary role as the '{sub_obj['name']}' subagent."
+                        self.launch_subagent_card(sub_obj, sub_task, raw_user_input=user_input)
+                        return
             elif cmd == "/report":
                 time_period = query if query else "past 7 days"
                 user_input = SLASH_COMMANDS[cmd]['system_prompt'].replace("<time_period>", time_period)

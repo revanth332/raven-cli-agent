@@ -50,6 +50,9 @@ class SkillsManagerModal(ModalScreen[str | None]):
     def action_close(self) -> None:
         self.dismiss(None)
 
+    def action_dismiss_modal(self) -> None:
+        self.dismiss(None)
+
     def refresh_skills(self) -> None:
         self.all_skills = load_skills(include_disabled=False)
         search_val = self.query_one("#skills_search_input", Input).value.strip().lower()
@@ -107,6 +110,12 @@ class SkillsManagerModal(ModalScreen[str | None]):
             )
 
     def on_key(self, event: events.Key) -> None:
+        if event.key == "escape":
+            self.action_close()
+            event.prevent_default()
+            event.stop()
+            return
+
         search_input = self.query_one("#skills_search_input", Input)
         opt_list = self.query_one("#skills_option_list", OptionList)
 
