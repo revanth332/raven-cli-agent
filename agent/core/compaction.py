@@ -11,10 +11,9 @@ def should_compact_content(content: str, token_limit: int = 1200) -> bool:
     Verifies and returns a boolean stating whether compaction is required or not.
     """
     token_count = count_tokens(content)
-    print(token_count)
     return token_count > token_limit
 
-def compact_content(content: str) -> dict:
+def compact_content(content: str, global_memory: str = "") -> dict:
     """
     Attempts to compact the given memory context using LLM distillation.
     Returns a dictionary of success status and content.
@@ -45,6 +44,10 @@ def compact_content(content: str) -> dict:
         logger.error("No model configured for compaction")
         return {"success": False, "content": content}
 
+    user_payload = f"Memory:\n{content}"
+    if global_memory and global_memory.strip():
+        user_payload = f"Global Memory Reference (Do NOT duplicate these points in Project Memory):\n{global_memory.strip()}\n\nProject Memory to Compact:\n{content}"
+
     max_retries = 3
     tried = 1
     while tried <= max_retries:
@@ -54,7 +57,7 @@ def compact_content(content: str) -> dict:
                     model=model,
                     messages=[
                         {"role": "system", "content": prompt},
-                        {"role": "user", "content": f"Memory:\n {content}"}
+                        {"role": "user", "content": user_payload}
                     ],
                     stream=False,
                 )

@@ -16,6 +16,30 @@ MAX_DIFF_LINES = 8
 MAX_ARG_LENGTH = 80
 MAX_RESULT_LINES = 6
 
+SLASH_COMMAND_PATTERN = re.compile(
+    r"(?:^|(?<=\s))(/(?:skill|subagent)(?:\s+[a-zA-Z0-9_-]+)?|/[a-zA-Z][a-zA-Z0-9_-]*)(?=\s|$)"
+)
+SLASH_COMMAND_STYLE = "bold #10B981 on #132e27"
+
+
+def format_user_message(raw_text: str) -> Text:
+    """Formats user message text, highlighting slash commands in the user message card."""
+    text_str = str(raw_text or "")
+    styled = Text(style="#F8FAFC")
+    last_idx = 0
+
+    for match in SLASH_COMMAND_PATTERN.finditer(text_str):
+        start, end = match.span(1)
+        if start > last_idx:
+            styled.append(text_str[last_idx:start])
+        styled.append(match.group(1), style=SLASH_COMMAND_STYLE)
+        last_idx = end
+
+    if last_idx < len(text_str):
+        styled.append(text_str[last_idx:])
+
+    return styled
+
 
 class SubtleCodeBlock(TextElement):
     """A code block with subtle, low-opacity background syntax highlighting."""
@@ -56,7 +80,7 @@ def format_tool_header(display_name: str, display_value: str = "", tool_name: st
     tool_logs.append(display_name, style="bold #10B981")
     if display_value:
         clean_val = " ".join(str(display_value).split())
-        max_len = 120 if tool_name == "search_codebase" else MAX_ARG_LENGTH
+        max_len = MAX_ARG_LENGTH
         if len(clean_val) > max_len:
             clean_val = clean_val[: max_len - 3] + "..."
         tool_logs.append("(", style="dim white")
@@ -718,6 +742,19 @@ class ChatMessageWidget(Vertical):
 
     def _format_multimodal_text(self, content: Any) -> str:
         if isinstance(content, str):
+            skill_match = re.match(
+                r"^\[SYSTEM INSTRUCTION: The user has explicitly invoked the '([^']+)' skill\.\].*?\n---\nUser Request:\s*(.*)$",
+                content,
+                flags=re.DOTALL,
+            )
+            if skill_match:
+                skill_name = skill_match.group(1).strip()
+                user_req = skill_match.group(2).strip()
+                default_req = f"Follow the guidelines and instructions for the '{skill_name}' skill."
+                if not user_req or user_req == default_req:
+                    return f"/{skill_name}"
+                return f"/{skill_name} {user_req}"
+
             # Intercept any legacy or direct rich markup badge like [bold #06B6D4][...][/bold #06B6D4]
             markup_pattern = r"^\[bold\s+#[0-9a-fA-F]{6}\]\[?(.*?)\]?\[/bold\s+#[0-9a-fA-F]{6}\]\s*\n*"
             match = re.match(markup_pattern, content)
@@ -867,7 +904,10 @@ class ChatMessageWidget(Vertical):
             content_static = self.query_one("#msg_content", Static)
             content_static.display = True
             if isinstance(renderable, (str, list)):
-                content_static.update(Markdown(self.raw_text))
+                if self.role == "user":
+                    content_static.update(format_user_message(self.raw_text))
+                else:
+                    content_static.update(Markdown(self.raw_text))
             else:
                 content_static.update(renderable)
             self._pending_renderable = None

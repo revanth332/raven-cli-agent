@@ -47,9 +47,9 @@ class ConnectModal(ModalScreen[dict | None]):
         api_key = "" if is_vertex else (cfg.get("api_key") or "")
         delete_disabled = (initial_val in BUILTIN_PRESETS) or (initial_val == "__new__")
 
-        with Vertical(id="modal_container"):
+        with Vertical(id="connect_modal_container"):
             with Horizontal(id="connect_header_row"):
-                yield Static("Configure Provider & Presets", id="modal_title")
+                yield Static("Configure Provider & Presets", id="connect_modal_title")
                 yield Static("esc to close", id="connect_close_hint")
 
             yield Label("Provider Preset:", classes="field_label")

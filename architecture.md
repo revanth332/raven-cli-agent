@@ -1,34 +1,20 @@
 Project architecture:
 
- Added Two-Mode Subagent Architecture (SubAgentRunner, SubagentManager, and delegate_to_subagent tool) supporting direct slash commands (/report, /commit, /subagent) and autonomous agent delegation. 
+ Raven CLI Agent modular architecture with Textual TUI, OpenAI/OpenRouter/Vertex LLM session orchestration, provider-agnostic 4-tier memory & compaction engine (local BM25 episodic recall, atomic section-level project memory updates, micro-compaction + archived macro-compaction), isolated subagent delegation, and tool execution loop safeguards. 
 
  ```mermaid
 graph TD
-    subgraph Terminal UI
-        App[agent/terminal_ui/app.py]
-        ChatInput[agent/terminal_ui/chat_input.py]
-        ChatMessage[agent/terminal_ui/chat_message.py]
-        SlashCommands[agent/terminal_ui/slash_commands.py]
-    end
-    subgraph Core Engine
-        LLM[agent/core/llm.py]
-        SubagentMgr[agent/core/subagent_manager.py]
-        SubagentRunner[agent/core/subagent_runner.py]
-        UsageTracker[agent/core/usage_tracker.py]
-    end
-    subgraph Tools
-        ToolRegistry[agent/tools/tool_registry.py]
-        SubagentTools[agent/tools/subagent_tools.py]
-    end
-
-    User((User)) -->|Submits query or slash command| ChatInput
-    ChatInput -->|Dispatches event| App
-    App -->|Mode A: /report, /commit, /subagent| SubagentRunner
-    App -->|Primary chat loop| LLM
-    LLM -->|Calls delegate_to_subagent| ToolRegistry
-    ToolRegistry -->|Invokes| SubagentTools
-    SubagentTools -->|Mode B: Isolated delegation| SubagentRunner
-    SubagentRunner -->|Resolves preset & model| SubagentMgr
-    SubagentRunner -->|Records token usage| UsageTracker
-    SubagentRunner -->|Streams timeline updates| ChatMessage
+    Entry[agent/main.py] -->|Launches| TUI[agent/terminal_ui/app.py]
+    TUI -->|Manages Turns & Streams| LLM[agent/core/llm.py]
+    TUI -->|Enforces Loop Ceiling| LoopGuard[agent/core/loop_guard.py]
+    LLM -->|Micro & Macro Compaction| Compaction[agent/core/compaction.py]
+    LLM -->|Persists & Archives| SessionMgr[agent/core/session_manager.py]
+    LLM -->|Tracks Tokens & Latency| Usage[agent/core/usage_tracker.py]
+    LLM -->|Loads Prompts & Memory| MemTools[agent/tools/memory_tools.py]
+    TUI -->|Executes Tools| Registry[agent/tools/tool_registry.py]
+    Registry -->|File & Grep Ops| FileTools[agent/tools/file_tools.py]
+    Registry -->|Git Ops| GitTools[agent/tools/git_tools.py]
+    Registry -->|BM25 Recall & Project Memory| MemTools
+    Registry -->|Isolated Subagents| SubagentRunner[agent/core/subagent_runner.py]
+    SubagentRunner -->|Resolves Presets| SubagentMgr[agent/core/subagent_manager.py]
 ```

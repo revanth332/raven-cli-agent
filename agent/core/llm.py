@@ -120,25 +120,22 @@ def _get_vertex_access_token():
 class AgentChatSession:
     def __init__(self, model_name, session_id=None, is_coach=False):
         self.model_name = model_name
+        self.is_coach = is_coach
 
         global_memory = get_memory_content()
 
-        project_memory_path,project_memory = get_project_memory_info()
+        project_memory_path, project_memory = get_project_memory_info()
         if should_compact_content(project_memory):
-            compaction_response = compact_content(project_memory)
+            compaction_response = compact_content(project_memory, global_memory=global_memory)
             if compaction_response["success"]:
                 project_memory = compaction_response["content"]
-                save_compacted_memory(project_memory_path,project_memory)
+                save_compacted_memory(project_memory_path, project_memory)
 
-        project_name = get_active_project_name()
-        repo_map = get_repo_map()
-        COACH_PROMPT = read_prompt_from_file("prompts/coach_prompt.md") if is_coach else ""
-
-        skills_section = build_skills_prompt_section()
-        from agent.core.subagent_manager import build_subagents_prompt_section
-        subagents_section = build_subagents_prompt_section()
-
-        self.system_prompt = read_prompt_from_file('prompts/system_prompt.md').replace("{global_memory}", global_memory).replace("{project_name}", project_name).replace("{project_memory_path}",project_memory_path).replace("{project_memory}", project_memory).replace("{repo_map}", repo_map).replace("{coach_prompt}", COACH_PROMPT).replace("{skills}", skills_section).replace("{subagents}", subagents_section)
+        self.system_prompt = self._build_system_prompt(
+            global_memory=global_memory,
+            project_memory_path=project_memory_path,
+            project_memory=project_memory,
+        )
         
         session_data = load_session(session_id) if session_id else None
 
@@ -197,6 +194,40 @@ class AgentChatSession:
         if restored_messages and "session_cost" not in session_data:
             self.save_session_state()
 
+    def _build_system_prompt(self, global_memory=None, project_memory_path=None, project_memory=None) -> str:
+        if global_memory is None:
+            global_memory = get_memory_content()
+        if project_memory_path is None or project_memory is None:
+            project_memory_path, project_memory = get_project_memory_info()
+
+        project_name = get_active_project_name()
+        repo_map = get_repo_map()
+        coach_prompt = read_prompt_from_file("prompts/coach_prompt.md") if getattr(self, "is_coach", False) else ""
+        skills_section = build_skills_prompt_section()
+        from agent.core.subagent_manager import build_subagents_prompt_section
+        subagents_section = build_subagents_prompt_section()
+
+        return (
+            read_prompt_from_file("prompts/system_prompt.md")
+            .replace("{global_memory}", global_memory)
+            .replace("{project_name}", project_name)
+            .replace("{project_memory_path}", project_memory_path)
+            .replace("{project_memory}", project_memory)
+            .replace("{repo_map}", repo_map)
+            .replace("{coach_prompt}", coach_prompt)
+            .replace("{skills}", skills_section)
+            .replace("{subagents}", subagents_section)
+        )
+
+    def refresh_system_prompt(self) -> None:
+        """Re-renders the system prompt with latest global and project memory and updates self.messages[0] in-place."""
+        try:
+            self.system_prompt = self._build_system_prompt()
+            if self.messages and self.messages[0].get("role") == "system":
+                self.messages[0]["content"] = self.system_prompt
+        except Exception as e:
+            logging.getLogger("raven.llm").warning(f"Failed to refresh system prompt: {e}")
+
     def get_messages(self, include_system: bool = False):
         """Returns the conversation messages, excluding the system prompt by default."""
         if include_system:
@@ -235,9 +266,11 @@ class AgentChatSession:
     def compact_history(self, custom_instructions: str = "") -> dict:
         """
         Compacts past conversation history using LLM distillation (Option B sliding window).
-        Saves updated state and returns compaction statistics.
+        Saves a pre-compaction backup archive and returns compaction statistics.
         """
         from agent.core.compaction import compact_conversation_history
+        from pathlib import Path
+        import json
 
         tokens_before = count_tokens(self.messages, self.model_name)
         result = compact_conversation_history(
@@ -248,6 +281,24 @@ class AgentChatSession:
 
         if not result["success"]:
             return result
+
+        # M-06: Archive pre-compaction messages non-destructively before overwriting
+        try:
+            archive_dir = Path.home() / ".raven" / "sessions" / "archive"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            ts = int(time.time())
+            archive_file = archive_dir / f"{self.session_id}_{ts}.json"
+            non_system_before = [m for m in self.messages if m.get("role") != "system"]
+            archive_payload = {
+                "session_id": self.session_id,
+                "title": f"{self.session_title} (Pre-Compaction Backup)",
+                "model_name": self.model_name,
+                "archived_at": ts,
+                "messages": non_system_before,
+            }
+            archive_file.write_text(json.dumps(archive_payload, indent=2), encoding="utf-8")
+        except Exception as e:
+            logging.getLogger("raven.llm").warning(f"Failed to archive pre-compaction session backup: {e}")
 
         self.messages = result["compacted_messages"]
         self.save_session_state()
@@ -398,10 +449,24 @@ class AgentChatSession:
             self._stream_aborted = False
             self._active_stream = None
 
-        # 1. Autonomous compaction threshold check
+        # 1. Apply micro-compaction first (payload pruning of older tool returns)
+        pruning_enabled = getattr(settings, "RAVEN_CONTEXT_PRUNING_ENABLED", True)
+        retention_turns = getattr(settings, "RAVEN_TOOL_OUTPUT_RETENTION_TURNS", 2)
+        stub_threshold = getattr(settings, "RAVEN_TOOL_OUTPUT_STUB_THRESHOLD", 150)
+
+        if pruning_enabled:
+            messages_to_send = prune_message_payload(
+                self.messages,
+                retention_turns=retention_turns,
+                stub_char_threshold=stub_threshold
+            )
+        else:
+            messages_to_send = self.messages
+
+        # 2. Autonomous compaction threshold check against effective pruned payload
         if getattr(settings, "RAVEN_AUTO_COMPACTION_ENABLED", True):
             threshold = getattr(settings, "RAVEN_AUTO_COMPACTION_TOKEN_THRESHOLD", 60000)
-            current_tokens = count_tokens(self.messages, self.model_name)
+            current_tokens = count_tokens(messages_to_send, self.model_name)
             if should_auto_compact(current_tokens, threshold=threshold, message_count=len(self.messages)):
                 if status_callback:
                     try:
@@ -409,7 +474,17 @@ class AgentChatSession:
                     except Exception:
                         pass
                 try:
-                    self.compact_history()
+                    compaction_res = self.compact_history()
+                    if compaction_res.get("success"):
+                        messages_to_send = (
+                            prune_message_payload(
+                                self.messages,
+                                retention_turns=retention_turns,
+                                stub_char_threshold=stub_threshold
+                            )
+                            if pruning_enabled
+                            else self.messages
+                        )
                 except Exception as e:
                     logging.getLogger("raven.llm").warning(f"Autonomous compaction trigger failed: {e}")
                 finally:
@@ -418,18 +493,6 @@ class AgentChatSession:
                             status_callback("Thinking...")
                         except Exception:
                             pass
-
-        # 2. Apply micro-compaction (payload pruning of older tool returns)
-        if getattr(settings, "RAVEN_CONTEXT_PRUNING_ENABLED", True):
-            retention_turns = getattr(settings, "RAVEN_TOOL_OUTPUT_RETENTION_TURNS", 2)
-            stub_threshold = getattr(settings, "RAVEN_TOOL_OUTPUT_STUB_THRESHOLD", 150)
-            messages_to_send = prune_message_payload(
-                self.messages,
-                retention_turns=retention_turns,
-                stub_char_threshold=stub_threshold
-            )
-        else:
-            messages_to_send = self.messages
 
         request_messages = [self._sanitize_message_for_api(m) for m in messages_to_send]
         if query is not None:
@@ -537,6 +600,8 @@ class AgentChatSession:
         """Helper to append structured assistant or tool returns to history"""
         msg = self._create_message(role,content=content,tool_call_id=tool_call_id,name=name,tool_calls=tool_calls)
         self.messages.append(msg)
+        if role == "tool" and name in ("save_to_memory", "update_project_memory"):
+            self.refresh_system_prompt()
 
     def _create_message(self, role, content=None, tool_call_id=None, name=None, tool_calls=None, model_name=None):
         msg = {"role": role}

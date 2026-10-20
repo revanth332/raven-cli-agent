@@ -1,4 +1,4 @@
-from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,update_architecture_map,get_active_projects,recall_memory
+from agent.tools.memory_tools import save_to_memory,save_concept,log_successful_debug,update_architecture_map,get_active_projects,recall_memory,update_project_memory
 from agent.tools.file_tools import find_file,read_file,create_file,patch_file,search_file_content
 from agent.tools.git_tools import get_staged_git_changes,commit_staged_git_changes,get_git_status,git_add,get_git_diff,get_git_log
 from agent.tools.checkpoint_tools import create_checkpoint,rollback_checkpoint,list_checkpoints
@@ -13,7 +13,6 @@ from agent.tools.web_tools import web_search,extract_content_from_web_links
 from agent.tools.image_generation_tools import generate_image
 from agent.tools.interaction_tools import ask_user
 from agent.tools.subagent_tools import delegate_to_subagent
-from agent.core.indexer import search_codebase
 
 raven_tools = [
     {
@@ -394,23 +393,35 @@ raven_tools = [
     {
         "type": "function",
         "function": {
-            "name": "search_codebase",
-            "description": "Searches the codebase for code snippets or documentation related to the query. Use this to find how functions are implemented, where variables are defined, or general architectural context.",
+            "name": "update_project_memory",
+            "description": "Updates a specific section of the active project's memory file atomically ('Tech Stack & Runtime', 'Active Architecture & Key Modules', 'Critical Constraints, Preferences', or 'Current/Ongoing Tasks'). Use this instead of patch_file for project memory maintenance.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "query": {
+                    "section": {
                         "type": "string",
-                        "description": "The natural language question or code keywords to search for."
+                        "enum": [
+                            "Tech Stack & Runtime",
+                            "Active Architecture & Key Modules",
+                            "Critical Constraints, Preferences",
+                            "Current/Ongoing Tasks"
+                        ],
+                        "description": "The project memory section header to update."
                     },
-                    "top_results": {
-                        "type": "integer",
-                        "description": "Number of top results to return. Defaults to 3.",
-                        "default": 3
+                    "content": {
+                        "type": "string",
+                        "description": "Concise markdown bullet points for the targeted section."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["replace", "append"],
+                        "description": "'replace' overwrites the section (ideal for Current/Ongoing Tasks); 'append' adds new bullet points to the existing section.",
+                        "default": "replace"
                     }
                 },
                 "required": [
-                    "query"
+                    "section",
+                    "content"
                 ]
             }
         }
@@ -811,11 +822,11 @@ TOOL_REGISTRY = {
         "display_arg": None,
         "ignore_display": False
     },
-    "search_codebase":{
-        "fn": search_codebase,
-        "display_name": "Searching Codebase",
-        "display_arg": "query",
-        "ignore_display": False
+    "update_project_memory": {
+        "fn": update_project_memory,
+        "display_name": "Update Project Memory",
+        "display_arg": "section",
+        "ignore_display": True
     },
     "get_staged_git_changes":{
         "fn": get_staged_git_changes,

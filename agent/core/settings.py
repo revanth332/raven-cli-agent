@@ -11,7 +11,6 @@ class Settings:
         "RAVEN_API_KEY": (None, "str", ["RAVEN_API_KEY", "API_KEY"]),
         "RAVEN_MODEL": ("google/gemini-3-flash-preview", "str", ["RAVEN_MODEL", "MODEL"]),
         "RAVEN_SMALL_MODEL": (None, "str", ["RAVEN_SMALL_MODEL", "SMALL_MODEL"]),
-        "RAVEN_EMBEDDING_MODEL": (None, "str", ["RAVEN_EMBEDDING_MODEL", "EMBEDDING_MODEL"]),
         "RAVEN_USE_VERTEX_AI": (False, "bool", ["RAVEN_USE_VERTEX_AI", "USE_VERTEX_AI"]),
         "RAVEN_AUTO_APPROVE": (False, "bool", ["RAVEN_AUTO_APPROVE", "AUTO_APPROVE"]),
         "RAVEN_AGENT_SOFT_TURNS": (25, "int", ["RAVEN_AGENT_SOFT_TURNS", "AGENT_SOFT_TURNS"]),

@@ -35,9 +35,9 @@ class ModelSelectModal(ModalScreen[str]):
         self._search_timer: Optional[Timer] = None
 
     def compose(self) -> ComposeResult:
-        with Vertical(id="modal_container"):
+        with Vertical(id="model_modal_container"):
             with Horizontal(id="model_header_row"):
-                yield Static(f"Select AI Model ({self.preset_name})", id="modal_title")
+                yield Static(f"Select AI Model ({self.preset_name})", id="model_modal_title")
                 yield Static("esc to close", id="model_close_hint")
             yield Input(placeholder="Search models...", id="search_input")
             yield OptionList(id="model_list")

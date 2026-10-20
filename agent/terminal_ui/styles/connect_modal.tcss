@@ -3,69 +3,70 @@ ConnectModal {
     background: rgba(0, 0, 0, 0.7);
 }
 
-#modal_container {
+ConnectModal #connect_modal_container {
     width: 76;
     height: auto;
     max-height: 90%;
+    overflow-y: auto;
     background: #18181a;
     border: none;
     padding: 1 2;
 }
 
-#connect_header_row {
+ConnectModal #connect_header_row {
     width: 100%;
     height: 1;
     margin-bottom: 1;
 }
 
-#modal_title {
+ConnectModal #connect_modal_title {
     width: 1fr;
     color: #FFFFFF;
     text-style: bold;
 }
 
-#connect_close_hint {
+ConnectModal #connect_close_hint {
     width: auto;
     color: #71717a;
     text-align: right;
 }
 
-.field_label {
+ConnectModal .field_label {
     color: #94A3B8;
     margin-top: 1;
     margin-bottom: 0;
     text-style: bold;
 }
 
-.field_input {
+ConnectModal .field_input {
     margin-bottom: 1;
     background: #252526;
     border: none;
     color: #F8FAFC;
 }
 
-.field_input:focus {
+ConnectModal .field_input:focus {
     border: none;
 }
 
-.field_input:disabled {
+ConnectModal .field_input:disabled {
     opacity: 0.55;
     background: #1e1e1e;
     color: #64748B;
 }
 
-#preset_select {
+ConnectModal #preset_select {
     margin-bottom: 1;
     background: #252526;
     border: none;
     color: #F8FAFC;
 }
 
-#preset_select:focus {
+ConnectModal #preset_select:focus {
     border: none;
 }
 
-#provider_type_radios {
+ConnectModal #provider_type_radios {
     height: auto;
     background: transparent;
     border: none;
@@ -73,14 +74,14 @@ ConnectModal {
     layout: horizontal;
 }
 
-#provider_type_radios > RadioButton {
+ConnectModal #provider_type_radios > RadioButton {
     background: transparent;
     padding: 0 1;
     margin-right: 2;
     color: #E2E8F0;
 }
 
-#error_label {
+ConnectModal #error_label {
     color: #EF4444;
     text-style: italic;
     margin-top: 0;
@@ -88,13 +89,13 @@ ConnectModal {
     display: none;
 }
 
-#button_container {
+ConnectModal #button_container {
     height: auto;
     align: right middle;
     margin-top: 1;
 }
 
-Button {
+ConnectModal Button {
     margin-left: 1;
     min-width: 10;
     height: 3;
@@ -102,35 +103,35 @@ Button {
     border: none;
 }
 
-#cancel_btn {
+ConnectModal #cancel_btn {
     background: transparent;
     color: #E2E8F0;
     border: none;
 }
 
-#cancel_btn:hover {
+ConnectModal #cancel_btn:hover {
     background: #27272a;
 }
 
-#delete_btn {
+ConnectModal #delete_btn {
     background: transparent;
     color: #EF4444;
     border: none;
     min-width: 13;
 }
 
-#delete_btn:hover {
+ConnectModal #delete_btn:hover {
     background: rgba(239, 68, 68, 0.15);
 }
 
-#delete_btn:disabled {
+ConnectModal #delete_btn:disabled {
     color: #475569;
     border: none;
     opacity: 0.4;
     background: transparent;
 }
 
-#save_btn {
+ConnectModal #save_btn {
     background: transparent;
     color: #38BDF8;
     border: none;
@@ -138,11 +139,11 @@ Button {
     text-style: bold;
 }
 
-#save_btn:hover {
+ConnectModal #save_btn:hover {
     background: rgba(56, 189, 248, 0.15);
 }
 
-#submit_btn {
+ConnectModal #submit_btn {
     background: #10B981;
     color: #062b1e;
     border: none;
@@ -150,7 +151,7 @@ Button {
     text-style: bold;
 }
 
-#submit_btn:hover {
+ConnectModal #submit_btn:hover {
     background: #059669;
 }
 

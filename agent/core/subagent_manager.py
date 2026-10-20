@@ -17,7 +17,7 @@ EXPLORE_SYSTEM_PROMPT = """You are Raven's Codebase Exploration Subagent (`explo
 Your role is to rapidly locate files, search code patterns, read relevant sections, and return a concise, high-signal technical summary.
 
 STRICT RULES:
-1. You have read-only access to the workspace (`find_file`, `read_file`, `search_file_content`, `search_codebase`).
+1. You have read-only access to the workspace (`find_file`, `read_file`, `search_file_content`).
 2. Do NOT dump entire raw files into your final response. Cite exact file paths, line numbers, function/class names, and key architectural findings.
 3. Avoid redundant or duplicate tool calls. Stop exploring as soon as you have sufficient facts to answer the query accurately.
 4. Keep your final response structured, direct, and compact so the parent session or user gets maximum signal with minimal token overhead."""
@@ -51,7 +51,7 @@ GENERAL_SYSTEM_PROMPT = """You are Raven's General Worker Subagent (`general`).
 You execute self-contained, multi-step engineering or research sub-tasks in an isolated context window.
 
 STRICT RULES:
-1. Complete the assigned task thoroughly using your available tools (`find_file`, `read_file`, `search_file_content`, `search_codebase`, `create_file`, `patch_file`, `execute_command`, `web_search`, `extract_content_from_web_links`).
+1. Complete the assigned task thoroughly using your available tools (`find_file`, `read_file`, `search_file_content`, `create_file`, `patch_file`, `execute_command`, `web_search`, `extract_content_from_web_links`).
 2. Never execute the exact same tool call with identical arguments twice.
 3. When modifying files, always use `patch_file` or `create_file` directly—never write temporary scripts to edit code.
 4. Return a clear, concise summary of what you accomplished, any files created/modified, and key findings."""
@@ -70,7 +70,6 @@ def get_builtin_subagents() -> Dict[str, Dict[str, Any]]:
                 "find_file",
                 "read_file",
                 "search_file_content",
-                "search_codebase",
             ],
             "system_prompt": EXPLORE_SYSTEM_PROMPT,
             "scope": "builtin",
@@ -115,7 +114,6 @@ def get_builtin_subagents() -> Dict[str, Dict[str, Any]]:
                 "find_file",
                 "read_file",
                 "search_file_content",
-                "search_codebase",
                 "create_file",
                 "patch_file",
                 "execute_command",

@@ -1403,7 +1403,7 @@ class RavenTUI(App):
                 return
 
             badge_label = f"{encoded['file_name']}"
-            user_card = ChatMessageWidget(role="user", raw_text=image_query, image_badge=badge_label, classes="user-msg")
+            user_card = ChatMessageWidget(role="user", raw_text=user_input, image_badge=badge_label, classes="user-msg")
             history_container.mount(user_card)
 
             active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
@@ -1440,7 +1440,7 @@ class RavenTUI(App):
                 return
 
             badge_label = f"Clipboard Screenshot ({encoded.get('width', '?')}x{encoded.get('height', '?')})"
-            user_card = ChatMessageWidget(role="user", raw_text=image_query, image_badge=badge_label, classes="user-msg")
+            user_card = ChatMessageWidget(role="user", raw_text=user_input, image_badge=badge_label, classes="user-msg")
             history_container.mount(user_card)
 
             active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
