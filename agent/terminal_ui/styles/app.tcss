@@ -1,5 +1,10 @@
 Screen {
     color: #E2E8F0;      /* Crisp, bright off-white text */
+
+    & > .screen--selection {
+        background: #2563EB 55%;
+        color: #F8FAFC;
+    }
 }
 
 Header {

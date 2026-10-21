@@ -1,16 +1,254 @@
+import ctypes
+from itertools import islice
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional
+from textual._context import active_app
 from textual.app import ComposeResult
 from textual.containers import Vertical, Horizontal
+from textual.content import Content
+from textual.selection import Selection
+from textual.strip import Strip
+from textual.visual import RichVisual, RenderOptions
 from textual.widgets import Static, Button
 from rich.markdown import Markdown, TextElement
+from rich.segment import Segment
+from rich.style import Style as RichStyle
 from rich.syntax import Syntax
 from rich.console import Group, RenderableType
 from rich.text import Text
 
 from agent.tools.miscellaneous_tools import strip_ansi
+
+
+def copy_to_system_clipboard(text: str, app: Any = None) -> bool:
+    """Copy text to the OS clipboard reliably across Windows, macOS, Linux, and OSC 52."""
+    if not text:
+        return False
+
+    copied = False
+    if app is not None:
+        try:
+            app.copy_to_clipboard(text)
+            copied = True
+        except Exception:
+            pass
+
+    if sys.platform == "win32":
+        try:
+            CF_UNICODETEXT = 13
+            GMEM_MOVEABLE = 0x0002
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+
+            kernel32.GlobalAlloc.argtypes = [ctypes.c_uint, ctypes.c_size_t]
+            kernel32.GlobalAlloc.restype = ctypes.c_void_p
+            kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+            kernel32.GlobalLock.restype = ctypes.c_void_p
+            kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+            kernel32.GlobalUnlock.restype = ctypes.c_bool
+            kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
+            kernel32.GlobalFree.restype = ctypes.c_void_p
+
+            user32.OpenClipboard.argtypes = [ctypes.c_void_p]
+            user32.OpenClipboard.restype = ctypes.c_bool
+            user32.EmptyClipboard.argtypes = []
+            user32.EmptyClipboard.restype = ctypes.c_bool
+            user32.SetClipboardData.argtypes = [ctypes.c_uint, ctypes.c_void_p]
+            user32.SetClipboardData.restype = ctypes.c_void_p
+            user32.CloseClipboard.argtypes = []
+            user32.CloseClipboard.restype = ctypes.c_bool
+
+            encoded = text.encode("utf-16le") + b"\x00\x00"
+            h_mem = kernel32.GlobalAlloc(GMEM_MOVEABLE, len(encoded))
+            if h_mem:
+                locked_ptr = kernel32.GlobalLock(h_mem)
+                if locked_ptr:
+                    ctypes.memmove(locked_ptr, encoded, len(encoded))
+                    kernel32.GlobalUnlock(h_mem)
+                    if user32.OpenClipboard(None):
+                        try:
+                            user32.EmptyClipboard()
+                            if user32.SetClipboardData(CF_UNICODETEXT, h_mem):
+                                copied = True
+                                h_mem = None
+                        finally:
+                            user32.CloseClipboard()
+                if h_mem:
+                    kernel32.GlobalFree(h_mem)
+            if copied:
+                return True
+        except Exception:
+            pass
+
+        try:
+            subprocess.run(
+                ["clip"],
+                input=text.encode("utf-16le"),
+                check=True,
+                creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+            )
+            return True
+        except Exception:
+            pass
+
+    elif sys.platform == "darwin":
+        try:
+            subprocess.run(["pbcopy"], input=text.encode("utf-8"), check=True)
+            return True
+        except Exception:
+            pass
+    else:
+        for cmd in (["wl-copy"], ["xclip", "-selection", "clipboard"], ["xsel", "--clipboard", "--input"]):
+            try:
+                subprocess.run(cmd, input=text.encode("utf-8"), check=True)
+                return True
+            except Exception:
+                continue
+
+    try:
+        import pyperclip
+        pyperclip.copy(text)
+        return True
+    except Exception:
+        pass
+
+    return copied
+
+
+def _selectable_rich_visual_render_strips(
+    self: RichVisual,
+    width: int,
+    height: int | None,
+    style: Any,
+    options: RenderOptions,
+) -> list[Strip]:
+    """Render RichVisual into Strips with character offset metadata and selection highlighting."""
+    app = active_app.get()
+    console = app.console
+    console_options = app.console_options.update(
+        highlight=False,
+        width=width,
+        height=height,
+    )
+    rich_style = style.rich_style
+    renderable = self._widget.post_render(self._renderable, rich_style)
+    segments = console.render(renderable, console_options.update_width(width))
+    raw_lines = list(
+        islice(
+            Segment.split_and_crop_lines(
+                segments, width, include_new_lines=False, pad=False
+            ),
+            None,
+            height,
+        )
+    )
+
+    selection = options.selection
+    selection_rich_style = (
+        options.selection_style.rich_style
+        if (selection is not None and options.selection_style is not None)
+        else None
+    )
+
+    strips: list[Strip] = []
+    plain_lines: list[str] = []
+
+    for y, line in enumerate(raw_lines):
+        line_text = "".join(seg.text for seg in line if not seg.is_control)
+        plain_lines.append(line_text.rstrip(" "))
+        line_len = len(line_text)
+
+        span = selection.get_span(y) if selection is not None else None
+        if span is not None:
+            sel_start, sel_end = span
+            if sel_end == -1:
+                sel_end = line_len
+        else:
+            sel_start = sel_end = -1
+
+        new_segments: list[Segment] = []
+        char_x = 0
+
+        for seg in line:
+            if seg.is_control or not seg.text:
+                new_segments.append(seg)
+                continue
+
+            seg_text = seg.text
+            seg_len = len(seg_text)
+            seg_start = char_x
+            seg_end = char_x + seg_len
+            base_style = seg.style or RichStyle.null()
+
+            if (
+                span is None
+                or selection_rich_style is None
+                or sel_start >= sel_end
+                or seg_end <= sel_start
+                or seg_start >= sel_end
+            ):
+                meta_style = RichStyle.from_meta({"offset": (seg_start, y)})
+                new_segments.append(Segment(seg_text, base_style + meta_style))
+            else:
+                rel_start = max(0, sel_start - seg_start)
+                rel_end = min(seg_len, sel_end - seg_start)
+
+                if rel_start > 0:
+                    pre_meta = RichStyle.from_meta({"offset": (seg_start, y)})
+                    new_segments.append(
+                        Segment(seg_text[:rel_start], base_style + pre_meta)
+                    )
+
+                if rel_end > rel_start:
+                    sel_meta = RichStyle.from_meta(
+                        {"offset": (seg_start + rel_start, y)}
+                    )
+                    new_segments.append(
+                        Segment(
+                            seg_text[rel_start:rel_end],
+                            base_style + selection_rich_style + sel_meta,
+                        )
+                    )
+
+                if rel_end < seg_len:
+                    post_meta = RichStyle.from_meta(
+                        {"offset": (seg_start + rel_end, y)}
+                    )
+                    new_segments.append(
+                        Segment(seg_text[rel_end:], base_style + post_meta)
+                    )
+
+            char_x = seg_end
+
+        if not new_segments:
+            new_segments.append(Segment("", RichStyle.from_meta({"offset": (0, y)})))
+
+        strips.append(Strip(new_segments))
+
+    self._rendered_plain_text = "\n".join(plain_lines)
+    return strips
+
+
+def _selectable_static_get_selection(
+    self: Static, selection: Selection
+) -> tuple[str, str] | None:
+    """Extract selected text from Static widgets containing Text, Content, or RichVisual."""
+    visual = self._render()
+    if isinstance(visual, (Text, Content)):
+        text = str(visual)
+    elif hasattr(visual, "_rendered_plain_text"):
+        text = visual._rendered_plain_text
+    else:
+        return None
+    return selection.extract(text), "\n"
+
+
+RichVisual.render_strips = _selectable_rich_visual_render_strips  # type: ignore[assignment]
+Static.get_selection = _selectable_static_get_selection  # type: ignore[assignment]
 
 MAX_DIFF_LINES = 8
 MAX_ARG_LENGTH = 80
@@ -792,7 +1030,6 @@ class ChatMessageWidget(Vertical):
                 footer_text = f"[dim #64748B]{self.model_name}[/dim #64748B]" if self.model_name else ""
                 yield Static(footer_text, id="model_footer", classes="model-footer")
                 yield Static("Copy", id="copy_btn", classes="copy-btn")
-                yield Static("Copy Log", id="copy_all_btn", classes="copy-btn copy-all-btn")
             else:
                 yield Static("Copy", id="copy_btn", classes="copy-btn")
 
@@ -938,18 +1175,13 @@ class ChatMessageWidget(Vertical):
     def on_click(self, event) -> None:
         if event.control and event.control.id == "copy_btn":
             event.stop()
-            is_shift = getattr(event, "shift", False)
-            self.copy_to_clipboard(full_log=is_shift)
-            return
-        elif event.control and event.control.id == "copy_all_btn":
-            event.stop()
-            self.copy_to_clipboard(full_log=True)
+            self.copy_to_clipboard()
             return
 
-    def copy_to_clipboard(self, full_log: bool = False) -> None:
+    def copy_to_clipboard(self) -> None:
         if self._timeline:
-            text_to_copy = self._timeline.to_plain_text(text_only=not full_log)
-            if not text_to_copy and not full_log:
+            text_to_copy = self._timeline.to_plain_text(text_only=True)
+            if not text_to_copy:
                 text_to_copy = self._timeline.to_plain_text(text_only=False)
         else:
             text_to_copy = self.raw_text
@@ -970,32 +1202,15 @@ class ChatMessageWidget(Vertical):
         if not text_to_copy:
             return
 
-        try:
-            self.app.copy_to_clipboard(text_to_copy)
-        except Exception:
-            pass
+        copy_to_system_clipboard(text_to_copy, app=self.app)
 
         try:
-            import pyperclip
-            pyperclip.copy(text_to_copy)
-        except Exception:
-            pass
-
-        try:
-            target_id = "#copy_all_btn" if full_log else "#copy_btn"
-            try:
-                btn = self.query_one(target_id, Static)
-            except Exception:
-                btn = self.query_one("#copy_btn", Static)
-
-            btn.update("✓ Copied All!" if full_log else "✓ Copied Text!")
+            btn = self.query_one("#copy_btn", Static)
+            btn.update("✓ Copied Text!")
 
             def reset_btn() -> None:
                 try:
-                    if target_id == "#copy_all_btn":
-                        btn.update("Copy Log")
-                    else:
-                        btn.update("Copy")
+                    btn.update("Copy")
                 except Exception:
                     pass
 

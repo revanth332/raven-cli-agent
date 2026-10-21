@@ -36,6 +36,7 @@ from agent.terminal_ui.chat_input import ChatInput
 from agent.terminal_ui.chat_message import (
     ChatMessageWidget,
     ResponseTimeline,
+    copy_to_system_clipboard,
     format_tool_result_preview,
 )
 from agent.terminal_ui.permission_box import PermissionBox, PermissionBar
@@ -466,6 +467,16 @@ class RavenTUI(App):
             self.call_from_thread(_cleanup_ui)
 
         self.questionnaire_event.set()
+
+    def on_text_selected(self, event) -> None:
+        """Auto-copy selected text to the system clipboard on mouse release (OpenCode-style)."""
+        try:
+            selected_text = self.screen.get_selected_text()
+            if selected_text and selected_text.strip():
+                copy_to_system_clipboard(selected_text, app=self)
+                self.notify("✓ Copied to clipboard", timeout=1.8)
+        except Exception:
+            pass
 
     def safe_update_raven_card(self, raven_card: ChatMessageWidget, content, raw_text: str = None) -> None:
         """Safely mounts and updates the Raven message card during streaming to avoid displaying empty boxes."""
