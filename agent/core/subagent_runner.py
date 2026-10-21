@@ -302,6 +302,8 @@ class SubAgentRunner:
                 for attempt in range(max_retries):
                     if self._is_cancelled():
                         break
+                    function_calls = {}
+                    round_text = ""
                     try:
                         request_args: Dict[str, Any] = {
                             "model": self.model_name,

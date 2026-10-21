@@ -176,9 +176,11 @@ def run_agent_loop(chat_session,intial_input):
             user_message_committed = current_input is None
             with Live(Spinner("dots", text="Thinking...", style="cyan"),refresh_per_second=10,console=console) as live:
                 for attempt in range(max_retries):
+                    final_response = ""
+                    function_calls = {}
                     try:
                         generator = chat_session.send_message_stream(
-                            current_input,
+                            current_input if not user_message_committed else None,
                             execution_instruction=execution_instruction,
                             allow_tools=allow_tools,
                         )

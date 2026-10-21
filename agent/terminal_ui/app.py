@@ -1910,12 +1910,31 @@ class RavenTUI(App):
                 if not (cancel_event.is_set() or self.cancel_event.is_set()):
                     self.call_from_thread(self.show_thinking_loader, "Thinking...")
 
+                timeline_block_snapshot = len(timeline.blocks)
+                last_block_text_len = (
+                    len(timeline.blocks[-1].content)
+                    if (timeline.blocks and hasattr(timeline.blocks[-1], "content"))
+                    else None
+                )
+
+                def _rollback_partial_attempt() -> None:
+                    del timeline.blocks[timeline_block_snapshot:]
+                    if (
+                        last_block_text_len is not None
+                        and timeline.blocks
+                        and hasattr(timeline.blocks[-1], "content")
+                    ):
+                        timeline.blocks[-1].content = timeline.blocks[-1].content[:last_block_text_len]
+
                 for attempt in range(max_retries):
                     if cancel_event.is_set() or self.cancel_event.is_set():
                         break
+                    function_calls = {}
+                    round_text = ""
+                    _rollback_partial_attempt()
                     try:
                         generator = self.chat_session.send_message_stream(
-                            query,
+                            query if not user_message_committed else None,
                             execution_instruction=execution_instruction,
                             allow_tools=allow_tools,
                             status_callback=lambda st: self.call_from_thread(self.show_thinking_loader, st) if not (cancel_event.is_set() or self.cancel_event.is_set()) else None,
