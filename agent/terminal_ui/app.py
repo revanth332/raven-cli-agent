@@ -594,7 +594,7 @@ class RavenTUI(App):
         active_model = settings.RAVEN_MODEL
         current_project = get_active_project_name()
         project_or_folder = current_project if current_project else str(Path.cwd())
-        approve_status = "[bold #10B981]Auto (Safeguarded)[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
+        approve_status = "[bold #10B981]Auto[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
         
         with Horizontal(id="workspace_container"):
             with Vertical(id="main_container", classes="centered"):
@@ -630,7 +630,7 @@ class RavenTUI(App):
     def update_status_bar(self) -> None:
         try:
             active_model = settings.RAVEN_MODEL
-            approve_status = "[bold #10B981]Auto (Safeguarded)[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
+            approve_status = "[bold #10B981]Auto[/bold #10B981]" if settings.RAVEN_AUTO_APPROVE else "[bold #EF4048]Manual[/bold #EF4048]"
             session_title = getattr(self.chat_session, "session_title", "New Conversation") if self.chat_session else "New Conversation"
             current_project = get_active_project_name()
             project_name = current_project if current_project else Path.cwd().name

@@ -15,10 +15,8 @@ FRONTMATTER_REGEX = re.compile(r"^---\s*\r?\n(.*?)\r?\n---\s*\r?\n?(.*)$", re.DO
 
 
 def get_project_skills_dir() -> Path:
-    """Returns the path to the project-local skills directory."""
-    skills_dir = get_project_root() / "skills"
-    skills_dir.mkdir(parents=True, exist_ok=True)
-    return skills_dir
+    """Returns the path to the project-local skills directory without auto-creating it."""
+    return get_project_root() / "skills"
 
 
 def get_global_skills_dir() -> Path:
