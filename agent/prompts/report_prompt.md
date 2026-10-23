@@ -30,8 +30,9 @@
    Business Impact: <Impact on stability, performance, developer velocity, or system readiness>
 
    EXAMPLE:
-   Key Contributions/Work Done: Resolved lint errors and updated end-to-end test scripts to support smooth deployments. Added a Region column to the environment field in the GCP project intake form, allowing users to specify different regions for each deployment environment.
-   Remarks/Risks/Dependencies: N/A
-   Accomplishments/Highlights: Enhanced the GCP project intake form to support region-specific deployment configuration.
-   Business Impact: Improved deployment readiness and enabled more flexible regional configuration for GCP environments.
+   *Key Contributions/Work Done:* Resolved lint errors and updated end-to-end test scripts to support smooth deployments. Added a Region column to the environment field in the GCP project intake form, allowing users to specify different regions for each deployment environment.
+   *Remarks/Risks/Dependencies:* N/A
+   *Accomplishments/Highlights:* Enhanced the GCP project intake form to support region-specific deployment configuration.
+   *Business Impact:* Improved deployment readiness and enabled more flexible regional configuration for GCP environments.
 
+**NOTE**: DONT add file names or component names in the report.
