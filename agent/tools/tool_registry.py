@@ -592,13 +592,13 @@ raven_tools = [
         "type": "function",
         "function": {
             "name": "generate_image",
-            "description": "Generates an image from a detailed text prompt using the configured image generation model. Saves the output file locally in 'artifacts/images/' and opens it in the default viewer.",
+            "description": "Generates or edits an image from a detailed text prompt and optional reference image using the configured image generation model. Supports face/identity preservation and image-to-image transformations when a reference image is provided or attached in chat. Saves the output file locally in 'artifacts/images/' and opens it in the default viewer.",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "prompt": {
                         "type": "string",
-                        "description": "Detailed description of the image to generate."
+                        "description": "Detailed description of the image to generate or transformation to apply."
                     },
                     "filename": {
                         "type": "string",
@@ -611,11 +611,19 @@ raven_tools = [
                     },
                     "model": {
                         "type": "string",
-                        "description": "Specific image model to override default IMAGE_MODEL setting."
+                        "description": "Specific image model to override default IMAGE_MODEL setting (e.g. 'gemini-3.1-flash-image', 'gemini-3-pro-image')."
                     },
                     "negative_prompt": {
                         "type": "string",
                         "description": "Elements or styles to exclude (if supported by engine)."
+                    },
+                    "reference_image_path": {
+                        "type": "string",
+                        "description": "Optional local file path to a reference image for face/subject preservation or image-to-image editing."
+                    },
+                    "use_attached_image": {
+                        "type": "boolean",
+                        "description": "Set to True to use the image attached by the user in the conversation (via /image or /paste-image) as the reference image for identity preservation or editing."
                     }
                 },
                 "required": [

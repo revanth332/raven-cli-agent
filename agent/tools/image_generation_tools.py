@@ -4,6 +4,7 @@ Supports OpenRouter, OpenAI, and Google GenAI / Vertex AI image models.
 """
 
 import base64
+import mimetypes
 import os
 import random
 import re
@@ -18,7 +19,7 @@ from typing import Optional
 from PIL import Image
 
 from agent.core.settings import settings
-from agent.utils import use_vertex_ai
+from agent.utils import use_vertex_ai, get_latest_attached_image
 
 
 ASPECT_RATIO_DIMENSIONS = {
@@ -159,11 +160,114 @@ def _extract_retry_delay(exc: Optional[Exception], default_delay: float) -> floa
     return default_delay
 
 
+def _decode_data_uri(data_uri: str) -> Optional[tuple[bytes, str]]:
+    """Decodes a base64 image data URI into (raw_bytes, mime_type)."""
+    if not data_uri or not isinstance(data_uri, str) or not data_uri.startswith("data:"):
+        return None
+    try:
+        header, b64_payload = data_uri.split(",", 1)
+        mime_match = re.match(r"data:([^;]+);base64", header)
+        mime_type = mime_match.group(1) if mime_match else "image/png"
+        return base64.b64decode(b64_payload), mime_type
+    except Exception:
+        return None
+
+
+def _extract_latest_image_from_active_session() -> Optional[tuple[bytes, str]]:
+    """Scans the active conversation session from newest to oldest for an attached image_url."""
+    try:
+        from agent.core.session_manager import get_active_session_id, load_session
+
+        session_id = get_active_session_id()
+        if not session_id:
+            return None
+        session_data = load_session(session_id)
+        if not session_data:
+            return None
+        messages = session_data.get("messages", [])
+        for msg in reversed(messages):
+            content = msg.get("content")
+            if isinstance(content, list):
+                for item in reversed(content):
+                    if isinstance(item, dict) and item.get("type") == "image_url":
+                        url = item.get("image_url", {}).get("url", "")
+                        decoded = _decode_data_uri(url)
+                        if decoded:
+                            return decoded
+    except Exception:
+        pass
+    return None
+
+
+def _prompt_implies_reference_image(prompt: str) -> bool:
+    """Checks whether the prompt phrasing indicates transforming or preserving an input/reference image."""
+    lower = prompt.lower()
+    indicators = (
+        "input image",
+        "attached image",
+        "reference image",
+        "uploaded image",
+        "source image",
+        "this photo",
+        "this picture",
+        "this image",
+        "facial structure",
+        "preserve face",
+        "preserve identity",
+        "maintaining the exact",
+        "maintain the exact",
+        "person in the image",
+        "person in the input",
+    )
+    return any(term in lower for term in indicators)
+
+
+def _resolve_reference_image(
+    reference_image_path: str = "",
+    use_attached_image: bool = False,
+    prompt: str = "",
+) -> tuple[Optional[tuple[bytes, str]], Optional[str]]:
+    """
+    Resolves a reference image into (image_bytes, mime_type), or returns an error string if an explicit
+    file path was specified but could not be loaded.
+    """
+    clean_ref = (reference_image_path or "").strip().strip('"').strip("'")
+    if clean_ref and clean_ref.lower() not in ("attached", "latest", "session", "clipboard"):
+        ref_path = Path(clean_ref)
+        if not ref_path.exists() or not ref_path.is_file():
+            return None, f"Error: Reference image file '{clean_ref}' does not exist."
+        try:
+            mime_type, _ = mimetypes.guess_type(str(ref_path))
+            if not mime_type or not mime_type.startswith("image/"):
+                mime_type = "image/png" if ref_path.suffix.lower() == ".png" else "image/jpeg"
+            return (ref_path.read_bytes(), mime_type), None
+        except Exception as e:
+            return None, f"Error reading reference image '{clean_ref}': {e}"
+
+    should_use_attached = (
+        use_attached_image
+        or clean_ref.lower() in ("attached", "latest", "session", "clipboard")
+        or _prompt_implies_reference_image(prompt)
+    )
+    if should_use_attached:
+        latest_uri = get_latest_attached_image()
+        if latest_uri:
+            decoded = _decode_data_uri(latest_uri)
+            if decoded:
+                return decoded, None
+        session_img = _extract_latest_image_from_active_session()
+        if session_img:
+            return session_img, None
+
+    return None, None
+
+
 def _generate_with_google_genai(
     prompt: str,
     target_model: str,
     aspect_ratio: str,
-    negative_prompt: str = ""
+    negative_prompt: str = "",
+    reference_image: Optional[tuple[bytes, str]] = None,
 ) -> Optional[bytes]:
     """Helper to generate image using google-genai / Vertex AI with multi-region failover and backoff."""
     from agent.core.settings import settings
@@ -238,9 +342,18 @@ def _generate_with_google_genai(
 
                     aspect_ratio_str = aspect_ratio if aspect_ratio else "1:1"
 
+                    if reference_image:
+                        ref_bytes, ref_mime = reference_image
+                        contents_payload = [
+                            types.Part.from_bytes(data=ref_bytes, mime_type=ref_mime),
+                            effective_prompt,
+                        ]
+                    else:
+                        contents_payload = effective_prompt
+
                     response = client.models.generate_content(
                         model=model_name,
-                        contents=effective_prompt,
+                        contents=contents_payload,
                         config=types.GenerateContentConfig(
                             response_modalities=["IMAGE"],
                             image_config=types.ImageConfig(
@@ -375,28 +488,40 @@ def generate_image(
     filename: str = "",
     aspect_ratio: str = "1:1",
     model: str = "",
-    negative_prompt: str = ""
+    negative_prompt: str = "",
+    reference_image_path: str = "",
+    use_attached_image: bool = False,
 ) -> str:
     """
-    Generates an image from a detailed text prompt using the configured image generation model.
+    Generates or edits an image from a detailed text prompt and optional reference image.
     Saves the output file locally in 'artifacts/images/' and opens it in the default viewer.
 
     Args:
-        prompt: Detailed description of the image to generate.
+        prompt: Detailed description of the image to generate or transformation to apply.
         filename: Optional descriptive base filename (e.g. 'auth_flow_diagram').
         aspect_ratio: Aspect ratio ('1:1', '16:9', '9:16', '4:3', '3:4'). Defaults to '1:1'.
         model: Specific image model to override default IMAGE_MODEL setting.
         negative_prompt: Elements or styles to exclude (if supported by engine).
+        reference_image_path: Optional local file path to a reference image for face/subject preservation or image-to-image editing.
+        use_attached_image: Set to True to use the image attached by the user in the conversation (via /image or /paste-image) as the reference image.
 
     Returns:
-        A concise summary string with the saved file path, image metadata, and ANSI terminal preview.
+        A concise summary string with the saved file path and image metadata.
     """
     if not prompt or not prompt.strip():
         return "Error: Prompt cannot be empty for image generation."
 
     clean_prompt = prompt.strip()
+    reference_image, ref_error = _resolve_reference_image(
+        reference_image_path=reference_image_path,
+        use_attached_image=use_attached_image,
+        prompt=clean_prompt,
+    )
+    if ref_error:
+        return ref_error
+
     configured_model = (model or getattr(settings, "IMAGE_MODEL", None) or "").strip()
-    if use_vertex_ai():
+    if use_vertex_ai() or reference_image is not None:
         if not configured_model or configured_model == DEFAULT_IMAGE_MODEL or "imagen" in configured_model.lower():
             target_model = "gemini-3.1-flash-image"
         else:
@@ -410,6 +535,7 @@ def generate_image(
     try:
         is_vertex = (
             use_vertex_ai()
+            or reference_image is not None
             or "imagen" in target_model.lower()
             or "gemini" in target_model.lower()
             or "imagegeneration" in target_model.lower()
@@ -420,7 +546,8 @@ def generate_image(
                     prompt=clean_prompt,
                     target_model=target_model,
                     aspect_ratio=norm_aspect,
-                    negative_prompt=negative_prompt
+                    negative_prompt=negative_prompt,
+                    reference_image=reference_image,
                 )
             except Exception as e:
                 # Capture the inner exception to avoid silencing authentic authentication or SDK errors.
@@ -428,6 +555,7 @@ def generate_image(
                 # (since Vertex AI OpenAPI does not support /v1/images/generations).
                 if (
                     use_vertex_ai()
+                    or reference_image is not None
                     or any(k in target_model.lower() for k in ("imagen", "gemini", "imagegeneration"))
                 ):
                     raise e
@@ -472,9 +600,10 @@ def generate_image(
         except Exception:
             rel_path = out_path.as_posix()
 
+        ref_note = ", reference_image: applied" if reference_image else ""
         summary = (
             f"Image successfully generated and saved to `{rel_path}` "
-            f"({w}x{h}, {file_size_str}, model: `{target_model}`).\n"
+            f"({w}x{h}, {file_size_str}, model: `{target_model}`{ref_note}).\n"
             f"Opened in default system viewer."
         )
         return summary

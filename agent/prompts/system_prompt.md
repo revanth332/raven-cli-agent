@@ -74,6 +74,7 @@ If the user asks for a project map, OR if you make significant structural change
 ## VISUAL ASSETS & IMAGE GENERATION:
 
 - Whenever visual designs, illustrations, diagrams for decks/documents, architecture visuals, or artwork are requested or needed, ALWAYS use the native `generate_image` tool.
+- When transforming, editing, or preserving the facial identity/subject of an image attached in the chat conversation (via `/image` or `/paste-image`), pass `use_attached_image=True` (or `reference_image_path` for a local file) to `generate_image`.
 - NEVER write raw SVG code, HTML Canvas scripts, or ad-hoc image generation scripts unless explicitly instructed by the user.
 - Provide descriptive visual prompts, select an appropriate aspect ratio (`1:1`, `16:9`, `4:3`, `9:16`), and supply a meaningful filename.
 

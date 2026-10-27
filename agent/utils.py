@@ -11,6 +11,20 @@ from agent.core.settings import settings
 SUPPORTED_IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".gif"}
 MAX_IMAGE_SIZE_BYTES = 10 * 1024 * 1024  # 10 MB
 
+_latest_attached_image_data_uri: str | None = None
+
+
+def set_latest_attached_image(data_uri: str | None) -> None:
+    """Stores the most recently attached or pasted image Data URI in memory."""
+    global _latest_attached_image_data_uri
+    if data_uri and data_uri.startswith("data:image/"):
+        _latest_attached_image_data_uri = data_uri
+
+
+def get_latest_attached_image() -> str | None:
+    """Retrieves the most recently attached or pasted image Data URI from memory."""
+    return _latest_attached_image_data_uri
+
 def encode_image_file(file_path: str | Path) -> dict:
     """
     Validates and encodes a local image file into a base64 Data URI.
@@ -45,9 +59,11 @@ def encode_image_file(file_path: str | Path) -> dict:
             mime_type = "image/png" if ext == ".png" else "image/jpeg"
 
         data_b64 = base64.b64encode(path.read_bytes()).decode("utf-8")
+        data_uri = f"data:{mime_type};base64,{data_b64}"
+        set_latest_attached_image(data_uri)
         return {
             "success": True,
-            "data_uri": f"data:{mime_type};base64,{data_b64}",
+            "data_uri": data_uri,
             "mime_type": mime_type,
             "file_name": path.name,
             "size_bytes": size
@@ -98,9 +114,11 @@ def grab_clipboard_image() -> dict:
                 }
 
             b64_data = base64.b64encode(img_bytes).decode("utf-8")
+            data_uri = f"data:image/png;base64,{b64_data}"
+            set_latest_attached_image(data_uri)
             return {
                 "success": True,
-                "data_uri": f"data:image/png;base64,{b64_data}",
+                "data_uri": data_uri,
                 "mime_type": "image/png",
                 "file_name": "clipboard_screenshot.png",
                 "size_bytes": size,
@@ -122,6 +140,7 @@ def create_multimodal_content(text_prompt: str, image_data_uri: str) -> list[dic
     """
     Packages a text prompt and an image data URI into the OpenAI-compatible multimodal content format.
     """
+    set_latest_attached_image(image_data_uri)
     return [
         {"type": "text", "text": text_prompt or "Analyze this image."},
         {
