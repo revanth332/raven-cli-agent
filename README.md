@@ -1,71 +1,133 @@
-# My CLI Agent
+# Raven
 
 ## 🚀 Overview
 
-This is a Python-based Command Line Interface (CLI) agent, likely designed for automation, project management, or interacting with local system resources.
-
-## 🛠 Tech Stack
-
-- **Python**
-- **pyproject.toml** (Suggests use of Poetry, Flit, or a modern build system)
-
-## ⚙️ Prerequisites
-
-- Python 3.x (Ensure the correct version is installed)
-- A modern Python package manager (like `pip` or `Poetry`).
-
-## 💻 Installation
-
-1.  **Clone the repository:**
-
-    ```bash
-    git clone [REPO_URL_HERE]
-    cd my-cli-agent
-    ```
-
-2.  **Setup Virtual Environment and Install Dependencies:**
-
-    **If using Poetry (suggested by pyproject.toml):**
-
-    ```bash
-    pip install poetry
-    poetry install
-    ```
-
-    **If using pip/venv:**
-
-    ```bash
-    python -m venv venv
-    venv\Scripts\activate  # On Windows
-    pip install -e .
-    ```
-
-3.  **Environment Variables:**
-    The project uses a `.env` file for configuration. Please create or update it with necessary environment variables required for the agent to function.
-
-4.  VertexAI setup:
-    https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/start
-
-## ▶️ Running the Agent
-
-To execute the CLI agent, you would typically run it via the installed entry point or directly via Python.
-
-**Example 1: Using the package entry point (after installation)**
-
-```bash
-my-cli-agent --help
-```
-
-**Example 2: Running directly from the source**
-
-```bash
-python -m agent [command]
-```
-
-## 🤝 Contributing
-
-We welcome contributions! Please review the project structure and submit pull requests following the project's guidelines.
+**Raven** is an autonomous personal AI developer agent and CLI assistant designed for full-stack software engineering. Built on top of Python, Textual, and modern LLM APIs (Google GenAI, OpenAI, and Vertex AI), Raven assists with coding, debugging, planning, system cartography, image generation, and workflow automation.
 
 ---
 
-_This README is a template. Please update the bracketed sections and commands to accurately reflect the functionality and installation steps for this specific CLI agent._
+## ✨ Key Features
+
+- **🖥️ Multi-Modal Terminal UI (TUI):** A custom Textual-based terminal workspace featuring real-time response streaming, animated loaders, theme customization, sidebar navigation, dynamic model selection, and mouse-selection support.
+- **🤖 Autonomous Subagent Delegation:** Offload heavy exploration, git operations, commit reporting, or isolated scripts to lightweight, specialized subagents (`explore`, `git_ops`, `reporter`, `general`) without cluttering primary session context.
+- **🛠️ Rich Tool Ecosystem:**
+  - **File Operations:** Targeted code patching (`patch_file`), safe file creation, and chunk-based pagination.
+  - **Git Operations:** Automated diff analysis, staging, and lowercase commit generation.
+  - **Process Supervision:** Manage long-running dev servers and daemons via non-blocking background process tools.
+  - **Web Intelligence:** Integrated web search and web page content extraction.
+  - **Image Generation:** Multi-model image generation with facial preservation and reference image conditioning.
+  - **Interactive Questionnaires:** Structured terminal decision modals for trade-offs and architectural choices.
+- **⚡ Dynamic Model Registry & Provider Presets:** Switch dynamically across Gemini 2.5 / 3 (Flash & Pro) and OpenAI (GPT-4o, o3-mini) across standard and Vertex AI providers.
+- **🧠 Intelligent Memory & Context Compaction:** Long-term memory persistence for user preferences, facts, and debug fixes, coupled with automated token-aware context compaction and session forking.
+- **📊 Usage Tracking & Cost Analytics:** Live token tracking (prompt, cached, completion), model latency analytics, and HTML dashboard export.
+- **🧩 Extensible Skills:** Modular global and project-specific skills in file and folder formats.
+
+---
+
+## 🛠️ Tech Stack
+
+- **Runtime:** Python >= 3.10
+- **TUI & CLI:** [Textual](https://textual.textualize.io/), [Typer](https://typer.tiangolo.com/), [Rich](https://rich.readthedocs.io/)
+- **LLM Integrations:** `google-genai`, `openai`
+- **Search & Scraping:** `ddgs`, `playwright`
+- **Imaging & Utilities:** `pillow`, `tiktoken`, `python-dotenv`
+
+---
+
+## ⚙️ Prerequisites
+
+- **Python 3.10+**
+- A package manager such as `uv`, `pip`, or `poetry`.
+- API keys for Google GenAI (`GEMINI_API_KEY`) and/or OpenAI (`OPENAI_API_KEY`).
+
+---
+
+## 💻 Installation
+
+1. **Clone the repository:**
+   ```bash
+   git clone <repository_url>
+   cd my-cli-agent
+   ```
+
+2. **Create and activate a virtual environment:**
+   ```bash
+   # Using venv (Windows)
+   python -m venv venv
+   .\venv\Scripts\activate
+
+   # Using venv (macOS/Linux)
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **Install the package and dependencies:**
+   ```bash
+   pip install -e .
+   ```
+
+4. **Configure Environment Variables:**
+   Create a `.env` file in the root directory:
+   ```env
+   GEMINI_API_KEY=your_gemini_api_key
+   OPENAI_API_KEY=your_openai_api_key
+   ```
+
+---
+
+## ▶️ Usage
+
+Once installed, Raven can be launched via the `raven` command:
+
+### Launch Terminal UI (Recommended)
+```bash
+raven tui
+```
+
+### Interactive CLI Chat
+```bash
+raven
+# or
+raven chat
+```
+
+### Specialized CLI Commands
+
+| Command | Description |
+|---|---|
+| `raven tui` | Launches the full Textual multi-modal terminal UI. |
+| `raven debug` | Initiates debugging session or accepts piped error logs (`cat error.log \| raven debug`). |
+| `raven review` | Reviews local code changes or files for potential bugs, security issues, and style. |
+| `raven plan` | Generates implementation plans and system architectures before coding. |
+| `raven commit` | Inspects staged git diffs and creates automated commit messages. |
+| `raven report` | Generates structured project progress reports for chosen time periods. |
+| `raven config` | Inspects or sets agent configuration key-value pairs (`raven config --set key=value`). |
+| `raven eval` | Runs the autonomous evaluation suite to verify patch and tool accuracy. |
+| `raven load` | Previews the interactive TUI spinner and loader gallery. |
+
+---
+
+## 💬 TUI Slash Commands
+
+Inside the interactive TUI, type `/` in the prompt to access commands:
+
+- `/models` - Open the dynamic model selector modal.
+- `/skills` - Open and manage loaded skills.
+- `/subagents` - View active subagents and task delegation settings.
+- `/sessions` - Switch, create, or manage active chat sessions.
+- `/fork` - Fork the current conversation branch.
+- `/checkpoints` - View or revert to prior session checkpoints.
+- `/usage` - Open the token tracking and cost analytics dashboard.
+- `/compact` - Manually trigger conversation compaction.
+- `/report` - Run progress reporter.
+- `/commit` - Run git commit specialist.
+- `/image <prompt>` - Generate images directly from chat.
+- `/clear` - Clear the current chat view.
+
+---
+
+## 🤝 Contributing
+
+1. Fork the repository and create your feature branch (`git checkout -b feature/my-feature`).
+2. Commit your changes.
+3. Push to the branch and open a Pull Request.
