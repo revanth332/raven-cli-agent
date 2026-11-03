@@ -179,14 +179,14 @@ def run_agent_loop(chat_session,intial_input):
                     final_response = ""
                     function_calls = {}
                     try:
+                        if current_input is not None and not user_message_committed:
+                            chat_session.commit_user_message(current_input)
+                            user_message_committed = True
                         generator = chat_session.send_message_stream(
                             current_input if not user_message_committed else None,
                             execution_instruction=execution_instruction,
                             allow_tools=allow_tools,
                         )
-                        if current_input is not None and not user_message_committed:
-                            chat_session.commit_user_message(current_input)
-                            user_message_committed = True
                         for chunk in generator:
                             if not chunk.choices:
                                 continue

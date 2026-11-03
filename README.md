@@ -50,28 +50,26 @@
    cd my-cli-agent
    ```
 
-2. **Create and activate a virtual environment:**
-   ```bash
-   # Using venv (Windows)
-   python -m venv venv
-   .\venv\Scripts\activate
-
-   # Using venv (macOS/Linux)
-   python3 -m venv venv
-   source venv/bin/activate
-   ```
-
-3. **Install the package and dependencies:**
+2. **Install the package and dependencies:**
    ```bash
    pip install -e .
    ```
 
-4. **Configure Environment Variables:**
-   Create a `.env` file in the root directory:
+3. **Configure Environment Variables:**
    ```env
-   GEMINI_API_KEY=your_gemini_api_key
-   OPENAI_API_KEY=your_openai_api_key
+   RAVEN_BASE_URL=
+   RAVEN_USE_VERTEX_AI=
+   RAVEN_MODEL=
+   RAVEN_SMALL_MODEL=
+   RAVEN_IMAGE_MODEL=
    ```
+
+4. **Connect & Select Models In-App (`/connect`):**
+   Alternatively, you can configure providers and start using models directly inside the TUI without manually editing environment variables:
+   - Launch Raven (`raven` or `raven tui`) and run the `/connect` command in the prompt.
+   - Choose an existing provider preset or create a new custom preset (**OpenAI-Compatible Endpoint** such as OpenRouter, OpenAI, Ollama, or **Google Vertex AI**).
+   - Enter your **Base URL** and **API Key** (or use Google Cloud ADC for Vertex AI), then click **Connect** or **Save & Connect**.
+   - Select your primary model in the model selection modal that opens automatically to start chatting immediately.
 
 ---
 
@@ -81,13 +79,13 @@ Once installed, Raven can be launched via the `raven` command:
 
 ### Launch Terminal UI (Recommended)
 ```bash
+raven
+# or
 raven tui
 ```
 
 ### Interactive CLI Chat
 ```bash
-raven
-# or
 raven chat
 ```
 
@@ -111,6 +109,7 @@ raven chat
 
 Inside the interactive TUI, type `/` in the prompt to access commands:
 
+- `/connect` - Configure LLM provider presets, Base URL, API key, and models dynamically.
 - `/models` - Open the dynamic model selector modal.
 - `/skills` - Open and manage loaded skills.
 - `/subagents` - View active subagents and task delegation settings.

@@ -333,7 +333,7 @@ class AgentChatSession:
             duration_ms = getattr(self, "_last_duration_ms", 0.0)
         if ttft_ms is None:
             ttft_ms = getattr(self, "_last_ttft_ms", None)
-        summary = self.tracker.record_turn(
+        self.tracker.record_turn(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             model_name=self.model_name,
@@ -341,7 +341,7 @@ class AgentChatSession:
             ttft_ms=ttft_ms,
             status="success"
         )
-        self.get_context_usage()
+        summary = self.get_context_usage()
         self.save_session_state()
         return summary
 
@@ -463,11 +463,18 @@ class AgentChatSession:
         else:
             messages_to_send = self.messages
 
-        # 2. Autonomous compaction threshold check against effective pruned payload
+        # 2. Autonomous compaction threshold check aligned with context usage accounting
+        self._last_auto_compaction = None
         if getattr(settings, "RAVEN_AUTO_COMPACTION_ENABLED", True):
-            threshold = getattr(settings, "RAVEN_AUTO_COMPACTION_TOKEN_THRESHOLD", 60000)
-            current_tokens = count_tokens(messages_to_send, self.model_name)
-            if should_auto_compact(current_tokens, threshold=threshold, message_count=len(self.messages)):
+            threshold = getattr(settings, "RAVEN_AUTO_COMPACTION_TOKEN_THRESHOLD", 100000)
+            from agent.core.token_counter import get_tools_token_count
+            tool_tokens = get_tools_token_count(raven_tools, self.model_name) if allow_tools else 0
+            query_tokens = count_tokens(query, self.model_name) if query is not None else 0
+            pruned_tokens = count_tokens(messages_to_send, self.model_name) + tool_tokens + query_tokens
+            raw_tokens = count_tokens(self.messages, self.model_name) + tool_tokens + query_tokens
+            current_tokens = max(pruned_tokens, raw_tokens)
+            effective_msg_count = len(self.messages) + (1 if query is not None else 0)
+            if should_auto_compact(current_tokens, threshold=threshold, message_count=effective_msg_count):
                 if status_callback:
                     try:
                         status_callback("Compacting conversation history...")
@@ -476,6 +483,7 @@ class AgentChatSession:
                 try:
                     compaction_res = self.compact_history()
                     if compaction_res.get("success"):
+                        self._last_auto_compaction = compaction_res
                         messages_to_send = (
                             prune_message_payload(
                                 self.messages,

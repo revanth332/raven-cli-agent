@@ -1949,15 +1949,32 @@ class RavenTUI(App):
                     round_text = ""
                     _rollback_partial_attempt()
                     try:
+                        if query is not None and not user_message_committed:
+                            self.chat_session.commit_user_message(query)
+                            user_message_committed = True
                         generator = self.chat_session.send_message_stream(
                             query if not user_message_committed else None,
                             execution_instruction=execution_instruction,
                             allow_tools=allow_tools,
                             status_callback=lambda st: self.call_from_thread(self.show_thinking_loader, st) if not (cancel_event.is_set() or self.cancel_event.is_set()) else None,
                         )
-                        if query is not None and not user_message_committed:
-                            self.chat_session.commit_user_message(query)
-                            user_message_committed = True
+                        auto_compacted = getattr(self.chat_session, "_last_auto_compaction", None)
+                        if auto_compacted and auto_compacted.get("success"):
+                            self.chat_session._last_auto_compaction = None
+                            before = auto_compacted.get("tokens_before", 0)
+                            after = auto_compacted.get("tokens_after", 0)
+                            pct = auto_compacted.get("percent", 0.0)
+                            timeline.add_status(
+                                f"Auto-compacted context: {before:,} → {after:,} tokens ({pct}% saved)",
+                                style="dim cyan"
+                            )
+                            self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+                            self.call_from_thread(
+                                self.notify,
+                                f"Auto-compacted: {before:,} → {after:,} tokens ({pct}% saved)",
+                                title="Auto Compaction",
+                                severity="information",
+                            )
                         for chunk in generator:
                             if cancel_event.is_set() or self.cancel_event.is_set():
                                 break
@@ -2243,6 +2260,32 @@ class RavenTUI(App):
                     self.generate_session_title_worker(first_user_msg, total_text_response[:300])
 
                 summary = self.chat_session.record_turn_usage(assistant_response=total_text_response)
+                if (
+                    not (cancel_event.is_set() or self.cancel_event.is_set())
+                    and getattr(settings, "RAVEN_AUTO_COMPACTION_ENABLED", True)
+                ):
+                    from agent.core.compaction import should_auto_compact
+                    threshold = getattr(settings, "RAVEN_AUTO_COMPACTION_TOKEN_THRESHOLD", 100000)
+                    ctx_tokens = summary.get("current_context_tokens", 0)
+                    if should_auto_compact(ctx_tokens, threshold=threshold, message_count=len(self.chat_session.messages)):
+                        self.call_from_thread(self.show_thinking_loader, "Compacting conversation history...")
+                        compaction_res = self.chat_session.compact_history()
+                        if compaction_res.get("success"):
+                            before = compaction_res.get("tokens_before", 0)
+                            after = compaction_res.get("tokens_after", 0)
+                            pct = compaction_res.get("percent", 0.0)
+                            timeline.add_status(
+                                f"Auto-compacted context: {before:,} → {after:,} tokens ({pct}% saved)",
+                                style="dim cyan"
+                            )
+                            self.call_from_thread(self.safe_update_raven_card, raven_card, timeline)
+                            self.call_from_thread(
+                                self.notify,
+                                f"Auto-compacted: {before:,} → {after:,} tokens ({pct}% saved)",
+                                title="Auto Compaction",
+                                severity="information",
+                            )
+                            summary = self.chat_session.get_context_usage()
                 try:
                     sidebar = self.query_one(ConsumptionSidebar)
                     session_title = getattr(self.chat_session, "session_title", "New Conversation")

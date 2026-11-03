@@ -112,12 +112,32 @@ def save_compacted_memory(file_path: str, compacted_content: str) -> bool:
         return False
 
 
+def _extract_text_for_compaction(content) -> str:
+    """Safely extracts readable text from string or multimodal content blocks without dumping base64 payloads."""
+    if content is None:
+        return ""
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = []
+        for item in content:
+            if isinstance(item, dict):
+                if item.get("type") == "text":
+                    parts.append(str(item.get("text", "")))
+                elif item.get("type") == "image_url":
+                    parts.append("[Image attachment]")
+            else:
+                parts.append(str(item))
+        return "\n".join(parts)
+    return str(content)
+
+
 def format_messages_for_compaction(messages: list[dict], max_tool_chars: int = 1000) -> str:
     """Formats a list of message dicts into a clean text transcript for distillation."""
     lines = []
     for msg in messages:
         role = msg.get("role", "unknown").upper()
-        content = msg.get("content") or ""
+        content = _extract_text_for_compaction(msg.get("content"))
         tool_calls = msg.get("tool_calls")
         name = msg.get("name")
 
@@ -145,12 +165,12 @@ def format_messages_for_compaction(messages: list[dict], max_tool_chars: int = 1
     return "\n".join(lines)
 
 
-def should_auto_compact(current_tokens: int, threshold: int = 60000, message_count: int = 0) -> bool:
+def should_auto_compact(current_tokens: int, threshold: int = 100000, message_count: int = 0) -> bool:
     """
     Determines if conversation context exceeds the token ceiling for auto-compaction.
-    Requires at least 6 messages to ensure there is meaningful multi-turn history to distill.
+    Requires at least 4 messages (e.g. system + multi-step or multi-turn history) to distill.
     """
-    if message_count > 0 and message_count < 6:
+    if message_count > 0 and message_count < 4:
         return False
     return current_tokens >= threshold
 
@@ -236,7 +256,7 @@ def compact_conversation_history(messages: list[dict], custom_instructions: str 
     non_system = [m for m in messages if m.get("role") != "system"]
 
     user_indices = [i for i, m in enumerate(non_system) if m.get("role") == "user"]
-    if len(user_indices) < 2:
+    if not user_indices or len(non_system) < 3:
         return {
             "success": False,
             "summary": "",
@@ -244,10 +264,43 @@ def compact_conversation_history(messages: list[dict], custom_instructions: str 
             "error": "Conversation is too short to compact (requires at least 2 completed user turns)."
         }
 
-    # Slice at the start of the final user turn so tool/assistant sequence pairing is strictly preserved
     last_user_idx = user_indices[-1]
     to_compact = non_system[:last_user_idx]
     preserved = non_system[last_user_idx:]
+
+    # If there is only 1 user turn (with tool calls) OR the final user turn itself holds
+    # the majority of tokens due to multi-step tool calls, compact the intermediate tool rounds too.
+    effective_model = model_name or "gpt-4o"
+    final_turn_is_heavy = (
+        len(preserved) > 2
+        and (
+            len(user_indices) == 1
+            or count_tokens(preserved, effective_model) > count_tokens(to_compact, effective_model)
+        )
+    )
+    if final_turn_is_heavy:
+        last_msg = non_system[-1]
+        if last_msg.get("role") == "assistant" and not last_msg.get("tool_calls"):
+            # Completed turn: summarize all prior turns + intermediate tool calls, keep final user prompt & final answer
+            to_compact = non_system[:-1]
+            preserved = [non_system[last_user_idx], last_msg]
+        else:
+            # Mid-turn (ending in tool result or assistant tool_call): keep only the active/final assistant tool round
+            asst_indices = [i for i, m in enumerate(non_system) if m.get("role") == "assistant"]
+            if asst_indices and asst_indices[-1] > 0:
+                cut_idx = asst_indices[-1]
+                to_compact = non_system[:cut_idx]
+                preserved = non_system[cut_idx:]
+            else:
+                to_compact = non_system
+                preserved = []
+    elif len(user_indices) < 2:
+        return {
+            "success": False,
+            "summary": "",
+            "compacted_messages": messages,
+            "error": "Conversation is too short to compact (requires at least 2 completed user turns)."
+        }
 
     transcript = format_messages_for_compaction(to_compact)
     if not transcript.strip():
@@ -274,44 +327,58 @@ def compact_conversation_history(messages: list[dict], custom_instructions: str 
     # Use SMALL_MODEL with fallback to main model
     primary_model = getattr(settings, "RAVEN_SMALL_MODEL", None) or getattr(settings, "SMALL_MODEL", None)
     fallback_model = model_name or getattr(settings, "RAVEN_MODEL", None) or getattr(settings, "MODEL", None)
-    target_model = primary_model or fallback_model
+    models_to_try = []
+    if primary_model:
+        models_to_try.append(primary_model)
+    if fallback_model and fallback_model not in models_to_try:
+        models_to_try.append(fallback_model)
 
-    try:
-        response = get_genai_client().chat.completions.create(
-            model=target_model,
-            messages=[
-                {"role": "system", "content": base_prompt},
-                {"role": "user", "content": user_prompt}
-            ],
-            stream=False,
-        )
-        summary = response.choices[0].message.content or ""
-        if not summary.strip():
-            return {"success": False, "summary": "", "compacted_messages": messages, "error": "Model returned empty summary."}
+    last_error = None
+    for target_model in models_to_try:
+        try:
+            response = get_genai_client().chat.completions.create(
+                model=target_model,
+                messages=[
+                    {"role": "system", "content": base_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                stream=False,
+            )
+            summary = response.choices[0].message.content or ""
+            if not summary.strip():
+                last_error = "Model returned empty summary."
+                continue
 
-        synthetic_user = {
-            "role": "user",
-            "content": f"[Previous Conversation Context & Summary]\n{summary.strip()}"
-        }
-        synthetic_assistant = {
-            "role": "assistant",
-            "content": "Understood. I have absorbed the context, decisions, and file changes from our earlier discussion. Let's proceed."
-        }
+            synthetic_user = {
+                "role": "user",
+                "content": f"[Previous Conversation Context & Summary]\n{summary.strip()}"
+            }
+            synthetic_assistant = {
+                "role": "assistant",
+                "content": "Understood. I have absorbed the context, decisions, and file changes from our earlier discussion. Let's proceed."
+            }
 
-        new_messages = []
-        if system_msg:
-            new_messages.append(system_msg)
-        new_messages.extend([synthetic_user, synthetic_assistant])
-        new_messages.extend(preserved)
+            new_messages = []
+            if system_msg:
+                new_messages.append(system_msg)
+            if preserved and preserved[0].get("role") == "assistant":
+                # Mid-turn preservation: synthetic_user (role=user) directly precedes preserved assistant tool_call
+                new_messages.append(synthetic_user)
+            else:
+                new_messages.extend([synthetic_user, synthetic_assistant])
+            new_messages.extend(preserved)
 
-        return {
-            "success": True,
-            "summary": summary.strip(),
-            "compacted_messages": new_messages,
-            "error": None
-        }
-    except Exception as e:
-        logger.error(f"Failed to compact conversation history: {e}")
-        return {"success": False, "summary": "", "compacted_messages": messages, "error": str(e)}
+            return {
+                "success": True,
+                "summary": summary.strip(),
+                "compacted_messages": new_messages,
+                "error": None
+            }
+        except Exception as e:
+            last_error = str(e)
+            logger.warning(f"Conversation compaction failed with model '{target_model}': {e}")
+
+    logger.error(f"Failed to compact conversation history: {last_error}")
+    return {"success": False, "summary": "", "compacted_messages": messages, "error": last_error or "No compaction model configured."}
 
 
