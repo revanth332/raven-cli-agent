@@ -102,10 +102,26 @@ class RavenTUI(App):
         ("q", "quit", "Quit"),
     ]
 
+    SIDEBAR_MIN_TERMINAL_WIDTH = 150
     active_suggestions = []
+
+    def _sync_sidebar_visibility(self, width: int | None = None) -> None:
+        """Shows or hides the sidebar dynamically based on terminal window width."""
+        try:
+            current_width = width if width is not None else self.size.width
+            sidebar = self.query_one("#sidebar", ConsumptionSidebar)
+            sidebar.display = current_width >= self.SIDEBAR_MIN_TERMINAL_WIDTH
+        except Exception:
+            pass
+
+    def on_resize(self, event) -> None:
+        """Dynamically toggles sidebar visibility when the terminal window is resized."""
+        self._sync_sidebar_visibility(event.size.width)
+
     def on_mount(self):
         """Runs the exact moment the UI mounts to the screen."""
         self.console.push_theme(RAVEN_MARKDOWN_THEME)
+        self._sync_sidebar_visibility()
         self.chat_session = None
 
         self.permission_event = threading.Event()
