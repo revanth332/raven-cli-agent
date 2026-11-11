@@ -217,7 +217,6 @@ class ChatInput(TextArea):
 
         # Yield arrow navigation when slash-command autocomplete dropdown is open
         if self._is_autocomplete_open() and event.key in ("up", "down", "tab", "enter"):
-            super()._on_key(event)
             return
 
         # Arrow navigation for in-stream decision cards when input is empty
@@ -264,7 +263,20 @@ class ChatInput(TextArea):
                 self._navigating_history = False
                 self._suppress_autocomplete_once = False
 
-        super()._on_key(event)
+    def action_copy(self) -> None:
+        """Copy selected text from the input box or screen to the system clipboard."""
+        from agent.terminal_ui.chat_message import copy_to_system_clipboard
+
+        selected = self.selected_text
+        if not selected:
+            try:
+                selected = self.screen.get_selected_text() or ""
+            except Exception:
+                selected = ""
+
+        if selected:
+            copy_to_system_clipboard(selected, app=self.app)
+            self.app.notify("✓ Copied to clipboard", timeout=1.8)
 
     def action_submit(self) -> None:
         try:

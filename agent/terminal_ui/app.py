@@ -1,3 +1,5 @@
+import signal
+import sys
 import threading
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -139,13 +141,55 @@ class RavenTUI(App):
         self._active_timeline = None
         self._active_subagent_runner = None
         self.init_loader = None
+        self._prev_sigint_handler = None
+        self._ensure_vt_input_mode()
+        try:
+            self._prev_sigint_handler = signal.getsignal(signal.SIGINT)
+            signal.signal(signal.SIGINT, self._handle_sigint)
+        except Exception:
+            pass
 
         set_terminal_title("Raven - New Conversation")
         self.set_input_ready(False, "Initializing AI session, please wait...")
         self.initialize_ai()
 
+    def _ensure_vt_input_mode(self) -> None:
+        """Ensure Windows console input handle disables ENABLE_PROCESSED_INPUT so Ctrl+C acts as a key event."""
+        if sys.platform != "win32":
+            return
+        try:
+            from textual.drivers import win32
+
+            mode = win32.get_console_mode(sys.__stdin__)
+            if mode:
+                new_mode = (mode | win32.ENABLE_VIRTUAL_TERMINAL_INPUT) & ~0x0001
+                if new_mode != mode:
+                    win32.set_console_mode(sys.__stdin__, new_mode)
+        except Exception:
+            pass
+
+    def on_app_focus(self) -> None:
+        """Re-assert virtual terminal input mode whenever the terminal window regains focus."""
+        self._ensure_vt_input_mode()
+
+    def _handle_sigint(self, signum, frame) -> None:
+        """Intercept OS-level SIGINT (Ctrl+C) so the TUI never crashes and instead copies selection."""
+        self._ensure_vt_input_mode()
+        try:
+            if threading.get_ident() == getattr(self, "_thread_id", None):
+                self.call_later(self.action_help_quit)
+            else:
+                self.call_from_thread(self.action_help_quit)
+        except Exception:
+            pass
+
     def on_unmount(self) -> None:
         """Ensures background worker threads unblock and exit cleanly on application shutdown."""
+        if getattr(self, "_prev_sigint_handler", None) is not None:
+            try:
+                signal.signal(signal.SIGINT, self._prev_sigint_handler)
+            except Exception:
+                pass
         self.pending_permission = False
         self.pending_questionnaire = False
         self.permission_result = False
@@ -484,10 +528,41 @@ class RavenTUI(App):
 
         self.questionnaire_event.set()
 
+    def _get_any_selected_text(self) -> str:
+        """Retrieve selected text from the focused widget, ChatInput, or Screen selection."""
+        try:
+            focused = self.focused
+            if hasattr(focused, "selected_text") and focused.selected_text:
+                return focused.selected_text
+        except Exception:
+            pass
+        try:
+            chat_input = self.query_one("#chat_input", ChatInput)
+            if chat_input.selected_text:
+                return chat_input.selected_text
+        except Exception:
+            pass
+        try:
+            screen_sel = self.screen.get_selected_text()
+            if screen_sel:
+                return screen_sel
+        except Exception:
+            pass
+        return ""
+
+    def action_help_quit(self) -> None:
+        """Handle Ctrl+C at the app level: copy any active selection instead of exiting."""
+        selected_text = self._get_any_selected_text()
+        if selected_text and selected_text.strip():
+            copy_to_system_clipboard(selected_text, app=self)
+            self.notify("✓ Copied to clipboard", timeout=1.8)
+            return
+        super().action_help_quit()
+
     def on_text_selected(self, event) -> None:
         """Auto-copy selected text to the system clipboard on mouse release (OpenCode-style)."""
         try:
-            selected_text = self.screen.get_selected_text()
+            selected_text = self._get_any_selected_text()
             if selected_text and selected_text.strip():
                 copy_to_system_clipboard(selected_text, app=self)
                 self.notify("✓ Copied to clipboard", timeout=1.8)
