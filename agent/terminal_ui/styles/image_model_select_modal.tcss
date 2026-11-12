@@ -30,13 +30,6 @@ ImageModelSelectModal #image_close_hint {
     text-align: right;
 }
 
-ImageModelSelectModal #provider_bar {
-    width: 100%;
-    height: 1;
-    margin-bottom: 1;
-    color: #a1a1aa;
-}
-
 ImageModelSelectModal #search_input {
     width: 100%;
     height: 1;

@@ -1096,26 +1096,60 @@ class RavenTUI(App):
         except Exception as e:
             self.notify(f"Failed to launch usage dashboard: {e}", title="Error", severity="error")
 
-    def open_image_model_modal(self) -> None:
-        """Opens the Image Generation Engine configuration modal."""
-        def on_image_model_dismiss(result: dict | None) -> None:
-            if not result:
+    def open_image_model_modal(self, initial_preset: str | None = None) -> None:
+        """Opens the 2-step Image Generation Engine configuration flow (Preset -> Image Model)."""
+        from agent.core.preset_manager import get_image_preset
+
+        active_img_preset, _ = get_image_preset()
+        custom_provider = (getattr(settings, "IMAGE_PROVIDER", None) or "").strip()
+        if custom_provider:
+            active_img_preset = custom_provider
+
+        def on_preset_dismiss(conn_data: dict | None) -> None:
+            if not conn_data:
                 return
+            preset_name = conn_data.get("preset_name", active_img_preset)
+            initial_img_model = (
+                getattr(settings, "IMAGE_MODEL", "")
+                if preset_name == active_img_preset
+                else (conn_data.get("default_image_model") or "")
+            )
 
-            provider_name = result.get("preset_name", "")
-            target_model = result.get("model", "")
-            history_container = self.query_one("#history")
-            main_container = self.query_one("#main_container")
-            if main_container.has_class("centered"):
-                main_container.remove_class("centered")
+            def on_image_model_dismiss(result: dict | None) -> None:
+                if not result:
+                    self.open_image_model_modal(initial_preset=preset_name)
+                    return
 
-            msg = f"**System:** Image generation engine configured: `{target_model}` via provider `{provider_name}`."
-            info_card = ChatMessageWidget(role="assistant", raw_text=msg, classes="raven-msg")
-            history_container.mount(info_card)
-            self.scroll_to_bottom()
-            self.notify(f"Image Engine: {target_model} ({provider_name})", title="Image Engine Updated", severity="information")
+                provider_name = result.get("preset_name", preset_name)
+                target_model = result.get("model", "")
+                history_container = self.query_one("#history")
+                main_container = self.query_one("#main_container")
+                if main_container.has_class("centered"):
+                    main_container.remove_class("centered")
 
-        self.push_screen(ImageModelSelectModal(current_model=getattr(settings, "IMAGE_MODEL", "")), on_image_model_dismiss)
+                msg = f"**System:** Image generation engine configured: `{target_model}` via provider `{provider_name}`."
+                info_card = ChatMessageWidget(role="assistant", raw_text=msg, classes="raven-msg")
+                history_container.mount(info_card)
+                self.scroll_to_bottom()
+                self.notify(f"Image Engine: {target_model} ({provider_name})", title="Image Engine Updated", severity="information")
+
+            self.push_screen(
+                ImageModelSelectModal(
+                    current_model=initial_img_model,
+                    preset_name=preset_name,
+                    preset_cfg=conn_data,
+                ),
+                on_image_model_dismiss,
+            )
+
+        self.push_screen(
+            ConnectModal(
+                initial_preset=initial_preset or active_img_preset,
+                title="Image Provider Presets",
+                active_preset_override=active_img_preset,
+            ),
+            on_preset_dismiss,
+        )
 
     def open_model_select_modal(self) -> None:
         def on_model_dismiss(selected_model: str | None) -> None:

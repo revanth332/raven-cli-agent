@@ -22,17 +22,21 @@ from agent.core.preset_manager import (
 
 class ImageModelSelectModal(ModalScreen[Optional[Dict[str, str]]]):
     """
-    Modal for independently configuring and selecting Image Generation Provider Preset and Image Model.
-    Completely decoupled from the active chat LLM provider.
+    Modal for selecting an Image Generation Model for a chosen Provider Preset.
+    Pressing Esc dismisses with None so the caller can navigate back to PresetSelectModal.
     """
     BINDINGS = [
         Binding("escape", "dismiss_modal", "Cancel", priority=True),
-        Binding("ctrl+p", "cycle_provider", "Switch Provider", priority=True),
         Binding("ctrl+d", "delete_selected_model", "Delete Model", priority=True),
     ]
     CSS_PATH = "styles/image_model_select_modal.tcss"
 
-    def __init__(self, current_model: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        current_model: Optional[str] = None,
+        preset_name: Optional[str] = None,
+        preset_cfg: Optional[Dict[str, Any]] = None,
+    ) -> None:
         super().__init__()
         data = load_presets()
         self.presets: Dict[str, Any] = data.get("presets", {})
@@ -46,14 +50,32 @@ class ImageModelSelectModal(ModalScreen[Optional[Dict[str, str]]]):
             active_cfg = dict(self.presets[active_img_preset])
 
         self.active_image_provider = active_img_preset
-        self.selected_provider = active_img_preset
-        if self.selected_provider not in self.presets and self.provider_names:
-            self.selected_provider = self.provider_names[0]
+
+        if preset_name and preset_name in self.presets:
+            self.selected_provider = preset_name
+            selected_cfg = preset_cfg or self.presets.get(preset_name, {})
+        elif preset_name and preset_cfg is not None:
+            self.selected_provider = preset_name
+            selected_cfg = preset_cfg
+        else:
+            self.selected_provider = active_img_preset
+            if self.selected_provider not in self.presets and self.provider_names:
+                self.selected_provider = self.provider_names[0]
+            selected_cfg = self.presets.get(self.selected_provider, active_cfg)
 
         # Resolve active image model
-        configured_model = (current_model or getattr(settings, "IMAGE_MODEL", "") or active_cfg.get("default_image_model", "")).strip()
+        configured_model = (getattr(settings, "IMAGE_MODEL", "") or active_cfg.get("default_image_model", "")).strip()
         self.active_image_model = configured_model or "gemini-3.1-flash-image"
-        self.current_model = self.active_image_model
+
+        if current_model:
+            self.current_model = current_model.strip()
+        elif self.selected_provider == self.active_image_provider:
+            self.current_model = self.active_image_model
+        else:
+            self.current_model = (
+                selected_cfg.get("default_image_model")
+                or (selected_cfg.get("image_models", [""])[0] if selected_cfg.get("image_models") else "")
+            )
 
         self.all_models: List[str] = []
         self.filtered_models: List[str] = []
@@ -61,23 +83,13 @@ class ImageModelSelectModal(ModalScreen[Optional[Dict[str, str]]]):
     def compose(self) -> ComposeResult:
         with Vertical(id="image_modal_container"):
             with Horizontal(id="image_header_row"):
-                yield Static("Configure Image Generation Engine", id="image_modal_title")
+                yield Static(f"Select Image Model ({self.selected_provider})", id="image_modal_title")
                 yield Static("esc to close", id="image_close_hint")
-            yield Static(self._format_provider_bar(), id="provider_bar")
             yield Input(placeholder="Search image models...", id="search_input")
             yield OptionList(id="image_model_list")
             yield Input(placeholder="Or type custom image model string...", id="custom_input")
             yield Static("Ready", id="status_label")
-            yield Static("ctrl+p switch provider    enter apply    ctrl+d delete    esc cancel", id="image_footer_shortcuts")
-
-    def _format_provider_bar(self) -> str:
-        parts = []
-        for name in self.provider_names:
-            if name == self.selected_provider:
-                parts.append(f"[bold #10B981][{name}][/bold #10B981]")
-            else:
-                parts.append(f"[#71717a]{name}[/#71717a]")
-        return "Provider: " + "  |  ".join(parts) + "  [#71717a](ctrl+p to switch)[/#71717a]"
+            yield Static("select enter    delete ctrl+d    esc back", id="image_footer_shortcuts")
 
     def on_mount(self) -> None:
         self._load_provider_models()
@@ -145,29 +157,6 @@ class ImageModelSelectModal(ModalScreen[Optional[Dict[str, str]]]):
         if self.filtered_models and highlight_idx < len(self.filtered_models):
             ol.highlighted = highlight_idx
 
-    def action_cycle_provider(self) -> None:
-        if not self.provider_names:
-            return
-        try:
-            curr_idx = self.provider_names.index(self.selected_provider)
-            next_idx = (curr_idx + 1) % len(self.provider_names)
-        except ValueError:
-            next_idx = 0
-
-        self.selected_provider = self.provider_names[next_idx]
-        self.query_one("#provider_bar", Static).update(self._format_provider_bar())
-
-        # Reload fresh preset data from disk
-        data = load_presets()
-        self.presets = data.get("presets", {})
-        preset_cfg = self.presets.get(self.selected_provider, {})
-        def_model = preset_cfg.get("default_image_model") or (
-            preset_cfg.get("image_models", [""])[0] if preset_cfg.get("image_models") else ""
-        )
-        self.current_model = def_model
-
-        self._load_provider_models()
-
     def action_delete_selected_model(self) -> None:
         ol = self.query_one("#image_model_list", OptionList)
         if ol.highlighted is not None and 0 <= ol.highlighted < len(self.filtered_models):
@@ -177,10 +166,6 @@ class ImageModelSelectModal(ModalScreen[Optional[Dict[str, str]]]):
                 self.presets = data.get("presets", {})
                 self._load_provider_models()
                 self.query_one("#status_label", Static).update(f"Removed '{target}' from {self.selected_provider}")
-
-    def on_click(self, event: events.Click) -> None:
-        if getattr(event.widget, "id", None) == "provider_bar":
-            self.action_cycle_provider()
 
     def on_input_changed(self, event: Input.Changed) -> None:
         if event.input.id == "search_input":
@@ -221,12 +206,6 @@ class ImageModelSelectModal(ModalScreen[Optional[Dict[str, str]]]):
     def on_key(self, event: events.Key) -> None:
         if event.key == "escape":
             self.action_dismiss_modal()
-            event.prevent_default()
-            event.stop()
-            return
-
-        if event.key == "ctrl+p":
-            self.action_cycle_provider()
             event.prevent_default()
             event.stop()
             return

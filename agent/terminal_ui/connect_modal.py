@@ -303,9 +303,18 @@ class ConnectModal(ModalScreen[Optional[Dict[str, Any]]]):
     ]
     CSS_PATH = "styles/connect_modal.tcss"
 
-    def __init__(self, initial_preset: Optional[str] = None, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self,
+        initial_preset: Optional[str] = None,
+        title: str = "Provider Presets",
+        active_preset_override: Optional[str] = None,
+        *args: Any,
+        **kwargs: Any,
+    ) -> None:
         super().__init__(*args, **kwargs)
         self.initial_preset = initial_preset
+        self.modal_title = title
+        self.active_preset_override = active_preset_override
         self.presets: Dict[str, Dict[str, Any]] = {}
         self.active_preset_name: str = ""
         self._filtered_preset_keys: List[str] = []
@@ -316,7 +325,7 @@ class ConnectModal(ModalScreen[Optional[Dict[str, Any]]]):
     def compose(self) -> ComposeResult:
         with Vertical(id="preset_modal_container"):
             with Horizontal(id="preset_header_row"):
-                yield Static("Provider Presets", id="preset_modal_title")
+                yield Static(self.modal_title, id="preset_modal_title")
                 yield Static("esc", id="preset_close_hint")
 
             yield Input(
@@ -343,7 +352,10 @@ class ConnectModal(ModalScreen[Optional[Dict[str, Any]]]):
     def _load_presets_data(self) -> None:
         data = load_presets()
         self.presets = data.get("presets", {})
-        self.active_preset_name, _ = get_active_preset()
+        if self.active_preset_override and self.active_preset_override in self.presets:
+            self.active_preset_name = self.active_preset_override
+        else:
+            self.active_preset_name, _ = get_active_preset()
 
     def populate_options(self, filter_query: str = "", target_preset: Optional[str] = None) -> None:
         opt_list = self.query_one("#preset_option_list", OptionList)
