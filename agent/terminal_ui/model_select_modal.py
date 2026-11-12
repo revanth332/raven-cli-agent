@@ -24,9 +24,17 @@ class ModelSelectModal(ModalScreen[str]):
     ]
     CSS_PATH = "styles/model_select_modal.tcss"
 
-    def __init__(self, current_model: Optional[str] = None) -> None:
+    def __init__(
+        self,
+        current_model: Optional[str] = None,
+        preset_name: Optional[str] = None,
+        preset_cfg: Optional[Dict[str, Any]] = None,
+    ) -> None:
         super().__init__()
-        self.preset_name, self.preset_cfg = get_active_preset()
+        if preset_name and preset_cfg is not None:
+            self.preset_name, self.preset_cfg = preset_name, preset_cfg
+        else:
+            self.preset_name, self.preset_cfg = get_active_preset()
         self.current_model = current_model or getattr(settings, "RAVEN_MODEL", "") or self.preset_cfg.get("default_model", "")
         self.favorite_model_ids: List[str] = self.preset_cfg.get("models", [])
         self.all_models: List[Dict[str, Any]] = []

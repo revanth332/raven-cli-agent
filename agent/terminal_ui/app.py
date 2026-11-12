@@ -45,6 +45,7 @@ from agent.terminal_ui.permission_box import PermissionBox, PermissionBar
 from agent.terminal_ui.thinking_loader import ThinkingMessage
 from agent.terminal_ui.connect_modal import ConnectModal
 from agent.terminal_ui.model_select_modal import ModelSelectModal
+from agent.terminal_ui.image_model_select_modal import ImageModelSelectModal
 from agent.terminal_ui.session_select_modal import SessionSelectModal
 from agent.terminal_ui.checkpoint_modal import CheckpointSelectModal
 from agent.terminal_ui.skills_modal import SkillsManagerModal
@@ -93,6 +94,7 @@ RAVEN_MARKDOWN_THEME = Theme({
 
 
 class RavenTUI(App):
+    ENABLE_COMMAND_PALETTE = False
     CSS_PATH = [
         "styles/app.tcss",
         "styles/chat_message.tcss",
@@ -315,6 +317,11 @@ class RavenTUI(App):
             if cmd in ["/model", "/models"]:
                 chat_input.text = ""
                 self.open_model_select_modal()
+                return
+
+            if cmd == "/image-model":
+                chat_input.text = ""
+                self.open_image_model_modal()
                 return
 
             if cmd == "/sessions":
@@ -1004,7 +1011,7 @@ class RavenTUI(App):
         except Exception:
             pass
 
-    def open_connect_modal(self) -> None:
+    def open_connect_modal(self, initial_preset: str | None = None) -> None:
         def on_connect_dismiss(conn_data: dict | None) -> None:
             if not conn_data:
                 return
@@ -1014,31 +1021,42 @@ class RavenTUI(App):
             preset_name = conn_data.get("preset_name", "Custom")
             default_model = conn_data.get("default_model")
 
-            settings.set_config({
-                "RAVEN_USE_VERTEX_AI": use_vertex_ai,
-                "RAVEN_BASE_URL": base_url or "",
-                "RAVEN_API_KEY": api_key or "",
-            })
-            reset_genai_client()
-
             initial_model = default_model or settings.RAVEN_MODEL
 
             def on_model_dismiss(selected_model: str | None) -> None:
-                target_model = selected_model or initial_model
-                if target_model and target_model != settings.RAVEN_MODEL:
-                    settings.set_config({"RAVEN_MODEL": target_model})
-                if self.chat_session and target_model:
-                    self.chat_session.model_name = target_model
+                if not selected_model:
+                    self.open_connect_modal(initial_preset=preset_name)
+                    return
+
+                from agent.core.preset_manager import set_active_preset
+                set_active_preset(preset_name)
+                settings.set_config({
+                    "RAVEN_USE_VERTEX_AI": use_vertex_ai,
+                    "RAVEN_BASE_URL": base_url or "",
+                    "RAVEN_API_KEY": api_key or "",
+                    "RAVEN_MODEL": selected_model,
+                })
+                reset_genai_client()
+
+                if self.chat_session:
+                    self.chat_session.model_name = selected_model
                     self.chat_session.save_session_state()
-                self.set_input_ready(False, f"Connecting to {target_model}...")
+                self.set_input_ready(False, f"Connecting to {selected_model}...")
                 self.initialize_ai()
                 self.update_status_bar()
                 display_target = "Google Vertex AI" if use_vertex_ai else (preset_name or base_url or "LLM Provider")
-                self.notify(f"Connected to {display_target} with model {target_model}", title="Connected", severity="information")
+                self.notify(f"Connected to {display_target} with model {selected_model}", title="Connected", severity="information")
 
-            self.push_screen(ModelSelectModal(current_model=initial_model), on_model_dismiss)
+            self.push_screen(
+                ModelSelectModal(
+                    current_model=initial_model,
+                    preset_name=preset_name,
+                    preset_cfg=conn_data,
+                ),
+                on_model_dismiss,
+            )
 
-        self.push_screen(ConnectModal(), on_connect_dismiss)
+        self.push_screen(ConnectModal(initial_preset=initial_preset), on_connect_dismiss)
 
     def open_usage_dashboard(self) -> None:
         import webbrowser
@@ -1077,6 +1095,27 @@ class RavenTUI(App):
             self.scroll_to_bottom()
         except Exception as e:
             self.notify(f"Failed to launch usage dashboard: {e}", title="Error", severity="error")
+
+    def open_image_model_modal(self) -> None:
+        """Opens the Image Generation Engine configuration modal."""
+        def on_image_model_dismiss(result: dict | None) -> None:
+            if not result:
+                return
+
+            provider_name = result.get("preset_name", "")
+            target_model = result.get("model", "")
+            history_container = self.query_one("#history")
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            msg = f"**System:** Image generation engine configured: `{target_model}` via provider `{provider_name}`."
+            info_card = ChatMessageWidget(role="assistant", raw_text=msg, classes="raven-msg")
+            history_container.mount(info_card)
+            self.scroll_to_bottom()
+            self.notify(f"Image Engine: {target_model} ({provider_name})", title="Image Engine Updated", severity="information")
+
+        self.push_screen(ImageModelSelectModal(current_model=getattr(settings, "IMAGE_MODEL", "")), on_image_model_dismiss)
 
     def open_model_select_modal(self) -> None:
         def on_model_dismiss(selected_model: str | None) -> None:
@@ -1566,21 +1605,36 @@ class RavenTUI(App):
             input_widget.text = ""
             self.query_one('#autocomplete_list', OptionList).styles.display = "none"
 
+            if not target_model:
+                self.open_image_model_modal()
+                return
+
             history_container = self.query_one("#history")
             main_container = self.query_one("#main_container")
             if main_container.has_class("centered"):
                 main_container.remove_class("centered")
 
-            if target_model:
-                settings.set_config({"IMAGE_MODEL": target_model})
-                msg = f"**System:** Image generation model updated to `{target_model}`."
-            else:
-                current_img_model = getattr(settings, "IMAGE_MODEL", None) or "black-forest-labs/flux-1-schnell"
-                msg = f"**System:** Current Image Generation Model: `{current_img_model}`\n\nTo switch models, use `/image-model <model_name>` (e.g. `/image-model black-forest-labs/flux-1-dev` or `dall-e-3`)."
+            from agent.core.preset_manager import get_image_preset, set_image_preset
+            img_preset_name, _ = get_image_preset()
 
+            # Support "PresetName:ModelName" syntax or plain model name
+            if ":" in target_model and not target_model.startswith("http"):
+                p_part, m_part = target_model.split(":", 1)
+                p_part, m_part = p_part.strip(), m_part.strip()
+                if m_part:
+                    img_preset_name = p_part
+                    target_model = m_part
+
+            set_image_preset(img_preset_name, default_model=target_model)
+            settings.set_config({
+                "IMAGE_PROVIDER": img_preset_name,
+                "IMAGE_MODEL": target_model,
+            })
+            msg = f"**System:** Image generation engine updated to `{target_model}` via provider `{img_preset_name}`."
             info_card = ChatMessageWidget(role="assistant", raw_text=msg, classes="raven-msg")
             history_container.mount(info_card)
             self.scroll_to_bottom()
+            self.notify(f"Image Engine: {target_model}", title="Image Engine Updated", severity="information")
             return
 
         if user_input.lower().startswith("/imagine") and (len(user_input) == 8 or user_input[8] in (" ", "\t")):

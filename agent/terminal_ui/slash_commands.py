@@ -15,7 +15,7 @@ EXPLAIN_PROMPT = read_prompt_from_file("prompts/explain_prompt.md")
 
 SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
     "/connect": {
-        "description": "Connect to LLM provider (Base URL, API Key, Model)",
+        "description": "Switch, configure, or manage provider presets and models",
         "placeholder": "/connect",
         "system_prompt": "",
     },
@@ -95,7 +95,7 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "system_prompt": "",
     },
     "/image-model": {
-        "description": "View or switch default image generation model (/image-model [model_name])",
+        "description": "Configure or switch image generation provider and model (/image-model [model_name])",
         "placeholder": "/image-model [model_name]",
         "system_prompt": "",
     },

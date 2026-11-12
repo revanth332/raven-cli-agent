@@ -19,7 +19,8 @@ from typing import Optional
 from PIL import Image
 
 from agent.core.settings import settings
-from agent.utils import use_vertex_ai, get_latest_attached_image
+from agent.utils import get_latest_attached_image
+from agent.core.preset_manager import get_image_preset
 
 
 ASPECT_RATIO_DIMENSIONS = {
@@ -30,7 +31,68 @@ ASPECT_RATIO_DIMENSIONS = {
     "3:4": "768x1024",
 }
 
-DEFAULT_IMAGE_MODEL = "black-forest-labs/flux-1-schnell"
+DEFAULT_IMAGE_MODEL = "gemini-3.1-flash-image"
+
+
+def resolve_image_engine_config(model_override: Optional[str] = None) -> dict:
+    """
+    Deterministically resolves the provider credentials, endpoint, and model for image generation.
+    Precedence:
+    1. IMAGE_PROVIDER from settings (or config.json / env).
+       If empty, falls back to image_preset in ~/.raven/providers.json.
+    2. Endpoint & auth from the selected preset, with standalone overrides from
+       settings.IMAGE_BASE_URL, settings.IMAGE_API_KEY, settings.IMAGE_USE_VERTEX_AI.
+    3. Model: model_override -> settings.IMAGE_MODEL -> preset['default_image_model'].
+    """
+    preset_name, preset_cfg = get_image_preset()
+    custom_provider = getattr(settings, "IMAGE_PROVIDER", None)
+    if custom_provider and custom_provider.strip():
+        # User explicitly specified a provider preset name in settings
+        from agent.core.preset_manager import load_presets
+        all_presets = load_presets().get("presets", {})
+        if custom_provider.strip() in all_presets:
+            preset_name = custom_provider.strip()
+            preset_cfg = dict(all_presets[preset_name])
+
+    # Determine provider type and vertex usage
+    use_vertex_override = getattr(settings, "IMAGE_USE_VERTEX_AI", None)
+    if use_vertex_override is not None:
+        use_vertex = bool(use_vertex_override)
+        provider_type = "vertex" if use_vertex else "openai"
+    else:
+        provider_type = preset_cfg.get("provider_type", "openai")
+        use_vertex = bool(preset_cfg.get("use_vertex_ai", False) or provider_type == "vertex")
+
+    # Determine base_url & api_key
+    base_url = (getattr(settings, "IMAGE_BASE_URL", None) or "").strip() or preset_cfg.get("base_url") or ""
+    api_key = (getattr(settings, "IMAGE_API_KEY", None) or "").strip() or preset_cfg.get("api_key") or ""
+    if not api_key and not use_vertex:
+        # Fall back to env key or RAVEN_API_KEY if preset matches active provider
+        active_key = getattr(settings, "RAVEN_API_KEY", None)
+        active_base = getattr(settings, "RAVEN_BASE_URL", None)
+        if active_key and active_base and ("openrouter" in str(active_base).lower() and "openrouter" in str(base_url).lower()):
+            api_key = active_key
+        elif not api_key:
+            api_key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+
+    # Determine target model
+    if model_override and model_override.strip():
+        resolved_model = model_override.strip()
+    else:
+        configured_model = (getattr(settings, "IMAGE_MODEL", None) or "").strip()
+        if configured_model:
+            resolved_model = configured_model
+        else:
+            resolved_model = preset_cfg.get("default_image_model") or ("gemini-3.1-flash-image" if use_vertex else DEFAULT_IMAGE_MODEL)
+
+    return {
+        "preset_name": preset_name,
+        "provider_type": "vertex" if use_vertex else provider_type,
+        "use_vertex_ai": use_vertex,
+        "base_url": base_url,
+        "api_key": api_key,
+        "model": resolved_model,
+    }
 
 
 def sanitize_image_name(name_or_prompt: str) -> str:
@@ -268,33 +330,25 @@ def _generate_with_google_genai(
     aspect_ratio: str,
     negative_prompt: str = "",
     reference_image: Optional[tuple[bytes, str]] = None,
+    engine_config: Optional[dict] = None,
 ) -> Optional[bytes]:
     """Helper to generate image using google-genai / Vertex AI with multi-region failover and backoff."""
-    from agent.core.settings import settings
     try:
         from google import genai
         from google.genai import types
         from google.auth import default
 
-        vertex_enabled = use_vertex_ai()
-
-        # Handle model selection and deprecation
-        model_name = target_model or "gemini-3.1-flash-image"
-        if (
-            not model_name
-            or model_name == DEFAULT_IMAGE_MODEL
-            or "imagen" in model_name.lower()
-            or "imagegeneration" in model_name.lower()
-        ):
-            model_name = "gemini-3.1-flash-image"
+        cfg = engine_config or resolve_image_engine_config(target_model)
+        vertex_enabled = bool(cfg.get("use_vertex_ai", True))
+        model_name = target_model or cfg.get("model") or "gemini-3.1-flash-image"
 
         if vertex_enabled:
             project_id = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GCP_PROJECT")
             location = os.environ.get("GOOGLE_CLOUD_REGION") or os.environ.get("VERTEX_LOCATION")
 
-            # Try to extract project/location from configured base URL
+            # Try to extract project/location from configured base URL if present
             if not project_id or not location:
-                base_url = settings.RAVEN_BASE_URL or ""
+                base_url = cfg.get("base_url") or getattr(settings, "RAVEN_BASE_URL", "") or ""
                 match = re.search(r'/projects/([^/]+)/locations/([^/]+)', base_url)
                 if match:
                     if not project_id:
@@ -333,6 +387,10 @@ def _generate_with_google_genai(
                             client_kwargs["project"] = project_id
                         if current_region:
                             client_kwargs["location"] = current_region
+                    else:
+                        api_key = cfg.get("api_key") or os.environ.get("GEMINI_API_KEY")
+                        if api_key:
+                            client_kwargs["api_key"] = api_key
 
                     client = genai.Client(**client_kwargs)
 
@@ -400,29 +458,28 @@ def _generate_with_openai_compatible(
     prompt: str,
     target_model: str,
     aspect_ratio: str,
-    negative_prompt: str = ""
+    negative_prompt: str = "",
+    engine_config: Optional[dict] = None,
 ) -> bytes:
-    """Helper to generate image using OpenAI / OpenRouter endpoints or active client with backoff."""
+    """Helper to generate image using OpenAI / OpenRouter endpoints with isolated client and backoff."""
     from openai import OpenAI
-    from agent.core.llm import get_genai_client
 
-    try:
-        client = get_genai_client()
-    except Exception:
-        base_url = getattr(settings, "RAVEN_BASE_URL", None) or "https://openrouter.ai/api/v1"
-        api_key = getattr(settings, "RAVEN_API_KEY", None)
+    cfg = engine_config or resolve_image_engine_config(target_model)
+    base_url = cfg.get("base_url") or "https://openrouter.ai/api/v1"
+    api_key = cfg.get("api_key") or ""
 
-        if not api_key:
-            raise ValueError(
-                f"Active provider at '{base_url}' has no API key configured. "
-                "Please configure an OpenRouter/OpenAI API key via `/connect` or switch `IMAGE_MODEL`."
-            )
-
-        client = OpenAI(
-            base_url=base_url,
-            api_key=api_key,
-            timeout=60.0
+    if not api_key and "localhost" not in base_url and "127.0.0.1" not in base_url:
+        preset_name = cfg.get("preset_name", "OpenAI-Compatible")
+        raise ValueError(
+            f"Image provider preset '{preset_name}' (at '{base_url}') has no API key configured. "
+            "Please configure an API key via `/connect`, set `IMAGE_API_KEY`, or switch your image engine via `/image-model`."
         )
+
+    client = OpenAI(
+        base_url=base_url,
+        api_key=api_key or "sk-no-key-required",
+        timeout=60.0
+    )
 
     size = ASPECT_RATIO_DIMENSIONS.get(aspect_ratio, "1024x1024")
 
@@ -520,58 +577,39 @@ def generate_image(
     if ref_error:
         return ref_error
 
-    configured_model = (model or getattr(settings, "IMAGE_MODEL", None) or "").strip()
-    if use_vertex_ai() or reference_image is not None:
-        if not configured_model or configured_model == DEFAULT_IMAGE_MODEL or "imagen" in configured_model.lower():
-            target_model = "gemini-3.1-flash-image"
-        else:
-            target_model = configured_model
-    else:
-        target_model = configured_model or DEFAULT_IMAGE_MODEL
+    engine_cfg = resolve_image_engine_config(model_override=model)
+    target_model = engine_cfg["model"]
+    is_vertex = bool(engine_cfg.get("use_vertex_ai", False) or engine_cfg.get("provider_type") == "vertex")
     norm_aspect = aspect_ratio if aspect_ratio in ASPECT_RATIO_DIMENSIONS else "1:1"
+
+    # Strict check: if reference image editing is requested on a non-supporting provider
+    if reference_image is not None and not is_vertex:
+        return (
+            f"Error: Reference image editing is not supported by the active Image Provider preset "
+            f"('{engine_cfg.get('preset_name')}' / '{target_model}'). "
+            "Please use `/image-model` to switch your Image Provider to 'Google Vertex AI' (model: 'gemini-3.1-flash-image') "
+            "for multimodal image-to-image editing."
+        )
 
     out_path = get_artifact_output_path(filename=filename, prompt=clean_prompt)
 
     try:
-        is_vertex = (
-            use_vertex_ai()
-            or reference_image is not None
-            or "imagen" in target_model.lower()
-            or "gemini" in target_model.lower()
-            or "imagegeneration" in target_model.lower()
-        )
         if is_vertex:
-            try:
-                img_bytes = _generate_with_google_genai(
-                    prompt=clean_prompt,
-                    target_model=target_model,
-                    aspect_ratio=norm_aspect,
-                    negative_prompt=negative_prompt,
-                    reference_image=reference_image,
-                )
-            except Exception as e:
-                # Capture the inner exception to avoid silencing authentic authentication or SDK errors.
-                # If running on Vertex AI or targeting a Google model, do not fall back to OpenAPI endpoint
-                # (since Vertex AI OpenAPI does not support /v1/images/generations).
-                if (
-                    use_vertex_ai()
-                    or reference_image is not None
-                    or any(k in target_model.lower() for k in ("imagen", "gemini", "imagegeneration"))
-                ):
-                    raise e
-                # Fallback to OpenAI compatible endpoint if Google GenAI fails or credentials differ
-                img_bytes = _generate_with_openai_compatible(
-                    prompt=clean_prompt,
-                    target_model=target_model,
-                    aspect_ratio=norm_aspect,
-                    negative_prompt=negative_prompt
-                )
+            img_bytes = _generate_with_google_genai(
+                prompt=clean_prompt,
+                target_model=target_model,
+                aspect_ratio=norm_aspect,
+                negative_prompt=negative_prompt,
+                reference_image=reference_image,
+                engine_config=engine_cfg,
+            )
         else:
             img_bytes = _generate_with_openai_compatible(
                 prompt=clean_prompt,
                 target_model=target_model,
                 aspect_ratio=norm_aspect,
-                negative_prompt=negative_prompt
+                negative_prompt=negative_prompt,
+                engine_config=engine_cfg,
             )
 
         if not img_bytes:

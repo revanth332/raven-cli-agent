@@ -20,6 +20,12 @@ DEFAULT_PRESETS = {
             "meta-llama/llama-3.3-70b-instruct",
             "openrouter/free",
         ],
+        "default_image_model": "black-forest-labs/flux-1-schnell",
+        "image_models": [
+            "black-forest-labs/flux-1-schnell",
+            "black-forest-labs/flux-1-dev",
+            "stabilityai/stable-diffusion-3-medium",
+        ],
     },
     "Google Vertex AI": {
         "provider_type": "vertex",
@@ -33,6 +39,12 @@ DEFAULT_PRESETS = {
             "google/gemini-3-flash-preview",
             "google/gemini-3.1-pro-preview",
         ],
+        "default_image_model": "gemini-3.1-flash-image",
+        "image_models": [
+            "gemini-3.1-flash-image",
+            "gemini-3-pro-image",
+            "imagen-3.0-generate-002",
+        ],
     },
     "Local Ollama": {
         "provider_type": "openai",
@@ -45,6 +57,8 @@ DEFAULT_PRESETS = {
             "deepseek-r1:14b",
             "llama3.3:latest",
         ],
+        "default_image_model": "",
+        "image_models": [],
     },
     "Groq": {
         "provider_type": "openai",
@@ -58,6 +72,8 @@ DEFAULT_PRESETS = {
             "mixtral-8x7b-32768",
             "deepseek-r1-distill-llama-70b",
         ],
+        "default_image_model": "",
+        "image_models": [],
     },
 }
 
@@ -84,8 +100,10 @@ class PresetManager:
                 presets["OpenRouter"]["default_model"] = current_model
 
         active = "Google Vertex AI" if use_vertex else "OpenRouter"
+        image_active = "Google Vertex AI" if "Google Vertex AI" in presets else active
         return {
             "active_preset": active,
+            "image_preset": image_active,
             "presets": presets,
         }
 
@@ -108,16 +126,34 @@ class PresetManager:
                             # Backfill models list if missing in existing user preset
                             if "models" not in data["presets"][k] or not isinstance(data["presets"][k]["models"], list):
                                 data["presets"][k]["models"] = list(v.get("models", []))
+                            # Backfill image models and default image model if missing
+                            if "image_models" not in data["presets"][k] or not isinstance(data["presets"][k]["image_models"], list):
+                                data["presets"][k]["image_models"] = list(v.get("image_models", []))
+                            if "default_image_model" not in data["presets"][k]:
+                                data["presets"][k]["default_image_model"] = v.get("default_image_model", "")
                     
-                    # Ensure custom presets also have a models list
+                    # Ensure custom presets also have a models list and image_models list
                     for k, preset_obj in data["presets"].items():
                         if "models" not in preset_obj or not isinstance(preset_obj["models"], list):
                             default_m = preset_obj.get("default_model")
                             preset_obj["models"] = [default_m] if default_m else []
+                        if "image_models" not in preset_obj or not isinstance(preset_obj["image_models"], list):
+                            default_im = preset_obj.get("default_image_model")
+                            preset_obj["image_models"] = [default_im] if default_im else []
+                        if "default_image_model" not in preset_obj:
+                            preset_obj["default_image_model"] = preset_obj["image_models"][0] if preset_obj["image_models"] else ""
 
                     if not data.get("active_preset") or data["active_preset"] not in data["presets"]:
                         use_vertex = getattr(settings, "RAVEN_USE_VERTEX_AI", False)
                         data["active_preset"] = "Google Vertex AI" if use_vertex else "OpenRouter"
+
+                    if not data.get("image_preset") or data["image_preset"] not in data["presets"]:
+                        if "Google Vertex AI" in data["presets"]:
+                            data["image_preset"] = "Google Vertex AI"
+                        elif "OpenRouter" in data["presets"]:
+                            data["image_preset"] = "OpenRouter"
+                        else:
+                            data["image_preset"] = data.get("active_preset", next(iter(data["presets"].keys()), ""))
                     return data
             except Exception:
                 pass
@@ -144,10 +180,16 @@ class PresetManager:
 
         # Existing preset models or fallback to default
         existing_models = []
+        existing_image_models = []
+        existing_default_image_model = ""
         if name in data.get("presets", {}):
             existing_models = data["presets"][name].get("models", [])
+            existing_image_models = data["presets"][name].get("image_models", [])
+            existing_default_image_model = data["presets"][name].get("default_image_model", "")
         elif name in DEFAULT_PRESETS:
             existing_models = list(DEFAULT_PRESETS[name].get("models", []))
+            existing_image_models = list(DEFAULT_PRESETS[name].get("image_models", []))
+            existing_default_image_model = DEFAULT_PRESETS[name].get("default_image_model", "")
 
         models = config.get("models")
         if models is None or not isinstance(models, list):
@@ -159,6 +201,16 @@ class PresetManager:
         if default_model and default_model not in models:
             models = [default_model] + [m for m in models if m != default_model]
 
+        image_models = config.get("image_models")
+        if image_models is None or not isinstance(image_models, list):
+            image_models = existing_image_models
+
+        default_image_model = config.get("default_image_model") or existing_default_image_model or (
+            "gemini-3.1-flash-image" if use_vertex else ("black-forest-labs/flux-1-schnell" if "openrouter" in str(base_url).lower() else "")
+        )
+        if default_image_model and default_image_model not in image_models:
+            image_models = [default_image_model] + [m for m in image_models if m != default_image_model]
+
         preset_data = {
             "provider_type": "vertex" if use_vertex else "openai",
             "base_url": (base_url.strip() if isinstance(base_url, str) and base_url.strip() else None),
@@ -166,6 +218,8 @@ class PresetManager:
             "default_model": default_model,
             "use_vertex_ai": use_vertex,
             "models": models,
+            "default_image_model": default_image_model,
+            "image_models": image_models,
         }
 
         data.setdefault("presets", {})[name] = preset_data
@@ -183,6 +237,13 @@ class PresetManager:
         del data["presets"][name]
         if data.get("active_preset") == name:
             data["active_preset"] = "OpenRouter" if "OpenRouter" in data["presets"] else next(iter(data["presets"].keys()), "")
+        if data.get("image_preset") == name:
+            if "Google Vertex AI" in data["presets"]:
+                data["image_preset"] = "Google Vertex AI"
+            elif "OpenRouter" in data["presets"]:
+                data["image_preset"] = "OpenRouter"
+            else:
+                data["image_preset"] = next(iter(data["presets"].keys()), "")
         self._save_to_disk(data)
         return True
 
@@ -206,6 +267,74 @@ class PresetManager:
         if name in data.get("presets", {}):
             data["active_preset"] = name
             self._save_to_disk(data)
+
+    def get_image_preset(self) -> tuple[str, dict]:
+        """Returns (image_preset_name, image_preset_dict)."""
+        data = self.load_presets()
+        image_name = data.get("image_preset")
+        presets = data.get("presets", {})
+        if image_name and image_name in presets:
+            return image_name, dict(presets[image_name])
+        if "Google Vertex AI" in presets:
+            return "Google Vertex AI", dict(presets["Google Vertex AI"])
+        if "OpenRouter" in presets:
+            return "OpenRouter", dict(presets["OpenRouter"])
+        if presets:
+            first_key = next(iter(presets.keys()))
+            return first_key, dict(presets[first_key])
+        return "Google Vertex AI", dict(DEFAULT_PRESETS["Google Vertex AI"])
+
+    def set_image_preset(self, name: str, default_model: str | None = None) -> None:
+        """Sets active image preset name in providers.json, optionally updating default_image_model."""
+        data = self.load_presets()
+        if name in data.get("presets", {}):
+            data["image_preset"] = name
+            if default_model and default_model.strip():
+                clean_model = default_model.strip()
+                data["presets"][name]["default_image_model"] = clean_model
+                image_models = data["presets"][name].setdefault("image_models", [])
+                if clean_model not in image_models:
+                    image_models.append(clean_model)
+            self._save_to_disk(data)
+
+    def get_preset_image_models(self, name: str | None = None) -> list[str]:
+        """Returns list of configured image models for a preset."""
+        data = self.load_presets()
+        target = name or data.get("image_preset") or "Google Vertex AI"
+        preset = data.get("presets", {}).get(target)
+        if preset and "image_models" in preset and isinstance(preset["image_models"], list):
+            return list(preset["image_models"])
+        if target in DEFAULT_PRESETS:
+            return list(DEFAULT_PRESETS[target].get("image_models", []))
+        return []
+
+    def add_preset_image_model(self, preset_name: str, model_id: str) -> None:
+        """Adds an image model to a preset's image_models list if not present."""
+        if not preset_name or not model_id or not model_id.strip():
+            return
+        model_id = model_id.strip()
+        data = self.load_presets()
+        if preset_name in data.get("presets", {}):
+            models = data["presets"][preset_name].setdefault("image_models", [])
+            if model_id not in models:
+                models.append(model_id)
+                self._save_to_disk(data)
+
+    def remove_preset_image_model(self, preset_name: str, model_id: str) -> bool:
+        """Removes an image model from a preset's image_models list."""
+        if not preset_name or not model_id:
+            return False
+        model_id = model_id.strip()
+        data = self.load_presets()
+        if preset_name in data.get("presets", {}):
+            models = data["presets"][preset_name].get("image_models", [])
+            if model_id in models:
+                models.remove(model_id)
+                if data["presets"][preset_name].get("default_image_model") == model_id:
+                    data["presets"][preset_name]["default_image_model"] = models[0] if models else ""
+                self._save_to_disk(data)
+                return True
+        return False
 
     def get_preset_models(self, name: str | None = None) -> list[str]:
         """Returns list of configured favorite/default models for a preset."""
@@ -278,3 +407,23 @@ def add_preset_model(preset_name: str, model_id: str) -> None:
 
 def remove_preset_model(preset_name: str, model_id: str) -> bool:
     return _default_manager.remove_preset_model(preset_name, model_id)
+
+
+def get_image_preset() -> tuple[str, dict]:
+    return _default_manager.get_image_preset()
+
+
+def set_image_preset(name: str, default_model: str | None = None) -> None:
+    return _default_manager.set_image_preset(name, default_model)
+
+
+def get_preset_image_models(name: str | None = None) -> list[str]:
+    return _default_manager.get_preset_image_models(name)
+
+
+def add_preset_image_model(preset_name: str, model_id: str) -> None:
+    return _default_manager.add_preset_image_model(preset_name, model_id)
+
+
+def remove_preset_image_model(preset_name: str, model_id: str) -> bool:
+    return _default_manager.remove_preset_image_model(preset_name, model_id)
