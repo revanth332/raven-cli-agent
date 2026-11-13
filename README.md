@@ -115,6 +115,7 @@ Inside the interactive TUI, type `/` in the prompt to access commands:
 - `/subagents` - View active subagents and task delegation settings.
 - `/sessions` - Switch, create, or manage active chat sessions.
 - `/fork` - Fork the current conversation branch.
+- `/export [path]` - Export the current session transcript to `.md`, `.json`, or `.html`.
 - `/checkpoints` - View or revert to prior session checkpoints.
 - `/usage` - Open the token tracking and cost analytics dashboard.
 - `/compact` - Manually trigger conversation compaction.

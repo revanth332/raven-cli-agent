@@ -36,6 +36,7 @@ EXCLUDED_HISTORY_COMMANDS = {
     "/new",
     "/editor",
     "/fork",
+    "/export",
     "/model",
     "/models",
     "/skills",

@@ -393,6 +393,12 @@ class RavenTUI(App):
                 chat_input.cursor_location = (0, len(chat_input.text))
                 return
 
+            if cmd == "/export":
+                chat_input.text = "/export "
+                chat_input.focus()
+                chat_input.cursor_location = (0, len(chat_input.text))
+                return
+
             chat_input.text = cmd + " "
             chat_input.action_cursor_line_end()
 
@@ -916,6 +922,109 @@ class RavenTUI(App):
             f"Forked session: '{new_sess['title']}'. Note: Files on disk remain unchanged.", 
             title="Session Forked", 
             severity="information"
+        )
+
+    def action_export_session(self, raw_path_arg: str = "") -> None:
+        """Exports the active conversation session transcript to .md, .json, or .html."""
+        if self.is_generating:
+            self.notify(
+                "A response is currently generating. Please wait or press Esc to cancel before exporting.",
+                title="Busy",
+                severity="warning",
+            )
+            return
+
+        if not self.chat_session:
+            self.notify("No active session to export.", title="Export Session", severity="warning")
+            return
+
+        messages = (
+            self.chat_session.get_messages()
+            if hasattr(self.chat_session, "get_messages")
+            else [m for m in getattr(self.chat_session, "messages", []) if m.get("role") != "system"]
+        )
+        tracker = getattr(self.chat_session, "tracker", None)
+        prompt_tokens = int(getattr(tracker, "session_prompt_tokens", 0) or 0) if tracker else 0
+        completion_tokens = int(getattr(tracker, "session_completion_tokens", 0) or 0) if tracker else 0
+        session_cost = float(getattr(tracker, "session_cost", 0.0) or 0.0) if tracker else 0.0
+        session_requests = int(getattr(tracker, "session_requests", 0) or 0) if tracker else 0
+
+        current_data = {
+            "session_id": getattr(self.chat_session, "session_id", None),
+            "title": getattr(self.chat_session, "session_title", "Untitled Conversation"),
+            "messages": messages,
+            "model_name": getattr(
+                self.chat_session,
+                "model_name",
+                getattr(self.chat_session, "model", settings.RAVEN_MODEL),
+            ),
+            "project_name": getattr(self.chat_session, "project_name", "") or get_active_project_name(),
+            "session_prompt_tokens": prompt_tokens,
+            "session_completion_tokens": completion_tokens,
+            "total_tokens": prompt_tokens + completion_tokens,
+            "session_cost": session_cost,
+            "session_requests": session_requests,
+        }
+
+        from agent.core.session_exporter import export_active_session, format_byte_size
+
+        res = export_active_session(
+            session_data=current_data,
+            raw_path_arg=raw_path_arg,
+            app=self,
+        )
+
+        if not res.get("success"):
+            err_msg = res.get("error") or "Unknown export error."
+            if "empty conversation" in err_msg.lower():
+                self.notify(err_msg, title="Export Session", severity="warning")
+                return
+            try:
+                main_container = self.query_one("#main_container")
+                if main_container.has_class("centered"):
+                    main_container.remove_class("centered")
+                history_container = self.query_one("#history")
+                err_card = ChatMessageWidget(
+                    role="assistant",
+                    raw_text=f"**Export Error:** {err_msg}",
+                    classes="raven-msg",
+                )
+                history_container.mount(err_card)
+                self.scroll_to_bottom()
+            except Exception:
+                pass
+            self.notify(err_msg, title="Export Error", severity="error")
+            return
+
+        size_str = format_byte_size(int(res.get("bytes_written", 0)))
+        clip_copied = bool(res.get("clipboard_copied"))
+        clip_note = "Copied file path to clipboard" if clip_copied else "Clipboard unavailable"
+        out_path = res.get("output_path", "")
+        fmt_upper = str(res.get("format", "md")).upper()
+        turns_count = int(res.get("turn_count", 0))
+
+        status_md = (
+            f"**Session Exported ({fmt_upper})**\n"
+            f"- **File:** `{out_path}`\n"
+            f"- **Stats:** {turns_count} turns ({size_str})\n"
+            f"- **Clipboard:** {clip_note}"
+        )
+        try:
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+            history_container = self.query_one("#history")
+            card = ChatMessageWidget(role="assistant", raw_text=status_md, classes="raven-msg")
+            history_container.mount(card)
+            self.scroll_to_bottom()
+        except Exception:
+            pass
+
+        toast_suffix = " (path copied to clipboard)" if clip_copied else ""
+        self.notify(
+            f"Exported to {Path(out_path).name}{toast_suffix}",
+            title="Session Exported",
+            severity="information",
         )
 
     def open_session_select_modal(self) -> None:
@@ -1692,6 +1801,14 @@ class RavenTUI(App):
             self.action_fork_session(title_arg)
             return
 
+        if user_input.lower() == "/export" or user_input.lower().startswith("/export "):
+            input_widget = event.text_area
+            input_widget.text = ""
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            path_arg = user_input[7:].strip()
+            self.action_export_session(path_arg)
+            return
+
         if user_input.lower() in ["/model", "/models"] or user_input.lower().startswith(("/model ", "/models ")):
             input_widget = event.text_area
             input_widget.text = ""
@@ -2063,6 +2180,10 @@ class RavenTUI(App):
                 chat_input.text = "/fork "
                 chat_input.focus()
                 chat_input.cursor_location = (0, len(chat_input.text))
+                return
+
+            if cmd == "/export":
+                self.action_export_session(query)
                 return
 
             # Direct skill invocation: /skill <name> [prompt]

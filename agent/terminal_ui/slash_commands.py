@@ -44,6 +44,11 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "placeholder": "/fork [optional_title]",
         "system_prompt": "",
     },
+    "/export": {
+        "description": "Export current chat session transcript to Markdown, JSON, or HTML",
+        "placeholder": "/export [file_path.md | .json | .html]",
+        "system_prompt": "",
+    },
     "/sessions": {
         "description": "List and switch chat sessions",
         "placeholder": "/sessions",
