@@ -1,13 +1,30 @@
 import json
+import os
+import time
 from pathlib import Path
 from textual.binding import Binding
 from textual.message import Message
 from textual.widgets import TextArea
 from textual import events
+from agent.tools.file_tools import is_sensitive_file
 
 
 MAX_INPUT_HISTORY = 10
 INPUT_HISTORY_FILE = Path.home() / ".raven" / "input_history.json"
+
+PASTE_COLLAPSE_MIN_LINES = 5
+PASTE_COLLAPSE_MIN_CHARS = 300
+
+_WORKSPACE_FILES_CACHE: list[str] = []
+_WORKSPACE_FILES_CACHE_TS: float = 0.0
+_WORKSPACE_FILES_CACHE_ROOT: str = ""
+_WORKSPACE_IGNORE_DIRS = {
+    "node_modules", ".git", "venv", ".env", ".venv", "env", "__pycache__",
+    "dist", "build", ".pytest_cache", ".mypy_cache", ".ruff_cache",
+    ".turbo", ".next", ".nuxt", ".cache", ".idea", ".vscode", ".vs",
+    ".coverage", "htmlcov",
+}
+_WORKSPACE_IGNORE_EXTS = {".pyc", ".pyo", ".pyd"}
 
 EXCLUDED_HISTORY_COMMANDS = {
     "exit",
@@ -17,6 +34,7 @@ EXCLUDED_HISTORY_COMMANDS = {
     "/connect",
     "/usage",
     "/new",
+    "/editor",
     "/fork",
     "/model",
     "/models",
@@ -33,6 +51,105 @@ COMMANDS_REQUIRING_ARGS = {
     "/skill",
     "/subagent",
 }
+
+
+def get_workspace_files(ttl: float = 5.0, max_scan: int = 5000) -> list[str]:
+    """Returns a cached list of non-ignored, non-sensitive relative workspace file paths."""
+    global _WORKSPACE_FILES_CACHE, _WORKSPACE_FILES_CACHE_TS, _WORKSPACE_FILES_CACHE_ROOT
+    now = time.monotonic()
+    cwd = os.getcwd()
+    if _WORKSPACE_FILES_CACHE and _WORKSPACE_FILES_CACHE_ROOT == cwd and (now - _WORKSPACE_FILES_CACHE_TS) < ttl:
+        return _WORKSPACE_FILES_CACHE
+
+    collected: list[str] = []
+    try:
+        for root, dirs, files in os.walk("."):
+            dirs[:] = [
+                d for d in dirs
+                if d not in _WORKSPACE_IGNORE_DIRS
+                and not d.endswith(".egg-info")
+                and not (("venv" in d.lower() or d.lower() == "env") and (Path(root) / d / "pyvenv.cfg").exists())
+            ]
+            for file in files:
+                f_lower = file.lower()
+                if any(f_lower.endswith(ext) for ext in _WORKSPACE_IGNORE_EXTS):
+                    continue
+                try:
+                    rel_path = Path(os.path.join(root, file)).relative_to(".").as_posix()
+                except ValueError:
+                    rel_path = (Path(root) / file).as_posix().lstrip("./")
+                if is_sensitive_file(rel_path):
+                    continue
+                collected.append(rel_path)
+                if len(collected) >= max_scan:
+                    break
+            if len(collected) >= max_scan:
+                break
+    except Exception:
+        pass
+
+    collected.sort(key=lambda p: (p.count("/"), p.lower()))
+    _WORKSPACE_FILES_CACHE = collected
+    _WORKSPACE_FILES_CACHE_TS = now
+    _WORKSPACE_FILES_CACHE_ROOT = cwd
+    return collected
+
+
+def _subsequence_span(needle: str, haystack: str) -> int | None:
+    """Returns the span length if all chars of needle appear in order in haystack, else None."""
+    if not needle:
+        return 0
+    first_idx = -1
+    cur = 0
+    for ch in needle:
+        pos = haystack.find(ch, cur)
+        if pos == -1:
+            return None
+        if first_idx == -1:
+            first_idx = pos
+        cur = pos + 1
+    return cur - first_idx
+
+
+def fuzzy_search_workspace_files(query: str, max_results: int = 15) -> list[str]:
+    """Fuzzy-searches workspace files for '@' reference autocomplete."""
+    files = get_workspace_files()
+    q = query.strip().replace("\\", "/").lstrip("./").lower()
+    if not q:
+        return files[:max_results]
+
+    scored: list[tuple[tuple, str]] = []
+    for rel_path in files:
+        rel_lower = rel_path.lower()
+        fname_lower = rel_lower.rsplit("/", 1)[-1]
+
+        if fname_lower == q:
+            rank = (0, len(rel_path), rel_lower)
+        elif rel_lower == q:
+            rank = (1, len(rel_path), rel_lower)
+        elif fname_lower.startswith(q):
+            rank = (2, len(fname_lower), len(rel_path), rel_lower)
+        elif rel_lower.startswith(q) or f"/{q}" in rel_lower:
+            rank = (3, len(rel_path), rel_lower)
+        elif q in fname_lower:
+            rank = (4, fname_lower.find(q), len(fname_lower), len(rel_path), rel_lower)
+        elif q in rel_lower:
+            rank = (5, rel_lower.find(q), len(rel_path), rel_lower)
+        else:
+            f_span = _subsequence_span(q, fname_lower)
+            if f_span is not None:
+                rank = (6, f_span, len(fname_lower), len(rel_path), rel_lower)
+            else:
+                p_span = _subsequence_span(q, rel_lower)
+                if p_span is not None:
+                    rank = (7, p_span, len(rel_path), rel_lower)
+                else:
+                    continue
+
+        scored.append((rank, rel_path))
+
+    scored.sort(key=lambda item: item[0])
+    return [path for _, path in scored[:max_results]]
 
 
 def should_record_query(raw_query: str) -> bool:
@@ -60,6 +177,7 @@ class ChatInput(TextArea):
         Binding("shift+return", "newline", "Newline", priority=True),
         Binding("alt+enter", "newline", "Newline", priority=True),
         Binding("ctrl+j", "newline", "Newline", priority=True),
+        Binding("ctrl+p", "toggle_paste_summary", "Toggle Paste Summary", priority=True),
     ]
 
     class Submitted(Message):
@@ -90,6 +208,145 @@ class ChatInput(TextArea):
         self._draft_text: str = ""
         self._navigating_history: bool = False
         self._suppress_autocomplete_once: bool = False
+        self._pasted_blocks: dict[str, str] = {}
+        self._paste_counter: int = 0
+        self._paste_collapsed: bool = True
+
+    def register_pasted_block(self, raw_text: str) -> str:
+        """Registers a large pasted block and returns its compact placeholder token."""
+        normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+        lines = normalized.split("\n")
+        line_count = len(lines)
+        char_count = len(normalized)
+        self._paste_counter += 1
+        if line_count >= PASTE_COLLAPSE_MIN_LINES:
+            token = f"[Pasted #{self._paste_counter}: {line_count} lines]"
+        elif line_count > 1:
+            token = f"[Pasted #{self._paste_counter}: {char_count} chars ({line_count} lines)]"
+        else:
+            token = f"[Pasted #{self._paste_counter}: {char_count} chars]"
+        self._pasted_blocks[token] = normalized
+        self._paste_collapsed = True
+        return token
+
+    def get_expanded_text(self) -> str:
+        """Returns the input text with all collapsed paste summary tokens expanded."""
+        result = self.text
+        if not self._pasted_blocks:
+            return result
+        for token, content in self._pasted_blocks.items():
+            if token in result:
+                result = result.replace(token, content)
+        return result
+
+    def clear_pasted_blocks(self) -> None:
+        """Clears stored paste blocks and resets the paste counter."""
+        self._pasted_blocks.clear()
+        self._paste_counter = 0
+        self._paste_collapsed = True
+
+    def action_toggle_paste_summary(self) -> None:
+        """Toggles between collapsed [Pasted #N: X lines] tokens and full pasted text."""
+        if not self._pasted_blocks:
+            return
+
+        current = self.text
+        has_collapsed_token = any(token in current for token in self._pasted_blocks)
+
+        if has_collapsed_token:
+            for token, content in self._pasted_blocks.items():
+                if token in current:
+                    current = current.replace(token, content)
+            self._paste_collapsed = False
+            self._suppress_autocomplete_once = True
+            self.text = current
+            lines = current.split("\n") if current else [""]
+            self.cursor_location = (max(0, len(lines) - 1), len(lines[-1]))
+        else:
+            has_expanded = any(content in current for content in self._pasted_blocks.values())
+            if has_expanded:
+                for token, content in sorted(self._pasted_blocks.items(), key=lambda x: len(x[1]), reverse=True):
+                    if content in current:
+                        current = current.replace(content, token)
+                self._paste_collapsed = True
+                self._suppress_autocomplete_once = True
+                self.text = current
+                lines = current.split("\n") if current else [""]
+                self.cursor_location = (max(0, len(lines) - 1), len(lines[-1]))
+
+    def _on_paste(self, event: events.Paste) -> None:
+        """Intercepts multi-line or large pastes and collapses them into summary tokens."""
+        if self.read_only:
+            event.stop()
+            return
+
+        raw_text = event.text or ""
+        normalized = raw_text.replace("\r\n", "\n").replace("\r", "\n")
+        line_count = len(normalized.split("\n"))
+        char_count = len(normalized)
+
+        if line_count >= PASTE_COLLAPSE_MIN_LINES or char_count >= PASTE_COLLAPSE_MIN_CHARS:
+            token = self.register_pasted_block(normalized)
+            self._navigating_history = False
+            self._suppress_autocomplete_once = True
+            self.replace(token, *self.selection, maintain_selection_offset=False)
+            event.stop()
+            event.prevent_default()
+            try:
+                self.app.notify(
+                    f"Collapsed {line_count} lines (Ctrl+P to expand/collapse)",
+                    timeout=2.2,
+                )
+            except Exception:
+                pass
+            return
+
+        super()._on_paste(event)
+
+    def get_active_at_mention(self) -> tuple[str, tuple[int, int], tuple[int, int]] | None:
+        """Detects an active '@file' reference query at the current cursor position.
+
+        Returns:
+            Tuple of (query_string, start_location, end_location) if an active '@'
+            token is under the cursor, otherwise None.
+        """
+        raw = self.text
+        if not raw or "@" not in raw:
+            return None
+
+        lines = raw.split("\n")
+        row, col = self.cursor_location
+        if row < 0 or row >= len(lines):
+            return None
+
+        line = lines[row]
+        col = max(0, min(col, len(line)))
+        prefix = line[:col]
+        at_idx = prefix.rfind("@")
+        if at_idx == -1:
+            return None
+
+        # Ensure '@' is at start of line or preceded by whitespace/opening punctuation (not an email)
+        if at_idx > 0 and prefix[at_idx - 1] not in (" ", "\t", "(", "[", "{", "\"", "'", ","):
+            return None
+
+        query_part = prefix[at_idx + 1:]
+        if " " in query_part or "\t" in query_part:
+            return None
+
+        return (query_part, (row, at_idx), (row, col))
+
+    def complete_at_mention(self, selected_path: str) -> bool:
+        """Replaces the active '@query' token under the cursor with '@<selected_path> '."""
+        mention = self.get_active_at_mention()
+        if mention is None:
+            return False
+        _, start_loc, end_loc = mention
+        replacement = f"@{selected_path} "
+        self._suppress_autocomplete_once = True
+        self._navigating_history = False
+        self.replace(replacement, start_loc, end_loc, maintain_selection_offset=False)
+        return True
 
     def on_mouse_down(self, event: events.MouseDown) -> None:
         """Exits rapid history-cycling mode when the user clicks to place the cursor."""
@@ -287,7 +544,8 @@ class ChatInput(TextArea):
                 return
         except Exception:
             pass
-        self.post_message(self.Submitted(self, self.text))
+        expanded_text = self.get_expanded_text()
+        self.post_message(self.Submitted(self, expanded_text))
 
     def action_newline(self) -> None:
         self._navigating_history = False

@@ -34,6 +34,11 @@ SLASH_COMMANDS: Dict[str, Dict[str, Any]] = {
         "placeholder": "/new",
         "system_prompt": "",
     },
+    "/editor": {
+        "description": "Compose or edit prompt in external editor ($VISUAL / $EDITOR)",
+        "placeholder": "/editor",
+        "system_prompt": "",
+    },
     "/fork": {
         "description": "Fork current session state into a new conversation",
         "placeholder": "/fork [optional_title]",

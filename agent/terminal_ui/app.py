@@ -1,5 +1,10 @@
+import os
+import shlex
+import shutil
 import signal
+import subprocess
 import sys
+import tempfile
 import threading
 from textual.app import App, ComposeResult
 from textual.binding import Binding
@@ -15,7 +20,7 @@ from rich.text import Text
 from rich.theme import Theme
 
 from agent.tools.tool_registry import TOOL_REGISTRY
-from agent.tools.miscellaneous_tools import kill_active_sync_process
+from agent.tools.miscellaneous_tools import execute_command, kill_active_sync_process
 from agent.tools.checkpoint_tools import create_checkpoint, rollback_checkpoint, list_checkpoints
 from agent.core.llm import get_chat_session, generate_ai_session_title, reset_genai_client
 from agent.utils import (
@@ -34,7 +39,7 @@ from agent.core.subagent_runner import (
 from agent.core.vision import is_model_vision_capable, transcribe_image_with_vision_model
 from agent.core.settings import settings
 from agent.core.safety import is_command_dangerous
-from agent.terminal_ui.chat_input import ChatInput
+from agent.terminal_ui.chat_input import ChatInput, fuzzy_search_workspace_files
 from agent.terminal_ui.chat_message import (
     ChatMessageWidget,
     ResponseTimeline,
@@ -267,22 +272,42 @@ class RavenTUI(App):
         raw_text = event.text_area.text
         autocomplete = self.query_one("#autocomplete_list",OptionList)
         chat_input = self.query_one("#chat_input", ChatInput)
+        if not raw_text and not getattr(chat_input, "_navigating_history", False):
+            chat_input.clear_pasted_blocks()
         if getattr(chat_input, "_suppress_autocomplete_once", False):
             chat_input._suppress_autocomplete_once = False
             autocomplete.styles.display = "none"
             chat_input.styles.margin = (0, 0, 0, 0)
             return
-        if raw_text.startswith("/") and " " not in raw_text:
+        if raw_text.startswith("/") and " " not in raw_text and "\n" not in raw_text:
             matches = [(cmd,info) for cmd,info in SLASH_COMMANDS.items() if cmd.startswith(val)]
             if matches:
                 autocomplete.clear_options()
+                self.autocomplete_mode = "slash"
                 self.active_suggestions = [m[0] for m in matches]
 
                 for cmd,info in matches:
                     autocomplete.add_option(Option(prompt=f"{cmd:<14} - {info['description']}"))
+                autocomplete.highlighted = 0
                 autocomplete.styles.display = "block"
                 chat_input.styles.margin = (0, 0, 0, 0)
                 return
+
+        at_mention = chat_input.get_active_at_mention()
+        if at_mention is not None:
+            query_str, _, _ = at_mention
+            file_matches = fuzzy_search_workspace_files(query_str, max_results=15)
+            if file_matches:
+                autocomplete.clear_options()
+                self.autocomplete_mode = "file"
+                self.active_suggestions = file_matches
+                for rel_path in file_matches:
+                    autocomplete.add_option(Option(prompt=f"@{rel_path}"))
+                autocomplete.highlighted = 0
+                autocomplete.styles.display = "block"
+                chat_input.styles.margin = (0, 0, 0, 0)
+                return
+
         autocomplete.styles.display = "none"
         chat_input.styles.margin = (0, 0, 0, 0)
     
@@ -293,15 +318,28 @@ class RavenTUI(App):
             selected_id = 0
 
         if selected_id is not None and selected_id < len(self.active_suggestions):
-            cmd = self.active_suggestions[selected_id]
+            selected_val = self.active_suggestions[selected_id]
 
             chat_input = self.query_one("#chat_input", ChatInput)
             autocomplete.styles.display = "none"
             chat_input.styles.margin = (0, 0, 0, 0)
 
+            if getattr(self, "autocomplete_mode", "slash") == "file":
+                if not chat_input.complete_at_mention(selected_val):
+                    chat_input._suppress_autocomplete_once = True
+                    chat_input.insert(f"{selected_val} ")
+                chat_input.focus()
+                return
+
+            cmd = selected_val
             if cmd == "/exit":
                 chat_input.text = ""
                 self.exit()
+                return
+
+            if cmd == "/editor":
+                chat_input.text = ""
+                self.open_external_editor()
                 return
 
             if cmd == "/connect":
@@ -357,6 +395,73 @@ class RavenTUI(App):
 
             chat_input.text = cmd + " "
             chat_input.action_cursor_line_end()
+
+    def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        if event.option_list.id == "autocomplete_list":
+            self.select_autocomplete_option()
+
+    def open_external_editor(self, initial_text: str = "") -> None:
+        """Opens $VISUAL / $EDITOR (or OS default editor) on a temporary markdown file and loads the result into ChatInput."""
+        editor = os.environ.get("VISUAL") or os.environ.get("EDITOR")
+        if not editor:
+            if sys.platform == "win32" or os.name == "nt":
+                editor = "notepad"
+            else:
+                editor = "nano" if shutil.which("nano") else "vi"
+
+        tmp_path: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                suffix=".md",
+                prefix="raven_prompt_",
+                delete=False,
+                encoding="utf-8",
+            ) as tmp_file:
+                if initial_text:
+                    tmp_file.write(initial_text)
+                tmp_path = Path(tmp_file.name)
+
+            try:
+                parts = shlex.split(editor, posix=(os.name != "nt"))
+            except ValueError:
+                parts = [editor]
+            if not parts:
+                parts = ["notepad" if os.name == "nt" else "vi"]
+
+            bin_name = parts[0].strip("\"'")
+            resolved_bin = shutil.which(bin_name) or bin_name
+            cmd_list = [resolved_bin, *parts[1:], str(tmp_path)]
+
+            try:
+                with self.suspend():
+                    subprocess.run(cmd_list, check=False)
+            except Exception:
+                subprocess.run(cmd_list, check=False)
+            finally:
+                self._ensure_vt_input_mode()
+
+            if tmp_path and tmp_path.exists():
+                content = tmp_path.read_text(encoding="utf-8").rstrip("\r\n")
+                chat_input = self.query_one("#chat_input", ChatInput)
+                if content.strip():
+                    chat_input._suppress_autocomplete_once = True
+                    chat_input.text = content
+                    lines = content.split("\n")
+                    chat_input.cursor_location = (max(0, len(lines) - 1), len(lines[-1]))
+                    chat_input.focus()
+                    self.notify(f"Loaded {len(lines)} line(s) from editor.", title="External Editor", timeout=2.2)
+                else:
+                    chat_input.focus()
+                    self.notify("Editor closed with empty prompt.", title="External Editor", timeout=2.0)
+        except Exception as e:
+            self.notify(f"Failed to launch external editor ({editor}): {e}", title="Editor Error", severity="error")
+        finally:
+            if tmp_path and tmp_path.exists():
+                try:
+                    tmp_path.unlink()
+                except Exception:
+                    pass
 
     def on_key(self,event):
         autocomplete = self.query_one("#autocomplete_list",OptionList)
@@ -1429,6 +1534,41 @@ class RavenTUI(App):
             self.call_from_thread(self.remove_thinking_loader)
             self.is_generating = False
 
+    @work(thread=True)
+    def execute_shell_mode_worker(self, shell_cmd: str, raven_card: ChatMessageWidget) -> None:
+        """Background worker to execute !<command> in shell mode and inject output into session context."""
+        try:
+            result_str = execute_command(shell_cmd)
+            formatted_md = f"**Shell (`!{shell_cmd}`):**\n```text\n{result_str.rstrip()}\n```"
+            self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(formatted_md), formatted_md)
+
+            if self.chat_session:
+                self.chat_session.commit_user_message(f"!{shell_cmd}")
+                self.chat_session.messages.append(
+                    self.chat_session._create_message(
+                        "assistant",
+                        content=f"[Direct Shell Execution `!{shell_cmd}`]:\n{result_str}",
+                        model_name="shell",
+                    )
+                )
+                self.chat_session.save_session_state()
+                summary = self.chat_session.get_context_usage()
+                try:
+                    sidebar = self.query_one(ConsumptionSidebar)
+                    session_title = getattr(self.chat_session, "session_title", "New Conversation")
+                    current_project = get_active_project_name()
+                    project_name = current_project if current_project else Path.cwd().name
+                    active_model = getattr(self.chat_session, "model_name", None) or settings.RAVEN_MODEL
+                    self.call_from_thread(sidebar.update_metrics, summary, session_title, project_name, active_model)
+                except Exception:
+                    pass
+        except Exception as e:
+            err_msg = f"**Shell Execution Error:** {e}"
+            self.call_from_thread(self.safe_update_raven_card, raven_card, Markdown(err_msg), err_msg)
+        finally:
+            self.call_from_thread(self.remove_thinking_loader)
+            self.is_generating = False
+
     def on_chat_input_submitted(self, event: ChatInput.Submitted) -> None:
         """Triggers when the user presses 'Enter' in the input box."""
         self.clear_input_error()
@@ -1457,13 +1597,56 @@ class RavenTUI(App):
             self.notify("A response is currently generating. Please wait or press Esc to cancel.", title="Busy", severity="warning")
             return
 
-        if not self.chat_session:
-            self.notify("AI is still initializing. Please wait...", title="Initializing", severity="warning")
+        user_input = event.value.strip()
+
+        if not user_input:
             return
 
-        user_input = event.value.strip()
-        
-        if not user_input:
+        if user_input.lower() == "/editor" or user_input.lower().startswith("/editor "):
+            initial_draft = user_input[7:].strip() if len(user_input) > 7 else ""
+            input_widget = event.text_area
+            input_widget.text = ""
+            if hasattr(input_widget, "clear_pasted_blocks"):
+                input_widget.clear_pasted_blocks()
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+            self.open_external_editor(initial_text=initial_draft)
+            return
+
+        if user_input.startswith("!"):
+            shell_cmd = user_input[1:].strip()
+            input_widget = event.text_area
+            input_widget.text = ""
+            if hasattr(input_widget, "clear_pasted_blocks"):
+                input_widget.clear_pasted_blocks()
+            self.query_one('#autocomplete_list', OptionList).styles.display = "none"
+
+            if not shell_cmd:
+                self.notify("Usage: !<command> (e.g., !git status)", title="Shell Mode", severity="warning")
+                return
+
+            if hasattr(input_widget, "add_to_history"):
+                input_widget.add_to_history(user_input)
+
+            history_container = self.query_one("#history")
+            main_container = self.query_one("#main_container")
+            if main_container.has_class("centered"):
+                main_container.remove_class("centered")
+
+            user_card = ChatMessageWidget(role="user", raw_text=user_input, classes="user-msg")
+            history_container.mount(user_card)
+
+            raven_card = ChatMessageWidget(role="assistant", raw_text="", model_name="shell", classes="raven-msg")
+            history_container.mount(raven_card)
+            self.scroll_to_bottom()
+            self.show_thinking_loader(f"Running: {shell_cmd[:60]}...")
+            self.is_generating = True
+            self.cancel_event.clear()
+
+            self.execute_shell_mode_worker(shell_cmd, raven_card)
+            return
+
+        if not self.chat_session:
+            self.notify("AI is still initializing. Please wait...", title="Initializing", severity="warning")
             return
 
         if hasattr(event.text_area, "add_to_history"):
@@ -1558,7 +1741,7 @@ class RavenTUI(App):
                 input_widget.text = ""
                 return
 
-            raw_file_path = parts[1].strip()
+            raw_file_path = parts[1].strip().lstrip("@")
             image_query = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "Analyze this image and describe its key contents."
 
             input_widget = event.text_area
@@ -1775,6 +1958,8 @@ class RavenTUI(App):
         # Clear the input box immediately for the next question
         input_widget = event.text_area
         input_widget.text = ""
+        if hasattr(input_widget, "clear_pasted_blocks"):
+            input_widget.clear_pasted_blocks()
 
         # 1. Echo the user's message into the scrollable history area
         history_container = self.query_one("#history")
