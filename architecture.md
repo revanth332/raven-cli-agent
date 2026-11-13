@@ -1,20 +1,22 @@
 Project architecture:
 
- Raven CLI Agent modular architecture with Textual TUI, OpenAI/OpenRouter/Vertex LLM session orchestration, provider-agnostic 4-tier memory & compaction engine (local BM25 episodic recall, atomic section-level project memory updates, micro-compaction + archived macro-compaction), isolated subagent delegation, and tool execution loop safeguards. 
+ Raven CLI Agent modular architecture featuring Textual TUI, Slash Command Dispatcher (including deterministic Session Exporter for Markdown/JSON/HTML transcripts with base64 sanitization and collapsible tool timelines), LLM Session Orchestration, 4-tier Memory & Compaction Engine, Isolated Subagent Delegation, and Loop Safeguards. 
 
  ```mermaid
 graph TD
-    Entry[agent/main.py] -->|Launches| TUI[agent/terminal_ui/app.py]
-    TUI -->|Manages Turns & Streams| LLM[agent/core/llm.py]
-    TUI -->|Enforces Loop Ceiling| LoopGuard[agent/core/loop_guard.py]
-    LLM -->|Micro & Macro Compaction| Compaction[agent/core/compaction.py]
-    LLM -->|Persists & Archives| SessionMgr[agent/core/session_manager.py]
-    LLM -->|Tracks Tokens & Latency| Usage[agent/core/usage_tracker.py]
-    LLM -->|Loads Prompts & Memory| MemTools[agent/tools/memory_tools.py]
-    TUI -->|Executes Tools| Registry[agent/tools/tool_registry.py]
-    Registry -->|File & Grep Ops| FileTools[agent/tools/file_tools.py]
-    Registry -->|Git Ops| GitTools[agent/tools/git_tools.py]
-    Registry -->|BM25 Recall & Project Memory| MemTools
-    Registry -->|Isolated Subagents| SubagentRunner[agent/core/subagent_runner.py]
-    SubagentRunner -->|Resolves Presets| SubagentMgr[agent/core/subagent_manager.py]
+    Entry[Main Entrypoint] -->|Launches| TUI[Terminal UI App]
+    TUI -->|Dispatches Commands| SlashReg[Slash Command Registry]
+    SlashReg -->|Triggers Export| Exporter[Session Exporter Engine]
+    Exporter -->|Reads Active State| SessionMgr[Session Manager]
+    Exporter -->|Writes .md / .json / .html| WorkspaceFS[(Workspace File System)]
+    Exporter -->|Copies Path| Clipboard[System Clipboard]
+    TUI -->|Manages Turns & Streams| LLM[LLM Session Orchestrator]
+    TUI -->|Enforces Loop Ceiling| LoopGuard[Adaptive Loop Guard]
+    LLM -->|Micro & Macro Compaction| Compaction[Compaction Engine]
+    LLM -->|Persists & Archives| SessionMgr
+    LLM -->|Tracks Tokens & Latency| Usage[Usage Tracker]
+    LLM -->|Loads Prompts & Memory| MemEngine[Memory Engine]
+    TUI -->|Executes Tools| Registry[Tool Registry]
+    Registry -->|Isolated Subagents| SubagentRunner[Subagent Runner]
+    SubagentRunner -->|Resolves Presets| SubagentMgr[Subagent Manager]
 ```
