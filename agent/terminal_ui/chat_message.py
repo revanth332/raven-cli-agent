@@ -717,6 +717,118 @@ def format_subagent_result(subagent_name: str, result_str: str, expanded: bool =
     return result_text
 
 
+def format_web_search_result(query: str, result: Any, expanded: bool = False) -> Text:
+    """Formats web_search results with collapsible titles, URLs, and error highlighting."""
+    import ast
+    import json
+    from urllib.parse import urlparse
+
+    result_text = Text()
+    parsed_items = None
+
+    if isinstance(result, list):
+        parsed_items = result
+    elif isinstance(result, str):
+        raw = result.strip()
+        if raw.startswith(("Error:", "Failed")):
+            result_text.append(f"   |_ {raw}\n", style="bold red")
+            return result_text
+        for loader in (json.loads, ast.literal_eval):
+            try:
+                candidate = loader(raw)
+                if isinstance(candidate, list):
+                    parsed_items = candidate
+                    break
+            except Exception:
+                continue
+
+    if not isinstance(parsed_items, list) or not parsed_items:
+        return format_generic_tool_result("web_search", result, expanded=expanded)
+
+    first = parsed_items[0] if isinstance(parsed_items[0], dict) else {}
+    if "error" in first:
+        result_text.append(f"   |_ {first['error']}\n", style="bold red")
+        return result_text
+    if "message" in first and "url" not in first:
+        result_text.append(f"   |_ {first['message']}\n", style="dim yellow")
+        return result_text
+
+    valid_items = [item for item in parsed_items if isinstance(item, dict) and (item.get("title") or item.get("url"))]
+    total = len(valid_items)
+    result_text.append(f"   |_ Found {total} web result(s)\n", style="bold green")
+
+    visible_count = total if expanded else min(2, total)
+    for idx, item in enumerate(valid_items[:visible_count], start=1):
+        title = str(item.get("title", "Untitled") or "Untitled").strip()
+        url = str(item.get("url", "") or "").strip()
+        snippet = str(item.get("snippet", "") or "").strip()
+        domain = urlparse(url).netloc if url else ""
+
+        if expanded:
+            result_text.append(f"       {idx}. {title}\n", style="bold white")
+            if url:
+                result_text.append(f"          {url}\n", style="dim cyan")
+            if snippet:
+                short_snip = snippet if len(snippet) <= 180 else snippet[:177] + "..."
+                result_text.append(f"          {short_snip}\n", style="dim white")
+        else:
+            short_title = title if len(title) <= 65 else title[:62] + "..."
+            suffix = f" ({domain})" if domain else ""
+            result_text.append(f"       {idx}. {short_title}{suffix}\n", style="dim white")
+
+    hidden = total - visible_count
+    if hidden > 0:
+        result_text.append(
+            f"       ▶ ... [{hidden} more result(s) - click to expand]\n",
+            style="dim cyan italic",
+        )
+    elif expanded and total > 1:
+        result_text.append(
+            "       ▼ [Click to collapse]\n",
+            style="dim cyan italic",
+        )
+    return result_text
+
+
+def format_extract_link_result(web_link: str, result_str: str, expanded: bool = False) -> Text:
+    """Formats extracted web link content with character/line stats and collapsible preview."""
+    from urllib.parse import urlparse
+
+    result_text = Text()
+    clean = strip_ansi(str(result_str or "")).strip()
+    if not clean or clean.startswith(("Error:", "No web link")):
+        err_msg = clean or "Error: Empty extraction response."
+        result_text.append(f"   |_ {err_msg}\n", style="bold red")
+        return result_text
+
+    domain = urlparse(str(web_link or "")).netloc or str(web_link or "web link")
+    lines = [line for line in clean.splitlines() if line.strip()]
+    char_count = len(clean)
+    line_count = len(lines)
+    result_text.append(
+        f"   |_ Extracted {char_count:,} chars ({line_count} lines) from {domain}\n",
+        style="bold green",
+    )
+
+    max_lines = MAX_EXPANDED_LINES if expanded else MAX_RESULT_LINES
+    visible = lines[:max_lines]
+    for line in visible:
+        truncated = line if len(line) <= 100 else line[:97] + "..."
+        result_text.append(f"       {truncated}\n", style="dim white")
+
+    hidden = line_count - len(visible)
+    if hidden > 0:
+        label = (
+            f"       ▶ ... [{hidden} more lines - click to expand]\n"
+            if not expanded
+            else f"       ▼ ... [{hidden} more lines omitted - click to collapse]\n"
+        )
+        result_text.append(label, style="dim cyan italic")
+    elif expanded and line_count > MAX_RESULT_LINES:
+        result_text.append("       ▼ [Click to collapse]\n", style="dim cyan italic")
+    return result_text
+
+
 def format_tool_result_preview(
     tool_name: str,
     tool_args: dict,
@@ -755,6 +867,12 @@ def format_tool_result_preview(
     elif tool_name == "generate_image":
         prompt = args.get("prompt", "")
         return format_image_generation_result(prompt, str(result), expanded=expanded)
+    elif tool_name == "web_search":
+        query = args.get("query", "")
+        return format_web_search_result(query, result, expanded=expanded)
+    elif tool_name == "extract_content_from_web_links":
+        web_link = args.get("web_link", "")
+        return format_extract_link_result(web_link, str(result or ""), expanded=expanded)
     else:
         return format_generic_tool_result(tool_name, result, expanded=expanded)
 

@@ -93,10 +93,14 @@ class LoopGuard:
 
     @staticmethod
     def result_made_progress(result: Any) -> bool:
-        if isinstance(result, dict) and result.get("success") is False:
-            return False
+        if isinstance(result, dict):
+            if result.get("success") is False or "error" in result:
+                return False
+        if isinstance(result, list) and result:
+            if all(isinstance(item, dict) and "error" in item for item in result):
+                return False
         normalized = str(result).strip().lower()
-        return not normalized.startswith(("error", "failed", "failure"))
+        return not normalized.startswith(("error", "failed", "failure", "no web link provided"))
 
     def get_state(self) -> LoopGuardState:
         if (

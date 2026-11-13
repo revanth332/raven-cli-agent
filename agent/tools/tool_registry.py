@@ -580,6 +580,11 @@ raven_tools = [
                 "properties": {
                     "web_link": {
                         "type": "string",
+                        "description": "The HTTP or HTTPS URL from which to extract clean readable content."
+                    },
+                    "max_chars": {
+                        "type": "integer",
+                        "description": "Maximum number of characters to return (1000 to 50000). Defaults to 15000."
                     }
                 },
                 "required": [
