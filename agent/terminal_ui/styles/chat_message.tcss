@@ -30,21 +30,6 @@ ChatMessageWidget.raven-msg {
     margin-top: 1;
 }
 
-.copy-btn {
-    width: auto;
-    height: 1;
-    padding: 0 1;
-    color: #64748B;
-    background: transparent;
-    text-align: left;
-    content-align: left middle;
-}
-
-.copy-btn:hover {
-    color: #10B981;
-    background: #27272a;
-}
-
 .img-badge {
     color: #06B6D4;
     text-style: bold;

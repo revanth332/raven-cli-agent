@@ -1143,13 +1143,10 @@ class ChatMessageWidget(Vertical):
             yield Static(f"[bold #06B6D4]◆ Image: {self.image_badge}[/bold #06B6D4]", id="img_badge", classes="img-badge")
         yield Vertical(id="timeline_container", classes="timeline-container")
         yield Static(id="msg_content", classes="msg-content")
-        with Horizontal(classes="msg-footer"):
-            if self.role == "assistant":
+        if self.role == "assistant":
+            with Horizontal(classes="msg-footer"):
                 footer_text = f"[dim #64748B]{self.model_name}[/dim #64748B]" if self.model_name else ""
                 yield Static(footer_text, id="model_footer", classes="model-footer")
-                yield Static("Copy", id="copy_btn", classes="copy-btn")
-            else:
-                yield Static("Copy", id="copy_btn", classes="copy-btn")
 
     def _sync_timeline_widgets(self) -> None:
         """Syncs child widgets in timeline_container with self._timeline.blocks."""
@@ -1290,12 +1287,6 @@ class ChatMessageWidget(Vertical):
         self.update_timeline(self._timeline)
         return True
 
-    def on_click(self, event) -> None:
-        if event.control and event.control.id == "copy_btn":
-            event.stop()
-            self.copy_to_clipboard()
-            return
-
     def copy_to_clipboard(self) -> None:
         if self._timeline:
             text_to_copy = self._timeline.to_plain_text(text_only=True)
@@ -1321,20 +1312,6 @@ class ChatMessageWidget(Vertical):
             return
 
         copy_to_system_clipboard(text_to_copy, app=self.app)
-
-        try:
-            btn = self.query_one("#copy_btn", Static)
-            btn.update("✓ Copied Text!")
-
-            def reset_btn() -> None:
-                try:
-                    btn.update("Copy")
-                except Exception:
-                    pass
-
-            self.set_timer(2.0, reset_btn)
-        except Exception:
-            pass
 
         try:
             self.app.notify("Message copied to clipboard!", title="Clipboard", severity="information")
