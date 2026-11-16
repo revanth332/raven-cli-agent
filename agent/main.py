@@ -1,23 +1,27 @@
-import typer
-from rich.console import Console
-from rich.theme import Theme
-from rich.panel import Panel
-from rich.text import Text
-from rich.align import Align
-from rich.live import Live
-from rich.spinner import Spinner
-from rich.markdown import Markdown, TextElement
-from rich.syntax import Syntax
-from rich.prompt import Prompt
-import questionary
-from questionary import Style
-from agent.core.llm import get_chat_session
-from agent.utils import read_prompt_from_file,start_new_backup_turn
-from agent.core.settings import settings
-from agent.tools.tool_registry import TOOL_REGISTRY
-from agent.core.loop_guard import LoopGuard, LoopGuardState
-
 import sys
+
+try:
+    import typer
+    from rich.console import Console
+    from rich.theme import Theme
+    from rich.panel import Panel
+    from rich.text import Text
+    from rich.align import Align
+    from rich.live import Live
+    from rich.spinner import Spinner
+    from rich.markdown import Markdown, TextElement
+    from rich.syntax import Syntax
+    from rich.prompt import Prompt
+    import questionary
+    from questionary import Style
+    from agent.core.llm import get_chat_session
+    from agent.utils import read_prompt_from_file, start_new_backup_turn
+    from agent.core.settings import settings
+    from agent.tools.tool_registry import TOOL_REGISTRY
+    from agent.core.loop_guard import LoopGuard, LoopGuardState
+except KeyboardInterrupt:
+    sys.exit(130)
+
 from pathlib import Path
 import json
 import shutil
@@ -565,18 +569,23 @@ def report():
 @app.command()
 def eval():
     """Runs the autonomous evaluation suite to verify Raven's patching accuracy."""
-    from agent.evals import run_eval_suite
-    run_eval_suite()
+    try:
+        from agent.evals import run_eval_suite
+        run_eval_suite()
+    except KeyboardInterrupt:
+        raise typer.Exit(130)
 
 @app.command()
 def tui():
     """
     Launch the multi-modal Textual UI.
     """
-    from agent.terminal_ui.app import RavenTUI
     try:
+        from agent.terminal_ui.app import RavenTUI
         tui_app = RavenTUI()
         tui_app.run()
+    except KeyboardInterrupt:
+        raise typer.Exit(130)
     except Exception as e:
         console.print(f"[red]Error launching TUI: {e}[/red]")
         raise typer.Exit(1)
@@ -587,13 +596,18 @@ def load():
     """
     Launch the interactive TUI Spinner & Loader Gallery to preview all animations live.
     """
-    from agent.terminal_ui.loader_gallery import run_loader_gallery
     try:
+        from agent.terminal_ui.loader_gallery import run_loader_gallery
         run_loader_gallery()
+    except KeyboardInterrupt:
+        raise typer.Exit(130)
     except Exception as e:
         console.print(f"[red]Error launching Loader Gallery: {e}[/red]")
         raise typer.Exit(1)
 
 
 if __name__ == "__main__":
-    app()
+    try:
+        app()
+    except KeyboardInterrupt:
+        sys.exit(130)
