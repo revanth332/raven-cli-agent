@@ -343,7 +343,10 @@ class ChatInput(TextArea):
         if mention is None:
             return False
         _, start_loc, end_loc = mention
-        replacement = f"@{selected_path} "
+        if " " in selected_path or "\t" in selected_path:
+            replacement = f'@"{selected_path}" '
+        else:
+            replacement = f"@{selected_path} "
         self._suppress_autocomplete_once = True
         self._navigating_history = False
         self.replace(replacement, start_loc, end_loc, maintain_selection_offset=False)

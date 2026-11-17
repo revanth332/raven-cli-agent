@@ -26,7 +26,7 @@ from agent.core.llm import get_chat_session, generate_ai_session_title, reset_ge
 from agent.utils import (
     get_active_project_name,
     encode_image_file, grab_clipboard_image, create_multimodal_content,
-    set_terminal_title
+    parse_image_command_args, set_terminal_title
 )
 from agent.terminal_ui.slash_commands import SLASH_COMMANDS
 from agent.core.skills_manager import get_skill
@@ -1851,15 +1851,14 @@ class RavenTUI(App):
             return
 
         if user_input.lower().startswith("/image") and (len(user_input) == 6 or user_input[6] in (" ", "\t")):
-            parts = user_input.split(" ", 2)
-            if len(parts) < 2 or not parts[1].strip():
+            raw_file_path, parsed_query = parse_image_command_args(user_input)
+            if not raw_file_path:
                 self.notify("Usage: /image <file_path> [query]", title="Missing Argument", severity="warning")
                 input_widget = event.text_area
                 input_widget.text = ""
                 return
 
-            raw_file_path = parts[1].strip().lstrip("@")
-            image_query = parts[2].strip() if len(parts) > 2 and parts[2].strip() else "Analyze this image and describe its key contents."
+            image_query = parsed_query if parsed_query else "Analyze this image and describe its key contents."
 
             input_widget = event.text_area
             input_widget.text = ""

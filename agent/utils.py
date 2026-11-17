@@ -1,5 +1,6 @@
 from pathlib import Path
 import os
+import re
 import shutil
 import time
 import json
@@ -24,6 +25,71 @@ def set_latest_attached_image(data_uri: str | None) -> None:
 def get_latest_attached_image() -> str | None:
     """Retrieves the most recently attached or pasted image Data URI from memory."""
     return _latest_attached_image_data_uri
+
+
+_IMAGE_EXT_BOUNDARY_RE = re.compile(
+    r"\.(?:png|jpe?g|webp|gif|bmp|svg|tiff?|ico|heic|avif)(?=\s|$)",
+    re.IGNORECASE,
+)
+
+
+def parse_image_command_args(user_input: str) -> tuple[str, str]:
+    """Parses `/image <file_path> [query]` supporting spaces in quoted or unquoted file paths.
+
+    Returns:
+        Tuple of (file_path, query). Returns ("", "") if no file path is provided.
+    """
+    rest = user_input[6:].strip() if user_input.lower().startswith("/image") else user_input.strip()
+    if not rest:
+        return "", ""
+
+    # Strip optional leading '@' before checking quotes
+    if rest.startswith("@"):
+        rest = rest[1:].lstrip()
+        if not rest:
+            return "", ""
+
+    # 1. Explicitly quoted file path: "my image.png" or 'my image.png'
+    if rest[0] in ('"', "'"):
+        quote_char = rest[0]
+        closing_idx = rest.find(quote_char, 1)
+        if closing_idx != -1:
+            raw_path = rest[1:closing_idx].strip().lstrip("@")
+            query = rest[closing_idx + 1:].strip()
+            return raw_path, query
+        else:
+            # Unclosed quote: treat the rest as the path
+            return rest[1:].strip().lstrip("@"), ""
+
+    # 2. Check if the entire unquoted string points to an existing file on disk
+    try:
+        if Path(rest).is_file():
+            return rest, ""
+    except OSError:
+        pass
+
+    # 3. Unquoted path with image extension boundary (handles spaces in filenames/folders)
+    matches = list(_IMAGE_EXT_BOUNDARY_RE.finditer(rest))
+    if matches:
+        for match in matches:
+            end_idx = match.end()
+            candidate_path = rest[:end_idx].strip().lstrip("@")
+            try:
+                if Path(candidate_path).exists():
+                    return candidate_path, rest[end_idx:].strip()
+            except OSError:
+                pass
+
+        # Fallback to the first image extension boundary if file isn't found on disk yet
+        first_end = matches[0].end()
+        return rest[:first_end].strip().lstrip("@"), rest[first_end:].strip()
+
+    # 4. Fallback: standard whitespace split when no extension or quote is present
+    parts = rest.split(None, 1)
+    raw_path = parts[0].strip().lstrip("@")
+    query = parts[1].strip() if len(parts) > 1 else ""
+    return raw_path, query
+
 
 def encode_image_file(file_path: str | Path) -> dict:
     """
