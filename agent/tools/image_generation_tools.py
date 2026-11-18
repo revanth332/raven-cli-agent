@@ -55,13 +55,8 @@ def resolve_image_engine_config(model_override: Optional[str] = None) -> dict:
             preset_cfg = dict(all_presets[preset_name])
 
     # Determine provider type and vertex usage
-    use_vertex_override = getattr(settings, "IMAGE_USE_VERTEX_AI", None)
-    if use_vertex_override is not None:
-        use_vertex = bool(use_vertex_override)
-        provider_type = "vertex" if use_vertex else "openai"
-    else:
-        provider_type = preset_cfg.get("provider_type", "openai")
-        use_vertex = bool(preset_cfg.get("use_vertex_ai", False) or provider_type == "vertex")
+    provider_type = preset_cfg.get("provider_type", "openai")
+    use_vertex = bool(preset_name == "Google Vertex AI" or provider_type == "vertex")
 
     # Determine base_url & api_key
     base_url = (getattr(settings, "IMAGE_BASE_URL", None) or "").strip() or preset_cfg.get("base_url") or ""

@@ -3,7 +3,7 @@ from textual import events
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import ModalScreen
-from textual.widgets import Button, Static, Input, Label, OptionList, RadioSet, RadioButton
+from textual.widgets import Button, Static, Input, Label, OptionList
 from textual.widgets.option_list import Option
 from textual.containers import Vertical, Horizontal
 
@@ -19,17 +19,16 @@ from agent.core.preset_manager import (
 
 def is_preset_configured(preset_name: str, cfg: Dict[str, Any]) -> bool:
     """Checks whether a preset has all required configuration fields to connect directly."""
-    provider_type = cfg.get("provider_type", "openai")
-    is_vertex = bool(cfg.get("use_vertex_ai") or provider_type == "vertex")
-    if is_vertex:
-        return True
-
     base_url = (cfg.get("base_url") or "").strip()
-    api_key = (cfg.get("api_key") or "").strip()
-
     if not base_url:
         return False
 
+    provider_type = cfg.get("provider_type", "openai")
+    is_vertex = bool(preset_name == "Google Vertex AI" or provider_type == "vertex")
+    if is_vertex:
+        return True
+
+    api_key = (cfg.get("api_key") or "").strip()
     if any(loc in base_url.lower() for loc in ["localhost", "127.0.0.1", "ollama", ":11434"]):
         return True
 
@@ -42,7 +41,7 @@ def is_preset_configured(preset_name: str, cfg: Dict[str, Any]) -> bool:
 class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
     """
     Modal screen for creating a new provider preset or editing an existing preset.
-    Locks Preset Name and Provider Type when editing built-in presets.
+    Locks Preset Name when editing built-in presets.
     """
 
     BINDINGS = [
@@ -62,12 +61,13 @@ class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
         self.preset_cfg = dict(preset_cfg) if preset_cfg else {}
         self.is_editing = bool(preset_name)
         self.is_builtin = bool(preset_name and preset_name in BUILTIN_PRESETS)
+        self.is_vertex = bool(
+            preset_name == "Google Vertex AI" or self.preset_cfg.get("provider_type") == "vertex"
+        )
         self.presets = load_presets().get("presets", {})
 
     def compose(self) -> ComposeResult:
-        is_vertex = bool(
-            self.preset_cfg.get("use_vertex_ai") or self.preset_cfg.get("provider_type") == "vertex"
-        )
+        is_vertex = self.is_vertex
         base_url = self.preset_cfg.get("base_url") or ""
         api_key = "" if is_vertex else (self.preset_cfg.get("api_key") or "")
         name_val = self.preset_name or ""
@@ -77,11 +77,6 @@ class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
             with Horizontal(id="preset_form_header_row"):
                 yield Static(title_text, id="preset_form_title")
                 yield Static("esc to cancel", id="preset_form_close_hint")
-
-            yield Label("Provider Type:", classes="field_label")
-            with RadioSet(id="provider_type_radios", disabled=self.is_builtin):
-                yield RadioButton("OpenAI-Compatible Endpoint", id="radio_openai", value=not is_vertex)
-                yield RadioButton("Google Vertex AI", id="radio_vertex", value=is_vertex)
 
             yield Label("Preset Name:", classes="field_label")
             yield Input(
@@ -96,7 +91,7 @@ class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
             yield Input(
                 value=base_url,
                 placeholder=(
-                    "Optional custom OpenAPI endpoint or leave blank for default"
+                    "e.g. https://us-central1-aiplatform.googleapis.com/v1beta1/projects/.../endpoints/openapi"
                     if is_vertex
                     else "e.g. https://openrouter.ai/api/v1 or http://localhost:11434/v1"
                 ),
@@ -143,27 +138,6 @@ class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
             event.prevent_default()
             event.stop()
 
-    def on_radio_set_changed(self, event: RadioSet.Changed) -> None:
-        if event.radio_set.id != "provider_type_radios":
-            return
-        is_vertex = event.pressed.id == "radio_vertex"
-        base_url_input = self.query_one("#base_url_input", Input)
-        api_key_input = self.query_one("#api_key_input", Input)
-        error_label = self.query_one("#form_error_label", Static)
-        error_label.styles.display = "none"
-
-        if is_vertex:
-            base_url_input.disabled = False
-            base_url_input.placeholder = "Optional custom OpenAPI endpoint or leave blank for default"
-            api_key_input.disabled = True
-            api_key_input.value = ""
-            api_key_input.placeholder = "Auto-generated via Google Cloud ADC"
-        else:
-            base_url_input.disabled = False
-            base_url_input.placeholder = "e.g. https://openrouter.ai/api/v1 or http://localhost:11434/v1"
-            api_key_input.disabled = False
-            api_key_input.placeholder = "Enter API key"
-
     def on_button_pressed(self, event: Button.Pressed) -> None:
         if event.button.id == "cancel_btn":
             self.dismiss(None)
@@ -187,7 +161,7 @@ class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.submit_form()
 
     def submit_form(self) -> None:
-        is_vertex = self.query_one("#radio_vertex", RadioButton).value
+        is_vertex = self.is_vertex
         preset_name = self.query_one("#preset_name_input", Input).value.strip()
         if self.is_builtin and self.preset_name:
             preset_name = self.preset_name
@@ -221,14 +195,19 @@ class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
                     self.query_one("#preset_name_input", Input).focus()
                     return
 
+        if not base_url:
+            error_label.update("Base URL is required.")
+            error_label.styles.display = "block"
+            self.query_one("#base_url_input", Input).focus()
+            return
+
         if is_vertex:
             existing = self.presets.get(self.preset_name or preset_name, {})
             default_model = existing.get("default_model") or "google/gemini-2.5-flash"
             result = {
                 "preset_name": preset_name,
                 "provider_type": "vertex",
-                "use_vertex_ai": True,
-                "base_url": base_url or None,
+                "base_url": base_url,
                 "api_key": None,
                 "default_model": default_model,
                 "models": existing.get("models", []),
@@ -249,12 +228,6 @@ class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.dismiss(result)
             return
 
-        if not base_url:
-            error_label.update("Base URL is required.")
-            error_label.styles.display = "block"
-            self.query_one("#base_url_input", Input).focus()
-            return
-
         if not api_key:
             if any(loc in base_url.lower() for loc in ["localhost", "127.0.0.1", "ollama", ":11434"]):
                 api_key = "ollama"
@@ -269,7 +242,6 @@ class PresetFormModal(ModalScreen[Optional[Dict[str, Any]]]):
         result = {
             "preset_name": preset_name,
             "provider_type": "openai",
-            "use_vertex_ai": False,
             "base_url": base_url,
             "api_key": api_key,
             "default_model": default_model,
@@ -474,10 +446,10 @@ class ConnectModal(ModalScreen[Optional[Dict[str, Any]]]):
             self.update_preset(preset_key)
             return
 
+        is_vertex = bool(preset_key == "Google Vertex AI" or cfg.get("provider_type") == "vertex")
         conn_data = {
             "preset_name": preset_key,
-            "provider_type": cfg.get("provider_type", "openai"),
-            "use_vertex_ai": bool(cfg.get("use_vertex_ai") or cfg.get("provider_type") == "vertex"),
+            "provider_type": "vertex" if is_vertex else "openai",
             "base_url": cfg.get("base_url"),
             "api_key": cfg.get("api_key"),
             "default_model": cfg.get("default_model"),

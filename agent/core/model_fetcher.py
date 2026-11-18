@@ -108,7 +108,7 @@ class ModelFetcher:
 
         # 2. Network Discovery
         provider_type = preset_config.get("provider_type", "openai")
-        use_vertex = bool(preset_config.get("use_vertex_ai") or provider_type == "vertex")
+        use_vertex = bool(preset_name == "Google Vertex AI" or provider_type == "vertex")
         base_url = preset_config.get("base_url") or ""
         api_key = preset_config.get("api_key") or ""
 

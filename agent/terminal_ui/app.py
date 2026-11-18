@@ -836,7 +836,7 @@ class RavenTUI(App):
                     yield OptionList(id="autocomplete_list")
                     yield ChatInput(id="chat_input", show_line_numbers=False, placeholder="Ask Raven something... (Shift+Enter for newline, 'exit' to quit)")
                     try:
-                        provider_display = "Vertex AI" if getattr(settings, "RAVEN_USE_VERTEX_AI", False) else get_active_preset()[0]
+                        provider_display = get_active_preset()[0]
                     except Exception:
                         provider_display = "OpenAI"
                     yield Static(
@@ -859,14 +859,11 @@ class RavenTUI(App):
             self.title = f"Raven - {session_title}"
             set_terminal_title(f"Raven - {session_title}")
 
-            if getattr(settings, "RAVEN_USE_VERTEX_AI", False):
-                provider_display = "Vertex AI"
-            else:
-                try:
-                    active_name, _ = get_active_preset()
-                    provider_display = active_name
-                except Exception:
-                    provider_display = "OpenAI"
+            try:
+                active_name, _ = get_active_preset()
+                provider_display = active_name
+            except Exception:
+                provider_display = "OpenAI"
 
             status_widget = self.query_one("#input_status", Static)
             status_widget.update(
@@ -1229,7 +1226,10 @@ class RavenTUI(App):
         def on_connect_dismiss(conn_data: dict | None) -> None:
             if not conn_data:
                 return
-            use_vertex_ai = conn_data.get("use_vertex_ai", False)
+            is_vertex = bool(
+                conn_data.get("preset_name") == "Google Vertex AI"
+                or conn_data.get("provider_type") == "vertex"
+            )
             base_url = conn_data.get("base_url")
             api_key = conn_data.get("api_key")
             preset_name = conn_data.get("preset_name", "Custom")
@@ -1245,9 +1245,8 @@ class RavenTUI(App):
                 from agent.core.preset_manager import set_active_preset
                 set_active_preset(preset_name)
                 settings.set_config({
-                    "RAVEN_USE_VERTEX_AI": use_vertex_ai,
                     "RAVEN_BASE_URL": base_url or "",
-                    "RAVEN_API_KEY": api_key or "",
+                    "RAVEN_API_KEY": "" if is_vertex else (api_key or ""),
                     "RAVEN_MODEL": selected_model,
                 })
                 reset_genai_client()
@@ -1258,7 +1257,7 @@ class RavenTUI(App):
                 self.set_input_ready(False, f"Connecting to {selected_model}...")
                 self.initialize_ai()
                 self.update_status_bar()
-                display_target = "Google Vertex AI" if use_vertex_ai else (preset_name or base_url or "LLM Provider")
+                display_target = "Google Vertex AI" if is_vertex else (preset_name or base_url or "LLM Provider")
                 self.notify(f"Connected to {display_target} with model {selected_model}", title="Connected", severity="information")
 
             self.push_screen(

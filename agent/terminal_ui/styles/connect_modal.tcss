@@ -134,26 +134,6 @@ PresetFormModal .field_input:disabled {
     color: #64748B;
 }
 
-PresetFormModal #provider_type_radios {
-    height: auto;
-    background: transparent;
-    border: none;
-    margin-bottom: 1;
-    layout: horizontal;
-}
-
-PresetFormModal #provider_type_radios > RadioButton {
-    background: transparent;
-    padding: 0 1;
-    margin-right: 2;
-    color: #E2E8F0;
-}
-
-PresetFormModal #provider_type_radios:disabled > RadioButton {
-    opacity: 0.55;
-    color: #64748B;
-}
-
 PresetFormModal #form_error_label {
     color: #EF4444;
     text-style: italic;

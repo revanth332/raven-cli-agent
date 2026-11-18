@@ -11,7 +11,6 @@ DEFAULT_PRESETS = {
         "base_url": "https://openrouter.ai/api/v1",
         "api_key": "",
         "default_model": "anthropic/claude-3.7-sonnet",
-        "use_vertex_ai": False,
         "models": [
             "anthropic/claude-3.7-sonnet",
             "google/gemini-2.5-flash",
@@ -32,7 +31,6 @@ DEFAULT_PRESETS = {
         "base_url": None,
         "api_key": None,
         "default_model": "google/gemini-2.5-flash",
-        "use_vertex_ai": True,
         "models": [
             "google/gemini-2.5-flash",
             "google/gemini-2.5-pro",
@@ -51,7 +49,6 @@ DEFAULT_PRESETS = {
         "base_url": "http://localhost:11434/v1",
         "api_key": "ollama",
         "default_model": "qwen2.5-coder:14b",
-        "use_vertex_ai": False,
         "models": [
             "qwen2.5-coder:14b",
             "deepseek-r1:14b",
@@ -65,7 +62,6 @@ DEFAULT_PRESETS = {
         "base_url": "https://api.groq.com/openai/v1",
         "api_key": "",
         "default_model": "llama-3.3-70b-versatile",
-        "use_vertex_ai": False,
         "models": [
             "llama-3.3-70b-versatile",
             "llama-3.1-8b-instant",
@@ -89,17 +85,19 @@ class PresetManager:
         current_key = getattr(settings, "RAVEN_API_KEY", None)
         current_base = getattr(settings, "RAVEN_BASE_URL", None)
         current_model = getattr(settings, "RAVEN_MODEL", None)
-        use_vertex = getattr(settings, "RAVEN_USE_VERTEX_AI", False)
+        is_vertex_base = bool(current_base and "aiplatform.googleapis.com" in str(current_base).lower())
 
+        if is_vertex_base and current_base:
+            presets["Google Vertex AI"]["base_url"] = current_base
         if current_key and current_base and "openrouter" in str(current_base).lower():
             presets["OpenRouter"]["api_key"] = current_key
         if current_model:
-            if use_vertex:
+            if is_vertex_base:
                 presets["Google Vertex AI"]["default_model"] = current_model
             elif current_base and "openrouter" in str(current_base).lower():
                 presets["OpenRouter"]["default_model"] = current_model
 
-        active = "Google Vertex AI" if use_vertex else "OpenRouter"
+        active = "Google Vertex AI" if (is_vertex_base or (not current_key and not current_base)) else "OpenRouter"
         image_active = "Google Vertex AI" if "Google Vertex AI" in presets else active
         return {
             "active_preset": active,
@@ -144,8 +142,7 @@ class PresetManager:
                             preset_obj["default_image_model"] = preset_obj["image_models"][0] if preset_obj["image_models"] else ""
 
                     if not data.get("active_preset") or data["active_preset"] not in data["presets"]:
-                        use_vertex = getattr(settings, "RAVEN_USE_VERTEX_AI", False)
-                        data["active_preset"] = "Google Vertex AI" if use_vertex else "OpenRouter"
+                        data["active_preset"] = "OpenRouter"
 
                     if not data.get("image_preset") or data["image_preset"] not in data["presets"]:
                         if "Google Vertex AI" in data["presets"]:
@@ -173,7 +170,7 @@ class PresetManager:
         data = self.load_presets()
 
         provider_type = config.get("provider_type")
-        use_vertex = bool(config.get("use_vertex_ai") or provider_type == "vertex")
+        use_vertex = bool(name == "Google Vertex AI" or provider_type == "vertex")
 
         base_url = config.get("base_url")
         api_key = config.get("api_key")
@@ -216,7 +213,6 @@ class PresetManager:
             "base_url": (base_url.strip() if isinstance(base_url, str) and base_url.strip() else None),
             "api_key": None if use_vertex else (api_key.strip() if isinstance(api_key, str) else api_key),
             "default_model": default_model,
-            "use_vertex_ai": use_vertex,
             "models": models,
             "default_image_model": default_image_model,
             "image_models": image_models,

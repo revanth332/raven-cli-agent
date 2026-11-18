@@ -11,7 +11,6 @@ class Settings:
         "RAVEN_API_KEY": (None, "str", ["RAVEN_API_KEY", "API_KEY"]),
         "RAVEN_MODEL": ("google/gemini-3-flash-preview", "str", ["RAVEN_MODEL", "MODEL"]),
         "RAVEN_SMALL_MODEL": (None, "str", ["RAVEN_SMALL_MODEL", "SMALL_MODEL"]),
-        "RAVEN_USE_VERTEX_AI": (False, "bool", ["RAVEN_USE_VERTEX_AI", "USE_VERTEX_AI"]),
         "RAVEN_AUTO_APPROVE": (False, "bool", ["RAVEN_AUTO_APPROVE", "AUTO_APPROVE"]),
         "RAVEN_AGENT_SOFT_TURNS": (25, "int", ["RAVEN_AGENT_SOFT_TURNS", "AGENT_SOFT_TURNS"]),
         "RAVEN_AGENT_HARD_TURNS": (40, "int", ["RAVEN_AGENT_HARD_TURNS", "AGENT_HARD_TURNS"]),
@@ -28,7 +27,6 @@ class Settings:
         "IMAGE_MODEL": ("gemini-3.1-flash-image", "str", ["IMAGE_MODEL", "RAVEN_IMAGE_MODEL"]),
         "IMAGE_BASE_URL": ("", "str", ["IMAGE_BASE_URL", "RAVEN_IMAGE_BASE_URL"]),
         "IMAGE_API_KEY": ("", "str", ["IMAGE_API_KEY", "RAVEN_IMAGE_API_KEY"]),
-        "IMAGE_USE_VERTEX_AI": (None, "bool", ["IMAGE_USE_VERTEX_AI", "RAVEN_IMAGE_USE_VERTEX_AI"]),
     }
 
     def __init__(self):

@@ -363,8 +363,20 @@ def get_repo_map(max_files: int = 250):
 
     return "\n".join(file_paths)
 
-def use_vertex_ai():
-    return str(settings.RAVEN_USE_VERTEX_AI).strip().lower() == "true"
+def use_vertex_ai() -> bool:
+    try:
+        from agent.core.preset_manager import get_active_preset
+        active_name, active_cfg = get_active_preset()
+        if active_name == "Google Vertex AI" or active_cfg.get("provider_type") == "vertex":
+            return True
+        if active_name and active_cfg.get("provider_type") == "openai":
+            return False
+    except Exception:
+        pass
+    base_url = str(getattr(settings, "RAVEN_BASE_URL", "") or "").lower()
+    if "aiplatform.googleapis.com" in base_url:
+        return True
+    return False
 
 def notify_user_action_required(title: str = "Raven - Action Required", message: str = "Raven needs your permission to proceed.") -> None:
     """
