@@ -608,8 +608,11 @@ class AgentChatSession:
         """Helper to append structured assistant or tool returns to history"""
         msg = self._create_message(role,content=content,tool_call_id=tool_call_id,name=name,tool_calls=tool_calls)
         self.messages.append(msg)
-        if role == "tool" and name in ("save_to_memory", "update_project_memory"):
-            self.refresh_system_prompt()
+        # Note: We intentionally DO NOT mutate messages[0] in-place here mid-session.
+        # Overwriting messages[0] in-place breaks KV (Key-Value) prompt caching for the entire
+        # conversation prefix. Disk state is already updated atomically by the tools, and
+        # any mid-session tool execution result is immediately present in self.messages.
+
 
     def _create_message(self, role, content=None, tool_call_id=None, name=None, tool_calls=None, model_name=None):
         msg = {"role": role}

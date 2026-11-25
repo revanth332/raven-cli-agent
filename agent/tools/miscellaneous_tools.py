@@ -219,6 +219,27 @@ def execute_command(command: str) -> str:
             stderr_clean = strip_ansi(stderr_raw)
             output += f"STDERR:\n{truncate_output(stderr_clean, max_chars=3000, max_lines=60)}\n"
 
+        # Automated Error-Triggered Recall Hook:
+        # If command failed or encountered stack trace/fatal errors, look up past debug resolutions
+        combined_err = f"{stderr_raw or ''}\n{stdout_raw or ''}"
+        has_error = proc.returncode != 0 or any(kw in combined_err for kw in ("Traceback", "SyntaxError", "FATAL:", "npm ERR!", "ModuleNotFoundError", "ImportError"))
+        if has_error:
+            try:
+                from agent.tools.memory_tools import recall_memory
+                # Extract first prominent error/traceback lines for BM25 query
+                query_lines = []
+                for l in combined_err.splitlines():
+                    ls = l.strip()
+                    if any(ls.startswith(pref) for pref in ("Error:", "Traceback", "Exception:", "ModuleNotFoundError", "ImportError", "npm ERR!")) or "error:" in ls.lower():
+                        query_lines.append(ls)
+                query = " ".join(query_lines[:3]) if query_lines else combined_err[:200]
+                if query.strip():
+                    recall_hit = recall_memory(query.strip())
+                    if recall_hit and "No relevant past memories" not in recall_hit:
+                        output += f"\n[AUTOMATED EPISODIC RECALL - Past Similar Fixes]:\n{recall_hit}\n"
+            except Exception:
+                pass
+
         return output
     except Exception as e:
         return f"Failed to execute command. Error: {e}"

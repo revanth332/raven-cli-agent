@@ -5,6 +5,7 @@ import re
 from collections import Counter
 from agent.utils import get_project_root, get_active_project_name
 from agent.core.compaction import should_compact_content, compact_content, save_compacted_memory
+from datetime import datetime, timezone
 
 _STOPWORDS = {
     "the", "a", "an", "is", "are", "was", "were", "to", "of", "in", "on",
@@ -28,17 +29,30 @@ def _tokenize(text: str) -> list[str]:
 
 def chunk_debug_history(text: str) -> list[dict]:
     """
-    Splits debug history into distinct logical chunks per error.
+    Splits debug history into distinct logical chunks per error, parsing metadata if present.
     """
     chunks = []
-    sections = text.split("## Error:")
+    # Match entries starting with optional metadata HTML comment and ## Error:
+    # Pattern: <!-- entry: id=(...) ts=(...) hits=(...) --> ## Error: ...
+    sections = re.split(r"(?=(?:<!--\s*entry:[^>]*-->\s*)?## Error:)", text)
     for sec in sections:
         sec_content = sec.strip()
-        if not sec_content or sec_content.startswith("#"):
+        if not sec_content or sec_content.startswith("# Debugging History"):
             continue
+        if "## Error:" not in sec_content:
+            continue
+
+        meta_match = re.search(r"<!--\s*entry:\s*id=([^\s]+)\s+ts=([^\s]+)\s+hits=(\d+)\s*-->", sec_content)
+        entry_id = meta_match.group(1) if meta_match else ""
+        ts = meta_match.group(2) if meta_match else ""
+        hits = int(meta_match.group(3)) if meta_match else 0
+
         chunks.append({
             "type": "debug_log",
-            "content": f"## Error: {sec_content}"
+            "content": sec_content,
+            "id": entry_id,
+            "ts": ts,
+            "hits": hits,
         })
     return chunks
 
@@ -74,11 +88,13 @@ def chunk_markdown_file(file_path: Path, text: str) -> list[dict]:
 
 def _collect_episodic_chunks() -> list[dict]:
     """
-    Collects all episodic chunks from debug_history.md, concepts/*.md, and global_memory.md.
+    Collects all episodic chunks from debug_history.md, concepts/*.md, and cross-project memory files.
+    Global memory is strictly excluded since it is already injected directly into the system prompt.
     """
     debug_history_file = Path.home() / ".raven" / "debug_history.md"
     concepts_dir = Path.home() / ".raven" / "concepts"
-    global_memory_file = Path.home() / ".raven" / "memory" / "global_memory.md"
+    projects_dir = Path.home() / ".raven" / "memory" / "projects"
+    current_project = get_active_project_name()
 
     collected = []
 
@@ -102,21 +118,56 @@ def _collect_episodic_chunks() -> list[dict]:
         except Exception:
             pass
 
-    if global_memory_file.exists():
+    if projects_dir.exists():
         try:
-            content = global_memory_file.read_text(encoding="utf-8")
-            for ch in chunk_markdown_file(global_memory_file, content):
-                ch["source"] = global_memory_file.name
-                collected.append(ch)
+            for f in sorted(projects_dir.iterdir()):
+                # Exclude current active project from BM25 episodic chunks since active project memory is already in system prompt
+                if f.is_file() and f.name.endswith(".md"):
+                    proj_base_name = f.stem
+                    if current_project and proj_base_name.lower() == current_project.lower():
+                        continue
+                    content = f.read_text(encoding="utf-8")
+                    for ch in chunk_markdown_file(f, content):
+                        ch["source"] = f"project:{proj_base_name}"
+                        ch["type"] = "cross_project_memory"
+                        collected.append(ch)
         except Exception:
             pass
 
     return collected
 
 
+def _calculate_recency_and_utility_boost(chunk: dict) -> float:
+    """
+    Computes a multiplier for episodic chunk ranking based on:
+    - Temporal decay: half-life of 90 days (lambda = ln(2) / 90 ~ 0.007702)
+    - Utility boost: 1.0 + 0.15 * log(hits + 1)
+    """
+    ts_str = chunk.get("ts")
+    hits = chunk.get("hits", 0)
+
+    temporal_factor = 1.0
+    if ts_str:
+        try:
+            # Parse ISO timestamp (support both Z and offset)
+            ts_clean = ts_str.replace("Z", "+00:00")
+            dt = datetime.fromisoformat(ts_clean)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            now = datetime.now(timezone.utc)
+            delta_days = max(0.0, (now - dt).total_seconds() / 86400.0)
+            decay_lambda = 0.693147 / 90.0  # ln(2) / 90 days half-life
+            temporal_factor = math.exp(-decay_lambda * delta_days)
+        except Exception:
+            temporal_factor = 1.0
+
+    utility_factor = 1.0 + (0.15 * math.log(max(0, hits) + 1.0))
+    return temporal_factor * utility_factor
+
+
 def _rank_episodic_chunks(query: str, chunks: list[dict], top_k: int = 3) -> list[dict]:
     """
-    Ranks episodic memory chunks using Okapi BM25 + exact substring bonus.
+    Ranks episodic memory chunks using Okapi BM25 + exact substring bonus + temporal decay & utility boost.
     Zero external dependencies; runs locally in <2ms across all LLM providers.
     """
     if not query or not query.strip() or not chunks:
@@ -172,7 +223,9 @@ def _rank_episodic_chunks(query: str, chunks: list[dict], top_k: int = 3) -> lis
             score += 3.0
 
         if score > 0:
-            scored.append((score, idx, ch))
+            recency_utility = _calculate_recency_and_utility_boost(ch)
+            final_score = score * recency_utility
+            scored.append((final_score, idx, ch))
 
     scored.sort(key=lambda item: (-item[0], item[1]))
     return [item[2] for item in scored[:top_k]]
@@ -251,6 +304,65 @@ def get_active_projects():
     return projects
 
 
+def _reconcile_global_memory_entry(existing_content: str, category: str, information: str) -> tuple[str, str]:
+    """
+    Reconciles a new global memory entry against existing bullets.
+    Detects NOOP, REPLACE, or APPEND using normalized token similarity and negation/inversion keywords.
+    Returns (action, updated_content).
+    """
+    cat_clean = (category or "fact").strip().lstrip("-").lower()
+    info_clean = " ".join((information or "").strip().split())
+
+    lines = existing_content.splitlines()
+    new_tokens = set(_tokenize(info_clean))
+
+    best_match_idx = -1
+    best_similarity = 0.0
+
+    for idx, line in enumerate(lines):
+        line_stripped = line.strip()
+        if not line_stripped.startswith("-"):
+            continue
+        # Extract existing text after "-category: " or "- "
+        raw_text = re.sub(r"^-\s*([a-zA-Z_]+:\s*)?", "", line_stripped).strip()
+        line_tokens = set(_tokenize(raw_text))
+        if not line_tokens or not new_tokens:
+            continue
+
+        overlap = len(new_tokens & line_tokens)
+        sim = overlap / max(len(new_tokens), len(line_tokens))
+        if sim > best_similarity:
+            best_similarity = sim
+            best_match_idx = idx
+
+    new_bullet = f"- {cat_clean}: {info_clean}"
+
+    # If >85% token overlap, check if it's identical (NOOP) or an update/refinement
+    if best_similarity >= 0.85 and best_match_idx >= 0:
+        existing_line = lines[best_match_idx].strip()
+        raw_existing = re.sub(r"^-\s*([a-zA-Z_]+:\s*)?", "", existing_line).strip().lower()
+        if raw_existing == info_clean.lower():
+            return "NOOP", existing_content
+        # High overlap but not identical -> Replace old bullet in place
+        lines[best_match_idx] = new_bullet
+        return "REPLACE", "\n".join(lines) + "\n"
+
+    # If 50%-85% overlap, check for contradiction keywords (e.g., 'not', 'never', 'always', 'do not')
+    if best_similarity >= 0.50 and best_match_idx >= 0:
+        existing_line = lines[best_match_idx].strip().lower()
+        info_lower = info_clean.lower()
+        contrast_words = {"not", "never", "always", "dislike", "prefer", "stop", "avoid", "only"}
+        has_contrast = bool(contrast_words & (new_tokens ^ set(_tokenize(existing_line))))
+        if has_contrast:
+            # Replaces the contrasting rule
+            lines[best_match_idx] = new_bullet
+            return "REPLACE", "\n".join(lines) + "\n"
+
+    # Distinct entry -> Append cleanly
+    updated = existing_content.rstrip() + f"\n{new_bullet}\n"
+    return "APPEND", updated
+
+
 def save_to_memory(information: str, category: str):
     """
     Use this tool to save important facts, user preferences, project details, or newly learned concepts to long-term memory.
@@ -265,14 +377,15 @@ def save_to_memory(information: str, category: str):
         return "Error: Memory information cannot be empty."
 
     existing_content = get_memory_content()
-    normalized_existing = " ".join(existing_content.lower().split())
-    if info_clean.lower() in normalized_existing:
-        return "Memory already contains this information."
+    action, updated_content = _reconcile_global_memory_entry(existing_content, cat_clean, info_clean)
+
+    if action == "NOOP":
+        return "Memory already contains this exact information."
 
     memory_file = Path.home() / ".raven" / "memory" / "global_memory.md"
-    new_entry = f"-{cat_clean}: {info_clean}"
-    updated_content = existing_content.rstrip() + f"\n{new_entry}\n"
     save_compacted_memory(str(memory_file), updated_content)
+    if action == "REPLACE":
+        return f"Reconciled and updated existing memory under category '{cat_clean}'."
     return "New data added to memory successfully"
 
 
@@ -374,9 +487,14 @@ def log_successful_debug(error_description: str, solution: str) -> str:
         debug_file.write_text("# Debugging History & Error Resolutions\n\n", encoding="utf-8")
 
     project_name = get_active_project_name()
-    log_entry = f"\n## Error: {error_description}\n- **Project**: {project_name}\n- **Solution**: {solution}\n"
-    if not project_name:
-        log_entry = f"\n## Error: {error_description}\n- **Solution**: {solution}\n"
+    now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry_id = f"dbg_{int(datetime.now(timezone.utc).timestamp())}"
+    meta_header = f"<!-- entry: id={entry_id} ts={now_iso} hits=1 -->"
+
+    log_entry = f"\n{meta_header}\n## Error: {error_description}\n"
+    if project_name:
+        log_entry += f"- **Project**: {project_name}\n"
+    log_entry += f"- **Solution**: {solution}\n"
 
     with open(debug_file, "a", encoding="utf-8") as f:
         f.write(log_entry)
